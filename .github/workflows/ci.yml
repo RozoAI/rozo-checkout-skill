@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 18 is the floor declared in engines; 22 is current LTS; 24 is where the
+        # ESM __filename crash first showed up, so it stays in the matrix.
+        node: ['18', '22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build the bundles
+        run: npm run build
+
+      - name: Unit and bundle tests
+        run: npm test
+
+      # The dist/ bundles are committed, so a stale commit would ship code that
+      # does not match src. Fail if the rebuild changed anything.
+      - name: dist/ matches src/
+        run: git diff --exit-code --stat -- scripts/dist
+
+      # Belt and braces over the bundle-execution tests: run the real published
+      # entry point end to end on a bogus link. It must fail cleanly, not crash.
+      # This is the check that would have caught the __filename ReferenceError.
+      - name: Published entry point runs clean
+        run: |
+          set -o pipefail
+          out=$(node scripts/dist/cli.js quote \
+            https://payments.coinbase.com/payment-links/pl_ci_smoke_not_real 2>&1) || true
+          echo "$out"
+          if grep -qE "is not defined|ReferenceError|Cannot find module" <<<"$out"; then
+            echo "::error::entry point crashed instead of failing cleanly"
+            exit 1
+          fi
+
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+
+      # The tarball must never carry internal material. Inspect the real archive
+      # rather than the dry-run listing.
+      - name: Tarball contains only what it should
+        run: |
+          set -euo pipefail
+          npm pack --silent >/dev/null
+          tgz=$(ls -1 *.tgz | head -1)
+          files=$(tar -tzf "$tgz")
+          echo "$files"
+          for forbidden in 'package/test/' 'package/docs/reviews' 'package/PLAN.md' 'package/.env'; do
+            if grep -q "$forbidden" <<<"$files"; then
+              echo "::error::tarball contains $forbidden"
+              exit 1
+            fi
+          done
+          for required in 'package/scripts/dist/cli.js' 'package/scripts/dist/blacklist.json' 'package/llms.txt'; do
+            if ! grep -q "$required" <<<"$files"; then
+              echo "::error::tarball is missing $required"
+              exit 1
+            fi
+          done
