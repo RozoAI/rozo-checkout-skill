@@ -50,9 +50,14 @@ export function assertNoTrackedDotEnv(cwd = process.cwd()) {
     candidates = fs
       .readdirSync(cwd)
       .filter((f) => ENV_FILE_RE.test(f) && !PUBLIC_ENV_RE.test(f));
-  } catch {
-    // Cannot even list the directory — nothing we can assert about it.
-    return { checked: true, tracked: false, candidates: [] };
+  } catch (err) {
+    // We cannot even list the directory, so we cannot rule out a tracked key
+    // file living in it. "Could not check" is not "safe".
+    throw new SkillError(
+      'TRACKED_DOTENV_UNVERIFIABLE',
+      `Could not list this directory (${err?.code || 'unknown error'}), so it cannot be proved ` +
+        'that no tracked .env file is present. Refusing to use hot-wallet keys here.',
+    );
   }
   if (candidates.length === 0) return { checked: true, tracked: false, candidates: [] };
 
@@ -62,19 +67,23 @@ export function assertNoTrackedDotEnv(cwd = process.cwd()) {
     insideRepo =
       execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
         cwd,
-        stdio: ['ignore', 'pipe', 'ignore'],
+        stdio: ['ignore', 'pipe', 'pipe'],
         encoding: 'utf8',
       }).trim() === 'true';
   } catch (err) {
-    if (err && (err.code === 'ENOENT' || err.code === 'EACCES')) {
-      throw new SkillError(
-        'TRACKED_DOTENV_UNVERIFIABLE',
-        `Found ${candidates.length} .env file(s) here but git is unavailable, so it cannot be ` +
-          'proved they are untracked. Refusing to use hot-wallet keys in this directory.',
-      );
-    }
-    // A non-zero exit from rev-parse means "not a repository".
-    return { checked: true, tracked: false, candidates };
+    // The ONLY interpretable failure is git telling us this is not a
+    // repository — a definite answer, not an error we cannot read. Everything
+    // else (git missing, permission denied, a corrupt or unreadable repo, an
+    // unrecognised message) leaves the question open, and therefore refuses.
+    const stderr = String(err?.stderr || '');
+    const notARepo = /not a git repository|does not appear to be a git repository/i.test(stderr);
+    if (notARepo) return { checked: true, tracked: false, candidates };
+    throw new SkillError(
+      'TRACKED_DOTENV_UNVERIFIABLE',
+      `Found ${candidates.length} .env file(s) here, but git could not be consulted ` +
+        `(${err?.code || 'unknown error'}), so it cannot be proved they are untracked. ` +
+        'Refusing to use hot-wallet keys in this directory.',
+    );
   }
   if (!insideRepo) return { checked: true, tracked: false, candidates };
 

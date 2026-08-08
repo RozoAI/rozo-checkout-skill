@@ -144,7 +144,7 @@ test('the tracked-secret check fails CLOSED when git cannot be run', () => {
   const prevPath = process.env.PATH;
   try {
     fs.writeFileSync(path.join(dir, '.env'), 'KEY=value\n');
-    // Empty PATH: the git binary cannot be found.
+    // Empty PATH: the git binary cannot be found (ENOENT).
     process.env.PATH = '';
     assert.throws(
       () => assertNoTrackedDotEnv(dir),
@@ -155,6 +155,31 @@ test('the tracked-secret check fails CLOSED when git cannot be run', () => {
     process.env.PATH = prevPath;
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('the tracked-secret check fails CLOSED when the directory cannot be listed', () => {
+  const missing = path.join(os.tmpdir(), `rozo-gone-${Date.now()}`);
+  assert.throws(
+    () => assertNoTrackedDotEnv(missing),
+    (e) => e.code === 'TRACKED_DOTENV_UNVERIFIABLE',
+    'an unlistable directory must refuse, not pass',
+  );
+});
+
+test('the tracked-secret check fails CLOSED when git cannot read the index', () => {
+  // A real repository whose index is corrupt: git can tell us it IS a repo but
+  // cannot tell us what is tracked in it. That question stays open, so the
+  // answer must be a refusal rather than an assumption of safety.
+  gitRepo((dir) => {
+    fs.writeFileSync(path.join(dir, '.env'), 'KEY=value\n');
+    execFileSync('git', ['add', '-f', '.env'], { cwd: dir });
+    fs.writeFileSync(path.join(dir, '.git', 'index'), 'garbage');
+    assert.throws(
+      () => assertNoTrackedDotEnv(dir),
+      (e) => e.code === 'TRACKED_DOTENV_UNVERIFIABLE',
+      'an unreadable index must refuse, not pass',
+    );
+  });
 });
 
 test('payment-session ids may contain _ and -', () => {

@@ -31681,25 +31681,28 @@ function assertNoTrackedDotEnv(cwd = process.cwd()) {
   let candidates = [];
   try {
     candidates = fs.readdirSync(cwd).filter((f) => ENV_FILE_RE.test(f) && !PUBLIC_ENV_RE.test(f));
-  } catch {
-    return { checked: true, tracked: false, candidates: [] };
+  } catch (err) {
+    throw new SkillError(
+      "TRACKED_DOTENV_UNVERIFIABLE",
+      `Could not list this directory (${err?.code || "unknown error"}), so it cannot be proved that no tracked .env file is present. Refusing to use hot-wallet keys here.`
+    );
   }
   if (candidates.length === 0) return { checked: true, tracked: false, candidates: [] };
   let insideRepo;
   try {
     insideRepo = execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
       cwd,
-      stdio: ["ignore", "pipe", "ignore"],
+      stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf8"
     }).trim() === "true";
   } catch (err) {
-    if (err && (err.code === "ENOENT" || err.code === "EACCES")) {
-      throw new SkillError(
-        "TRACKED_DOTENV_UNVERIFIABLE",
-        `Found ${candidates.length} .env file(s) here but git is unavailable, so it cannot be proved they are untracked. Refusing to use hot-wallet keys in this directory.`
-      );
-    }
-    return { checked: true, tracked: false, candidates };
+    const stderr = String(err?.stderr || "");
+    const notARepo = /not a git repository|does not appear to be a git repository/i.test(stderr);
+    if (notARepo) return { checked: true, tracked: false, candidates };
+    throw new SkillError(
+      "TRACKED_DOTENV_UNVERIFIABLE",
+      `Found ${candidates.length} .env file(s) here, but git could not be consulted (${err?.code || "unknown error"}), so it cannot be proved they are untracked. Refusing to use hot-wallet keys in this directory.`
+    );
   }
   if (!insideRepo) return { checked: true, tracked: false, candidates };
   let out;
@@ -32394,23 +32397,25 @@ function claimSend(rozoPaymentId, intent, { allowLarge = false, skipCaps = false
   });
 }
 function recordSendResult(rozoPaymentId, { status, txHash = null, note = null }) {
-  const state = readState(rozoPaymentId);
-  if (!state || !state.send) {
-    throw new SkillError("NO_SEND_CLAIM", "No send claim to update for this order.");
-  }
-  const next = {
-    ...state,
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-    send: {
-      ...state.send,
-      status,
-      txHash: txHash ?? state.send.txHash,
-      note,
-      resolvedAt: (/* @__PURE__ */ new Date()).toISOString()
+  return withLock(() => {
+    const state = readState(rozoPaymentId);
+    if (!state || !state.send) {
+      throw new SkillError("NO_SEND_CLAIM", "No send claim to update for this order.");
     }
-  };
-  writeAtomic(statePath(rozoPaymentId), next);
-  return next;
+    const next = {
+      ...state,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      send: {
+        ...state.send,
+        status,
+        txHash: txHash ?? state.send.txHash,
+        note,
+        resolvedAt: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    };
+    writeAtomic(statePath(rozoPaymentId), next);
+    return next;
+  });
 }
 function sessionSpendUsd({ excludeId = null } = {}) {
   const dir = stateRoot();

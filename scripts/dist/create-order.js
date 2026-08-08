@@ -912,6 +912,64 @@ import fs2 from "node:fs";
 import path2 from "node:path";
 import os from "node:os";
 import crypto2 from "node:crypto";
+var LOCK_STALE_MS = 6e4;
+var LOCK_WAIT_MS = 1e4;
+var LOCK_POLL_MS = 25;
+function lockPath() {
+  return path2.join(stateRoot(), ".send.lock");
+}
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function tryAcquire(file) {
+  try {
+    const fd = fs2.openSync(file, "wx", 384);
+    fs2.writeFileSync(fd, JSON.stringify({ pid: process.pid, at: (/* @__PURE__ */ new Date()).toISOString() }));
+    fs2.closeSync(fd);
+    return true;
+  } catch (err) {
+    if (err.code !== "EEXIST") throw err;
+    return false;
+  }
+}
+function withLock(fn) {
+  const file = lockPath();
+  fs2.mkdirSync(path2.dirname(file), { recursive: true, mode: 448 });
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (; ; ) {
+    if (tryAcquire(file)) break;
+    try {
+      const age = Date.now() - fs2.statSync(file).mtimeMs;
+      if (age > LOCK_STALE_MS) {
+        const stolen = `${file}.stale.${crypto2.randomBytes(4).toString("hex")}`;
+        try {
+          fs2.renameSync(file, stolen);
+          fs2.unlinkSync(stolen);
+        } catch {
+        }
+        continue;
+      }
+    } catch (err) {
+      if (err.code !== "ENOENT") throw err;
+      continue;
+    }
+    if (Date.now() > deadline) {
+      throw new SkillError(
+        "LOCK_TIMEOUT",
+        "Another rozo-checkout process is holding the send lock. Refusing to proceed rather than risk a concurrent second send."
+      );
+    }
+    sleepSync(LOCK_POLL_MS);
+  }
+  try {
+    return fn();
+  } finally {
+    try {
+      fs2.unlinkSync(file);
+    } catch {
+    }
+  }
+}
 function stateRoot() {
   return process.env.ROZO_CHECKOUT_STATE_DIR || path2.join(os.homedir(), ".rozo-checkout", "state");
 }
@@ -953,6 +1011,9 @@ function readState(rozoPaymentId) {
   }
 }
 function createOrderRecord(record) {
+  return withLock(() => createOrderRecordUnlocked(record));
+}
+function createOrderRecordUnlocked(record) {
   const { rozoPaymentId } = record;
   const existing = readState(rozoPaymentId);
   const next = {
@@ -990,22 +1051,24 @@ function depositDigest(source) {
   return crypto2.createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 function recordConfirmation(rozoPaymentId, { source, invoiceAmount, tier }) {
-  const state = readState(rozoPaymentId);
-  if (!state) {
-    throw new SkillError("NO_ORDER_STATE", "Cannot confirm an order with no local record.");
-  }
-  const next = {
-    ...state,
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-    confirmation: {
-      confirmedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      depositDigest: depositDigest(source),
-      invoiceAmount: invoiceAmount ?? state.invoiceAmount ?? null,
-      tier: tier ?? null
+  return withLock(() => {
+    const state = readState(rozoPaymentId);
+    if (!state) {
+      throw new SkillError("NO_ORDER_STATE", "Cannot confirm an order with no local record.");
     }
-  };
-  writeAtomic(statePath(rozoPaymentId), next);
-  return next;
+    const next = {
+      ...state,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      confirmation: {
+        confirmedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        depositDigest: depositDigest(source),
+        invoiceAmount: invoiceAmount ?? state.invoiceAmount ?? null,
+        tier: tier ?? null
+      }
+    };
+    writeAtomic(statePath(rozoPaymentId), next);
+    return next;
+  });
 }
 
 // scripts/src/create-order.mjs

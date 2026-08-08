@@ -1,12 +1,13 @@
 {
   "provenance": {
-    "source": "compromised-wallet table maintained in the operator security policy (CLAUDE.md)",
-    "description": "Addresses recorded as compromised (leaked key, drained wallet) or as attacker aggregation points, vendored from that table so the check works offline and cannot be silently disabled.",
+    "source": "compromised-wallet table in the ainative repository CLAUDE.md (operator security policy)",
+    "description": "Addresses recorded there as compromised (leaked key, drained wallet) or as attacker aggregation points, vendored into this repo so the check works offline and cannot be silently disabled.",
+    "syncDate": "2026-08-08",
     "syncedOn": "2026-08-08",
     "addressCount": 18,
     "addressesSha256": "12cb2019f4b93bde94d8f5bea594009620a3e4ae9d6b6d4d389912da7144d085",
     "shaAlgorithm": "sha256(JSON.stringify(entries.map(e => e.address)))",
-    "digestScope": "Covers the address list only. It proves the vendored list has not been edited since sync; it is not a signature by the upstream source.",
+    "digestScope": "The digest proves only that this vendored list has not been edited since the sync date. It is NOT a signature by the upstream source and does not attest that the upstream table still matches.",
     "failMode": "closed — if this file is missing, malformed, empty, or the digest does not match, every send is refused"
   },
   "entries": [

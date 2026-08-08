@@ -160,6 +160,13 @@ export function readState(rozoPaymentId) {
  * createdAt and any send records.
  */
 export function createOrderRecord(record) {
+  // Under the lock: this is a read-modify-write of the same file claimSend
+  // owns. Unlocked, a re-create racing a claim can read the pre-claim state
+  // and write it back, erasing the send record and reopening double-send.
+  return withLock(() => createOrderRecordUnlocked(record));
+}
+
+function createOrderRecordUnlocked(record) {
   const { rozoPaymentId } = record;
   const existing = readState(rozoPaymentId);
   const next = {
@@ -209,22 +216,26 @@ export function depositDigest(source) {
  * (PLAN §3 step 6b). This is what makes a later `--send` legitimate.
  */
 export function recordConfirmation(rozoPaymentId, { source, invoiceAmount, tier }) {
-  const state = readState(rozoPaymentId);
-  if (!state) {
-    throw new SkillError('NO_ORDER_STATE', 'Cannot confirm an order with no local record.');
-  }
-  const next = {
-    ...state,
-    updatedAt: new Date().toISOString(),
-    confirmation: {
-      confirmedAt: new Date().toISOString(),
-      depositDigest: depositDigest(source),
-      invoiceAmount: invoiceAmount ?? state.invoiceAmount ?? null,
-      tier: tier ?? null,
-    },
-  };
-  writeAtomic(statePath(rozoPaymentId), next);
-  return next;
+  // Under the lock, for the same reason as createOrderRecord: an unlocked
+  // read-modify-write here can clobber a send claim written concurrently.
+  return withLock(() => {
+    const state = readState(rozoPaymentId);
+    if (!state) {
+      throw new SkillError('NO_ORDER_STATE', 'Cannot confirm an order with no local record.');
+    }
+    const next = {
+      ...state,
+      updatedAt: new Date().toISOString(),
+      confirmation: {
+        confirmedAt: new Date().toISOString(),
+        depositDigest: depositDigest(source),
+        invoiceAmount: invoiceAmount ?? state.invoiceAmount ?? null,
+        tier: tier ?? null,
+      },
+    };
+    writeAtomic(statePath(rozoPaymentId), next);
+    return next;
+  });
 }
 
 /**
@@ -284,23 +295,27 @@ export function claimSend(rozoPaymentId, intent, { allowLarge = false, skipCaps 
 
 /** Attach the broadcast outcome. `status` is submitted | confirmed | ambiguous | failed. */
 export function recordSendResult(rozoPaymentId, { status, txHash = null, note = null }) {
-  const state = readState(rozoPaymentId);
-  if (!state || !state.send) {
-    throw new SkillError('NO_SEND_CLAIM', 'No send claim to update for this order.');
-  }
-  const next = {
-    ...state,
-    updatedAt: new Date().toISOString(),
-    send: {
-      ...state.send,
-      status,
-      txHash: txHash ?? state.send.txHash,
-      note,
-      resolvedAt: new Date().toISOString(),
-    },
-  };
-  writeAtomic(statePath(rozoPaymentId), next);
-  return next;
+  // Every read-modify-write of a state file holds the lock, so no writer can
+  // ever read a stale copy and write back over another writer's change.
+  return withLock(() => {
+    const state = readState(rozoPaymentId);
+    if (!state || !state.send) {
+      throw new SkillError('NO_SEND_CLAIM', 'No send claim to update for this order.');
+    }
+    const next = {
+      ...state,
+      updatedAt: new Date().toISOString(),
+      send: {
+        ...state.send,
+        status,
+        txHash: txHash ?? state.send.txHash,
+        note,
+        resolvedAt: new Date().toISOString(),
+      },
+    };
+    writeAtomic(statePath(rozoPaymentId), next);
+    return next;
+  });
 }
 
 /**
