@@ -1,0 +1,21 @@
+{
+  "name": "rozo-checkout",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent skill: pay a Coinbase Payment Link with BTC Lightning or USDT/USDC on Solana, BNB Chain, Ethereum, Polygon, Base or Stellar.",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.mjs",
+    "check": "npm run build && npm test"
+  },
+  "dependencies": {
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.95.0",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}
