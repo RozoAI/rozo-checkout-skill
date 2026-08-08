@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh.md) | [日本語](README.ja.md) | **Español**
 
+**[Inicio rápido →](QUICKSTART.es.md)** — pagar un enlace en cinco minutos, sin leer todo esto.
+
 Pagar un **enlace de pago de Coinbase (Coinbase Payment Link) de OpenRouter** con
 una moneda que ese enlace no puede aceptar directamente: BTC por Lightning, o
 USDT/USDC en Solana, BNB Chain, Ethereum, Polygon, Base o Stellar.

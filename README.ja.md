@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh.md) | **日本語** | [Español](README.es.md)
 
+**[クイックスタート →](QUICKSTART.ja.md)** — 本文を読まずに、5 分でリンクを支払う。
+
 **OpenRouter の Coinbase 決済リンク (Payment Link)** を、そのリンクが直接受け取れない
 通貨で支払うためのものです — Lightning 経由の BTC、あるいは Solana、BNB Chain、Ethereum、
 Polygon、Base、Stellar 上の USDT/USDC が使えます。

@@ -2,6 +2,8 @@
 
 **English** | [简体中文](README.zh.md) | [日本語](README.ja.md) | [Español](README.es.md)
 
+**[Quick start →](QUICKSTART.md)** — pay a link in five minutes, without reading any of this.
+
 Pay an **OpenRouter Coinbase Payment Link** with a coin that link cannot take
 directly — BTC over Lightning, or USDT/USDC on Solana, BNB Chain, Ethereum,
 Polygon, Base or Stellar.

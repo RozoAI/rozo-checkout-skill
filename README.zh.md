@@ -2,6 +2,8 @@
 
 [English](README.md) | **简体中文** | [日本語](README.ja.md) | [Español](README.es.md)
 
+**[快速开始 →](QUICKSTART.zh.md)** —— 五分钟付掉一个链接，无需读完本文。
+
 用一种 **OpenRouter Coinbase 收款链接 (Payment Link)** 本身无法直接接受的币种去付款 —— 走闪电网络的 BTC，或者 Solana、BNB Chain、Ethereum、Polygon、Base、Stellar 上的 USDT/USDC。
 
 Coinbase 收款链接只接受 Base 上的 USDC。本仓库是一个 agent skill（以及背后的 Node 脚本），它把上面这些币种通过一座桥 (bridge) 路由过去：你会拿到一个针对你实际持有的币种的一次性充值地址 (deposit address)，等你的充值到账后，一个出资钱包会代你结清这张 Coinbase 账单。
