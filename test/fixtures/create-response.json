@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "reused": false,
+  "linkId": "pl_01TESTTESTTESTTESTTEST",
+  "merchant": "OpenRouter, Inc.",
+  "original": "5.000000",
+  "callerPays": "5.000000",
+  "discount": "0",
+  "title": "Pay OpenRouter, Inc. $5.00",
+  "paymentLink": "https://example.invalid/pay/11111111-2222-4333-8444-555555555555",
+  "rozoPaymentId": "11111111-2222-4333-8444-555555555555",
+  "expiresAt": "2026-08-08T11:00:00.000Z",
+  "source": { "chainId": "900", "tokenSymbol": "USDT", "tokenAddress": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB" }
+}

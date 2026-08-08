@@ -1,0 +1,15 @@
+{
+  "id": "22222222-3333-4444-8555-666666666666",
+  "status": "payment_started",
+  "expiresAt": "2026-08-08T11:00:00.000Z",
+  "source": {
+    "chainId": "56",
+    "tokenSymbol": "USDT",
+    "amount": "5.021000000000000000",
+    "receiverAddress": "0x1111111111111111111111111111111111111111",
+    "txHash": "0xaaaa",
+    "amountReceived": "4.000000000000000000",
+    "confirmedAt": "2026-08-08T10:05:00.000Z"
+  },
+  "destination": { "chainId": "8453", "tokenSymbol": "USDC", "amount": "5.000000" }
+}

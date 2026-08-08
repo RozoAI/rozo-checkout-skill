@@ -1,0 +1,16 @@
+{
+  "id": "11111111-2222-4333-8444-555555555555",
+  "status": "payment_unpaid",
+  "expiresAt": "2026-08-08T11:00:00.000Z",
+  "source": {
+    "chainId": "900",
+    "tokenSymbol": "USDT",
+    "amount": "5.021000",
+    "receiverAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "senderAddress": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    "txHash": "3Bxs4h24hBjHziQ8UJqSjqjbjWQq2sQ3yV9Fq4HrVh5c",
+    "amountReceived": "5.021000",
+    "confirmedAt": "2026-08-08T10:05:00.000Z"
+  },
+  "destination": { "chainId": "8453", "tokenSymbol": "USDC", "amount": "5.000000" }
+}

@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "pl_id": "pl_01TESTTESTTESTTESTTEST",
+  "rozo_payment_id": null,
+  "routerState": null,
+  "coinbase": {
+    "protocolVersion": "v1",
+    "id": "pl_01TESTTESTTESTTESTTEST",
+    "status": "active",
+    "usageCount": 1,
+    "maxUsage": 1,
+    "preApprovalExpiry": "1786000000",
+    "settled": true
+  },
+  "rozoPayment": null
+}

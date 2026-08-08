@@ -1,0 +1,15 @@
+{
+  "linkId": "pl_01TESTTESTTESTTESTTEST",
+  "protocolVersion": "v1",
+  "merchant": "OpenRouter, Inc.",
+  "original": "5.00",
+  "callerPays": "5.000000",
+  "fiat": { "amount": "5.00", "currency": "USD" },
+  "coinbase": {
+    "id": "pl_01TESTTESTTESTTESTTEST",
+    "status": "active",
+    "usageCount": 0,
+    "maxUsage": 1,
+    "preApprovalExpiry": "1786000000"
+  }
+}

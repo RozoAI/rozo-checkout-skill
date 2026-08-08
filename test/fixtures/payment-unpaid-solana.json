@@ -1,0 +1,31 @@
+{
+  "id": "11111111-2222-4333-8444-555555555555",
+  "appId": "merchant_openrouter",
+  "orderId": "pl_01TESTTESTTESTTESTTEST",
+  "status": "payment_unpaid",
+  "type": "exactIn",
+  "createdAt": "2026-08-08T10:00:00.000Z",
+  "expiresAt": "2026-08-08T11:00:00.000Z",
+  "paymentLink": "https://example.invalid/pay/11111111-2222-4333-8444-555555555555",
+  "display": { "title": "Pay OpenRouter $5.00", "currency": "USD" },
+  "source": {
+    "chainId": "900",
+    "tokenSymbol": "USDT",
+    "tokenAddress": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+    "amount": "5.021000",
+    "receiverAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    "receiverMemo": "rozo-901",
+    "senderAddress": null,
+    "txHash": null,
+    "amountReceived": null,
+    "confirmedAt": null
+  },
+  "destination": {
+    "chainId": "8453",
+    "tokenSymbol": "USDC",
+    "amount": "5.000000",
+    "txHash": null,
+    "confirmedAt": null
+  },
+  "metadata": {}
+}

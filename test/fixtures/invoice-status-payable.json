@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "pl_id": "pl_01TESTTESTTESTTESTTEST",
+  "rozo_payment_id": "11111111-2222-4333-8444-555555555555",
+  "routerState": null,
+  "coinbase": {
+    "protocolVersion": "v1",
+    "id": "pl_01TESTTESTTESTTESTTEST",
+    "status": "active",
+    "fiat": { "amount": "5.00", "currency": "USD" },
+    "maxAmount": "5.000000",
+    "usageCount": 0,
+    "maxUsage": 1,
+    "preApprovalExpiry": "1786000000",
+    "merchant": { "name": "OpenRouter, Inc." },
+    "settled": false
+  },
+  "rozoPayment": {
+    "id": "11111111-2222-4333-8444-555555555555",
+    "status": "payment_unpaid",
+    "expiresAt": "2026-08-08T11:00:00.000Z",
+    "source": { "amount": "5.021000", "amountReceived": null, "txHash": null, "confirmedAt": null },
+    "destination": { "amount": "5.000000", "txHash": null, "confirmedAt": null }
+  }
+}
