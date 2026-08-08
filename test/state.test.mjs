@@ -25,8 +25,13 @@ const {
   readState,
   claimSend,
   recordSendResult,
+  recordConfirmation,
+  depositDigest,
+  findByLinkId,
   statePath,
+  stateRoot,
   assertSpendCaps,
+  withLock,
   MAX_TX_USD,
 } = await import('../scripts/src/lib/state.mjs');
 
@@ -78,7 +83,7 @@ test('re-creating the same order preserves createdAt and any send record', () =>
 test('a second send for the same order is refused with ALREADY_SENT', () => {
   withTempStateDir(() => {
     createOrderRecord(ORDER);
-    const claimed = claimSend(ID, INTENT);
+    const { state: claimed } = claimSend(ID, INTENT);
     assert.equal(claimed.send.status, 'claimed');
     assert.throws(() => claimSend(ID, INTENT), (e) => e.code === 'ALREADY_SENT');
 

@@ -138,6 +138,51 @@ test('post-create comparator: any drift stops the run', () => {
   assert.ok(r.drift.some((d) => d.field === 'source.chainId'));
 });
 
+test('post-create comparator: security-critical fields must be PRESENT, not just equal', () => {
+  const snapshot = readFixture('quote-snapshot.json');
+
+  // A response that simply omits a binding field must not sail through: there
+  // would be no proof the order belongs to the quoted link/merchant/amount.
+  for (const field of ['linkId', 'merchant', 'original', 'callerPays']) {
+    for (const missing of [undefined, null, '']) {
+      const created = readFixture('create-response.json');
+      created[field] = missing;
+      const r = verifyCreateAgainstQuote({ snapshot, created, requested: REQUESTED });
+      assert.equal(r.ok, false, `${field}=${JSON.stringify(missing)} must be rejected`);
+      assert.equal(r.code, 'CREATE_DRIFT');
+      assert.ok(r.drift.some((d) => d.field === field));
+    }
+  }
+
+  // And the echoed source must be present too.
+  for (const field of ['chainId', 'tokenSymbol']) {
+    const created = readFixture('create-response.json');
+    delete created.source[field];
+    const r = verifyCreateAgainstQuote({ snapshot, created, requested: REQUESTED });
+    assert.equal(r.code, 'CREATE_DRIFT');
+  }
+
+  // A wholly absent source object is likewise a stop.
+  const noSource = readFixture('create-response.json');
+  delete noSource.source;
+  assert.equal(
+    verifyCreateAgainstQuote({ snapshot, created: noSource, requested: REQUESTED }).code,
+    'CREATE_DRIFT',
+  );
+});
+
+test('post-create comparator: merchant compares equal whether string or object', () => {
+  const snapshot = { ...readFixture('quote-snapshot.json'), merchant: { name: 'OpenRouter, Inc.' } };
+  const created = readFixture('create-response.json');
+  assert.equal(verifyCreateAgainstQuote({ snapshot, created, requested: REQUESTED }).ok, true);
+
+  const wrong = { ...created, merchant: { name: 'Someone Else' } };
+  assert.equal(
+    verifyCreateAgainstQuote({ snapshot, created: wrong, requested: REQUESTED }).code,
+    'CREATE_DRIFT',
+  );
+});
+
 test('post-create comparator: a discount on this line is a violation', () => {
   const snapshot = readFixture('quote-snapshot.json');
   const discounted = { ...readFixture('create-response.json'), discount: '0.500000' };
