@@ -54,6 +54,16 @@ LINK="https://payments.coinbase.com/payment-links/pl_01YOURLINKID"
 チェーン id: `1` Ethereum · `56` BNB Chain · `137` Polygon · `8453` Base ·
 `900` Solana · `1500` Stellar · `lightning` Bitcoin Lightning。
 
+## どのウォレットが必要ですか？
+
+**ウォレットは 1 つ、チェーンも 1 つで足ります — チェーンごとに用意する必要はありません。**すでに持っている通貨を選び、それが今ある場所から支払ってください。
+
+どのウォレットでも構いませんし、取引所からの出金でも構いません。下記の Mode A は入金情報を表示するだけで、示された `amount` の `tokenSymbol` を、その `chain` 上で `receiverAddress` へ送るだけです。どのサイトに接続することも、ブラウザで承認することもありません。実際には、EVM チェーンでは MetaMask や Rabby、Solana では Phantom や Solflare、BTC では Phoenix や Wallet of Satoshi といった Lightning ウォレットがよく使われています。
+
+異なるケースが 2 つあります。**Stellar** は共有アドレスと `receiverMemo` の組み合わせで振り分けられるため、送信元で memo を設定できる必要があります。memo を省くと、その支払いは失われます。**Lightning** は `deposit.lnInvoice` にある BOLT11 インボイスに支払います。送金先アドレスというものはありません。
+
+秘密鍵が必要なのは `--send`（Mode B）だけで、`ROZO_CHECKOUT_EVM_KEY` または `ROZO_CHECKOUT_SOL_KEY` から読み込まれ、対象は EVM チェーンと Solana のみです。
+
 ## 1. 見積もりを取得する（読み取り専用、無料）
 
 ```bash

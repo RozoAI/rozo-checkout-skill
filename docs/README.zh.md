@@ -35,6 +35,15 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 
 原生 gas 币（SOL、BNB、ETH、MATIC）以及链上 BTC 均不接受。
 
+## 我需要什么钱包？
+
+**一个钱包、一条链就够了——不需要每条链各准备一个。**从上面挑一种你已经持有的币，然后从它现在所在的地方付款即可。
+
+- **任何钱包都可以，从交易所提币同样可以。**默认路径只是打印一段充值信息：按其中给出的 `amount`、`tokenSymbol`、`chain`，把钱发到 `receiverAddress` 即可。全程不需要连接任何网站，也不需要在浏览器里做任何授权。实践中大家在 EVM 链上用 MetaMask 或 Rabby，在 Solana 上用 Phantom 或 Solflare，付 BTC 时用 Phoenix、Wallet of Satoshi 之类的闪电钱包。
+- **Stellar 是需要特别小心的那一条。**它的充值走的是共享地址加 `receiverMemo` 的方式，所以无论你从交易所还是钱包发出，都必须能填写 memo。漏掉 memo，这笔钱就丢了。
+- **闪电网络付的是一张 invoice，不是地址。**扫描或粘贴 `deposit.lnInvoice` 即可，这条路径上没有可转账的地址。
+- **只有 `--send` 需要私钥**，从 `ROZO_CHECKOUT_EVM_KEY` 或 `ROZO_CHECKOUT_SOL_KEY` 读取，且仅支持 EVM 链和 Solana。其余方式都不涉及私钥。
+
 ## 在你的 agent 里使用
 
 不管用哪个 agent，喂给它的东西都一样：上面那条命令，或者直接让它读

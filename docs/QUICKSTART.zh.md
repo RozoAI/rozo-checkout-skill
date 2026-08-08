@@ -44,6 +44,16 @@ LINK="https://payments.coinbase.com/payment-links/pl_01YOURLINKID"
 链 id：`1` Ethereum · `56` BNB Chain · `137` Polygon · `8453` Base ·
 `900` Solana · `1500` Stellar · `lightning` Bitcoin Lightning。
 
+## 我需要什么钱包？
+
+**一个钱包、一条链就够了——不需要每条链各准备一个。**挑一种你已经持有的币，然后从它现在所在的地方付款即可。
+
+任何钱包都可以，从交易所提币同样可以：下面的 Mode A 只是打印一段充值信息，你按其中给出的 `amount`、`tokenSymbol`、`chain`，把钱发到 `receiverAddress` 即可。全程不需要连接任何网站，也不需要在浏览器里做任何授权。实践中大家在 EVM 链上用 MetaMask 或 Rabby，在 Solana 上用 Phantom 或 Solflare，付 BTC 时用 Phoenix、Wallet of Satoshi 之类的闪电钱包。
+
+有两种情况不一样。**Stellar** 走的是共享地址加 `receiverMemo` 的方式，所以你的付款来源必须能填写 memo——漏掉 memo，这笔钱就丢了。**闪电网络**付的是 `deposit.lnInvoice` 里的 BOLT11 invoice，没有可转账的地址。
+
+只有 `--send`（Mode B）需要私钥，从 `ROZO_CHECKOUT_EVM_KEY` 或 `ROZO_CHECKOUT_SOL_KEY` 读取，且仅支持 EVM 链和 Solana。
+
 ## 1. 报价（只读，免费）
 
 ```bash

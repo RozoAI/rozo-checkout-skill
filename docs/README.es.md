@@ -39,6 +39,27 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 
 Las monedas de gas nativas (SOL, BNB, ETH, MATIC) y el BTC on-chain no se aceptan.
 
+## ¿Qué wallet necesito?
+
+**Una wallet, en una cadena: no hace falta una por cada cadena.** Elige de la
+tabla de arriba la moneda que ya tengas y paga desde donde ya esté.
+
+- **Sirve cualquier wallet, y también un retiro desde un exchange.** La vía por
+  defecto solo imprime un bloque de depósito: envía exactamente ese `amount` de
+  ese `tokenSymbol`, en esa `chain`, a esa `receiverAddress`. Nada se conecta a
+  ningún sitio ni se aprueba en el navegador. En la práctica la gente usa
+  MetaMask o Rabby en las cadenas EVM, Phantom o Solflare en Solana, y una
+  wallet Lightning como Phoenix o Wallet of Satoshi para BTC.
+- **Stellar es la que exige cuidado.** Sus depósitos se enrutan mediante una
+  dirección compartida más `receiverMemo`, así que aquello desde lo que envíes
+  — exchange o wallet — debe permitirte fijar un memo. Si lo omites, el pago se
+  pierde.
+- **Lightning paga una factura, no una dirección.** Escanea o pega
+  `deposit.lnInvoice`; no hay ninguna dirección a la que enviar.
+- **Solo `--send` necesita una clave privada**, leída de
+  `ROZO_CHECKOUT_EVM_KEY` o `ROZO_CHECKOUT_SOL_KEY`, y cubre únicamente las
+  cadenas EVM y Solana. Todo lo demás no usa claves.
+
 ## Usarlo desde el agente
 
 La carga útil es la misma en todas partes: el comando de una línea de arriba, o

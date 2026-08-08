@@ -38,6 +38,15 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 
 ネイティブのガス通貨（SOL、BNB、ETH、MATIC）およびオンチェーンの BTC は受け付けません。
 
+## どのウォレットが必要ですか？
+
+**ウォレットは 1 つ、チェーンも 1 つで足ります — チェーンごとに用意する必要はありません。**上の表から、すでに持っている通貨を選び、それが今ある場所から支払ってください。
+
+- **どのウォレットでも構いませんし、取引所からの出金でも構いません。**既定の経路は入金情報を表示するだけです。示された `amount` の `tokenSymbol` を、その `chain` 上で `receiverAddress` へ送るだけです。どのサイトに接続することも、ブラウザで承認することもありません。実際には、EVM チェーンでは MetaMask や Rabby、Solana では Phantom や Solflare、BTC では Phoenix や Wallet of Satoshi といった Lightning ウォレットがよく使われています。
+- **注意が必要なのは Stellar です。**Stellar の入金は共有アドレスと `receiverMemo` の組み合わせで振り分けられるため、取引所であれウォレットであれ、送信元で memo を設定できる必要があります。memo を省くと、その支払いは失われます。
+- **Lightning はアドレスではなくインボイスに支払います。**`deposit.lnInvoice` をスキャンまたは貼り付けてください。送金先アドレスというものはありません。
+- **秘密鍵が必要なのは `--send` だけ**で、`ROZO_CHECKOUT_EVM_KEY` または `ROZO_CHECKOUT_SOL_KEY` から読み込まれ、対象は EVM チェーンと Solana のみです。それ以外はすべて鍵不要です。
+
 ## エージェントから使う
 
 渡す内容はどこでも同じです。上のワンライナーそのものか、エージェントに

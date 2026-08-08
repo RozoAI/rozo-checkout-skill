@@ -37,6 +37,26 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 
 Native gas coins (SOL, BNB, ETH, MATIC) and on-chain BTC are not accepted.
 
+## Which wallet do I need?
+
+**One wallet, on one chain — not one per chain.** Pick whichever coin above you
+already hold and pay from wherever it already lives.
+
+- **Any wallet works, and so does an exchange withdrawal.** The default path
+  just prints a deposit block: send exactly that `amount` of that
+  `tokenSymbol`, on that `chain`, to that `receiverAddress`. Nothing connects to
+  a site and nothing is approved in a browser. In practice people use MetaMask
+  or Rabby on the EVM chains, Phantom or Solflare on Solana, and a Lightning
+  wallet such as Phoenix or Wallet of Satoshi for BTC.
+- **Stellar is the one to be careful with.** Its deposits route through a shared
+  address plus `receiverMemo`, so whatever you send from — exchange or wallet —
+  must let you set a memo. Omit it and the payment is lost.
+- **Lightning pays an invoice, not an address.** Scan or paste
+  `deposit.lnInvoice`; there is no address to send to.
+- **Only `--send` needs a private key**, read from `ROZO_CHECKOUT_EVM_KEY` or
+  `ROZO_CHECKOUT_SOL_KEY`, and it covers EVM chains and Solana only. Everything
+  else is keyless.
+
 ## Use it from your agent
 
 The payload is the same everywhere: the one-liner above, or point the agent at

@@ -57,6 +57,28 @@ LINK="https://payments.coinbase.com/payment-links/pl_01YOURLINKID"
 Ids de cadena: `1` Ethereum · `56` BNB Chain · `137` Polygon · `8453` Base ·
 `900` Solana · `1500` Stellar · `lightning` Bitcoin Lightning.
 
+## ¿Qué wallet necesito?
+
+**Una wallet, en una cadena: no hace falta una por cada cadena.** Elige la
+moneda que ya tengas y paga desde donde ya esté.
+
+Sirve cualquier wallet, y también un retiro desde un exchange: el Mode A de
+abajo solo imprime un bloque de depósito, y envías exactamente ese `amount` de
+ese `tokenSymbol`, en esa `chain`, a esa `receiverAddress`. Nada se conecta a
+ningún sitio ni se aprueba en el navegador. En la práctica la gente usa
+MetaMask o Rabby en las cadenas EVM, Phantom o Solflare en Solana, y una wallet
+Lightning como Phoenix o Wallet of Satoshi para BTC.
+
+Dos casos son distintos. **Stellar** se enruta mediante una dirección
+compartida más `receiverMemo`, así que aquello desde lo que envíes debe
+permitirte fijar un memo: si lo omites, el pago se pierde. **Lightning** paga
+la factura BOLT11 de `deposit.lnInvoice`; no hay ninguna dirección a la que
+enviar.
+
+Solo `--send` (Mode B) necesita una clave privada, de
+`ROZO_CHECKOUT_EVM_KEY` o `ROZO_CHECKOUT_SOL_KEY`, y cubre únicamente las
+cadenas EVM y Solana.
+
 ## 1. Cotizarlo (solo lectura, gratis)
 
 ```bash

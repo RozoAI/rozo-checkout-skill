@@ -46,6 +46,12 @@ chainId "1" Ethereum (USDC, USDT) · "56" BNB Chain (USDC, USDT; 18-decimals) ·
 amounts in integer satoshis via source.amountUnit=="sats").
 Native SOL/ETH/BNB are NOT supported — stablecoins (or Lightning BTC) only.
 
+WALLET: one wallet on one of these chains is enough — not one per chain. Any
+wallet, or an exchange withdrawal, can fund the deposit address; nothing
+connects to a site. Stellar is the exception that must be able to set a memo,
+and Lightning pays a BOLT11 invoice rather than an address. Only --send needs a
+private key (EVM and Solana only); every other path is keyless.
+
 ## Flow (4 HTTP calls, all public)
 
 1) Quote (read-only, safe):
