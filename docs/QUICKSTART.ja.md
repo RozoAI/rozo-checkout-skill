@@ -198,6 +198,73 @@ ROZO_CHECKOUT_EVM_KEYSTORE=~/wallets/hot.json \
 鍵ファイルと `.env` は他のユーザーから読めてはならず（`chmod 600`）、git で追跡されて
 いてもいけません。どちらの場合も警告ではなく拒否されます。
 
+<details>
+<summary><b><code>--send</code> 用のローカルウォレット設定</b> — .env テンプレートとウォレット別の書き出し手順</summary>
+
+**既定の経路ではここに書かれたものは一切不要です。** 自分のウォレットから支払う場合、
+鍵も設定も要りません。しかもここでは決して使えないウォレット — ハードウェアウォレットや
+取引所アカウントを含む — でも支払えます。
+
+コマンドを実行するディレクトリに `.env` を置きます。本ツールが読み取る変数の全一覧です:
+
+```bash
+# 自分のウォレットから支払う場合、以下はどれも不要です。--send を使うときだけ
+# 読み込まれます。
+
+# Solana の秘密鍵: base58 文字列、または JSON のバイト配列。
+# ~/.config/solana/id.json (自動的に使われます) が無い場合にのみ必要です。
+ROZO_CHECKOUT_SOL_KEY=REPLACE_ME_base58_secret_key
+
+# EVM の生の秘密鍵: 0x + 16 進 64 文字。最も安全でない選択肢です。
+# 下の keystore を優先してください。
+ROZO_CHECKOUT_EVM_KEY=0x0000000000000000000000000000000000000000000000000000000000000000
+
+# EVM の暗号化 V3 keystore: そのファイルへのパス。上の生の鍵より推奨されます。
+ROZO_CHECKOUT_EVM_KEYSTORE=/replace/me/keystores/my-hot-wallet
+
+# その keystore のパスフレーズ。無人実行のときだけ必要で、端末では対話的に
+# 尋ねられ、保存もされません。
+ROZO_CHECKOUT_KEYSTORE_PASSPHRASE=REPLACE_ME_not_a_real_passphrase
+
+# 任意の RPC 上書き。チェーン id ごとに 1 行。8453 = Base、900 = Solana。
+ROZO_CHECKOUT_RPC_8453=https://mainnet.base.org
+ROZO_CHECKOUT_RPC_900=https://api.mainnet-beta.solana.com
+```
+
+そのうえで権限を絞り、git に入らないようにします:
+
+```bash
+chmod 600 .env
+echo '.env' >> .gitignore
+```
+
+**Solana**
+
+- `solana-keygen new` は `~/.config/solana/id.json` を書き出します。設定は不要で、
+  自動的に見つかります。これが推奨の経路です。
+- **Phantom** → Settings → Export Private Key で得られるのは **base58** 文字列です。
+  `ROZO_CHECKOUT_SOL_KEY` に設定してください。
+- **Solflare** は現行バージョンでは base58 文字列、古いバージョンでは JSON のバイト配列を
+  書き出します。どちらもそのまま使えます。
+
+**EVM**
+
+- **MetaMask** と **Rabby** の秘密鍵の書き出しは **`0x` の付かない 16 進 64 文字**です。
+  接頭辞は自分で付けてください: `ROZO_CHECKOUT_EVM_KEY=0x<その 64 文字>`。
+  付けない場合、その鍵は拒否されます。
+- **暗号化 keystore (より安全)。** ブラウザーウォレットが書き出せるのは生の鍵だけで、
+  keystore ではありません。生の鍵を暗号化 keystore に変えるには Foundry を使います:
+  `cast wallet import my-hot-wallet --interactive` が鍵の入力を促し、暗号化された
+  V3 keystore を `~/.foundry/keystores/my-hot-wallet` に書き出します
+  (`--keystore-dir` で場所を変更できます)。`ROZO_CHECKOUT_EVM_KEYSTORE` をその
+  ファイルに向けてください。`geth account import` も V3 keystore を生成します。
+
+**`--send` に使えないウォレット:** ハードウェアウォレット (Ledger、Trezor)、
+WalletConnect 専用のモバイルウォレット、取引所アカウント。いずれも設計上、署名鍵を
+渡しません。これらの場合は既定の鍵なしの経路を使ってください — すべてで動作します。
+
+</details>
+
 1 回の支払いは **$1,100** を超えられません。それ以上は上記のとおり自分のウォレットから
 支払ってください。
 

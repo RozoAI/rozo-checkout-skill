@@ -34,6 +34,29 @@ automation option. Those settings may also come from a .env in the working
 directory (or --env-file <path>): only ROZO_CHECKOUT_* keys are read from it, it
 is parsed as text and never shell-evaluated, and the real environment wins.
 Key files and .env must be chmod 600 and untracked by git.
+
+## Local wallet setup for --send (not needed for the default keyless path)
+
+.env keys (only ROZO_CHECKOUT_* are read; real env wins; chmod 600; gitignore):
+  ROZO_CHECKOUT_SOL_KEY               base58 string OR JSON byte array
+  ROZO_CHECKOUT_EVM_KEY               0x + 64 hex
+  ROZO_CHECKOUT_EVM_KEYSTORE          path to an encrypted V3 keystore
+  ROZO_CHECKOUT_KEYSTORE_PASSPHRASE   unattended runs only; else prompted
+  ROZO_CHECKOUT_RPC_<chainId>         e.g. ROZO_CHECKOUT_RPC_8453 (Base),
+                                      ROZO_CHECKOUT_RPC_900 (Solana)
+
+Where the material comes from:
+- Solana: `solana-keygen new` -> ~/.config/solana/id.json, found automatically
+  (preferred). Phantom exports base58; Solflare exports base58 (current) or a
+  JSON byte array (older). Both accepted.
+- EVM: MetaMask/Rabby export 64 hex chars WITHOUT a 0x prefix — you must add
+  "0x" or the key is rejected. For an encrypted keystore, Foundry's
+  `cast wallet import <name> --interactive` writes a V3 keystore to
+  ~/.foundry/keystores/<name>; `geth account import` also writes one. Browser
+  wallets do not export keystores, only raw keys.
+- Hardware wallets, WalletConnect-only wallets and exchange accounts CANNOT be
+  used with --send. Those users take the default keyless path, which works with
+  any wallet.
 With --send, one limit applies: a single payment may not exceed $1,100, with no
 override; larger invoices go through the keyless path.
 

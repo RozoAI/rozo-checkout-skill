@@ -211,6 +211,66 @@ node scripts/dist/status.js --rozo-payment-id <uuid> --watch
 钱包：任意钱包，**无需私钥**。只有 `--send` 需要，它用你的 Solana CLI 密钥对或加密 keystore 在本地签名。
 </details>
 
+<details>
+<summary><b>为 <code>--send</code> 配置本地钱包</b> —— .env 模板与各钱包导出步骤</summary>
+
+**默认路径不需要这里的任何东西。** 用你自己的钱包付款既不需要私钥也不需要任何配置，
+而且支持那些在这里根本用不了的钱包 —— 包括硬件钱包和交易所账户。
+
+在你运行命令的目录放一个 `.env`，下面列出了本工具会读取的全部变量：
+
+```bash
+# 用你自己的钱包付款不需要下面任何一项。它们只在你使用 --send 时才被读取。
+
+# Solana 私钥：base58 字符串，或 JSON 字节数组。只有在你没有
+# ~/.config/solana/id.json（它会被自动识别）时才需要填。
+ROZO_CHECKOUT_SOL_KEY=REPLACE_ME_base58_secret_key
+
+# EVM 原始私钥：0x 加 64 位十六进制。这是最不安全的方式 —— 优先用下面的 keystore。
+ROZO_CHECKOUT_EVM_KEY=0x0000000000000000000000000000000000000000000000000000000000000000
+
+# EVM 加密 V3 keystore：文件路径。比上面的原始私钥更推荐。
+ROZO_CHECKOUT_EVM_KEYSTORE=/replace/me/keystores/my-hot-wallet
+
+# 该 keystore 的口令。只在无人值守时需要；在终端上会交互式提示，且不会被保存。
+ROZO_CHECKOUT_KEYSTORE_PASSPHRASE=REPLACE_ME_not_a_real_passphrase
+
+# 可选的 RPC 覆盖，按链 id 一条。8453 = Base，900 = Solana。
+ROZO_CHECKOUT_RPC_8453=https://mainnet.base.org
+ROZO_CHECKOUT_RPC_900=https://api.mainnet-beta.solana.com
+```
+
+然后锁好权限，并确保它不进 git：
+
+```bash
+chmod 600 .env
+echo '.env' >> .gitignore
+```
+
+**Solana**
+
+- `solana-keygen new` 会写出 `~/.config/solana/id.json`。什么都不用配 —— 它会被自动
+  找到。这是我们推荐的方式。
+- **Phantom** → Settings → Export Private Key 给出的是 **base58** 字符串，填进
+  `ROZO_CHECKOUT_SOL_KEY`。
+- **Solflare** 新版本导出 base58 字符串，旧版本导出 JSON 字节数组。两种都可以直接用。
+
+**EVM**
+
+- **MetaMask** 和 **Rabby** → 导出私钥给出的是 **64 位十六进制、不带 `0x` 前缀**。
+  你需要自己补上前缀：`ROZO_CHECKOUT_EVM_KEY=0x<那 64 个字符>`。不加会被拒绝。
+- **加密 keystore（更安全）。** 浏览器钱包只能导出原始私钥，不能导出 keystore。
+  想把私钥变成加密 keystore，可以用 Foundry：`cast wallet import my-hot-wallet
+  --interactive` 会提示你输入私钥，并把加密的 V3 keystore 写到
+  `~/.foundry/keystores/my-hot-wallet`（用 `--keystore-dir` 可改目录）。然后把
+  `ROZO_CHECKOUT_EVM_KEYSTORE` 指向该文件。`geth account import` 同样会生成 V3 keystore。
+
+**不能用于 `--send` 的钱包：** 硬件钱包（Ledger、Trezor）、只支持 WalletConnect 的
+手机钱包，以及交易所账户。它们在设计上就不会交出签名私钥。这类用户请走默认的无私钥
+路径 —— 那条路对它们全都适用。
+
+</details>
+
 ## 三条必须知道的规则
 
 - **充值地址是一次性的。** 绝不要复用旧订单、缓存响应或截图里的地址。

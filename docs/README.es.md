@@ -236,6 +236,76 @@ directamente los cuatro endpoints públicos — ver [cómo funciona](how-it-work
 Billetera: cualquier billetera, **sin clave**. Solo `--send` la necesita: firma localmente con el par de claves de la CLI de Solana o un keystore cifrado.
 </details>
 
+<details>
+<summary><b>Configurar una billetera local para <code>--send</code></b> — plantilla .env y pasos de exportación por billetera</summary>
+
+**Nada de esto hace falta para la ruta por defecto.** Pagar desde la propia
+billetera no necesita clave ni configuración, y funciona con billeteras que aquí
+nunca se pueden usar, incluidas las de hardware y las cuentas de exchange.
+
+Un `.env` en el directorio desde el que se ejecuta, con todas las variables que
+esta herramienta lee:
+
+```bash
+# Nada de esto hace falta para pagar desde la propia billetera. Solo se lee
+# cuando se usa --send.
+
+# Clave secreta de Solana: una cadena base58 o un arreglo JSON de bytes. Solo
+# hace falta si NO se tiene ~/.config/solana/id.json, que se detecta solo.
+ROZO_CHECKOUT_SOL_KEY=REPLACE_ME_base58_secret_key
+
+# Clave privada EVM en bruto: 0x seguido de 64 caracteres hex. La opción menos
+# segura: es preferible el keystore de abajo.
+ROZO_CHECKOUT_EVM_KEY=0x0000000000000000000000000000000000000000000000000000000000000000
+
+# Keystore V3 cifrado para EVM: ruta al archivo. Preferible a la clave en bruto.
+ROZO_CHECKOUT_EVM_KEYSTORE=/replace/me/keystores/my-hot-wallet
+
+# Frase de contraseña de ese keystore. Solo para ejecuciones desatendidas; en
+# una terminal se solicita y no se guarda nada.
+ROZO_CHECKOUT_KEYSTORE_PASSPHRASE=REPLACE_ME_not_a_real_passphrase
+
+# Sobrescrituras de RPC opcionales, una por id de cadena. 8453 = Base,
+# 900 = Solana.
+ROZO_CHECKOUT_RPC_8453=https://mainnet.base.org
+ROZO_CHECKOUT_RPC_900=https://api.mainnet-beta.solana.com
+```
+
+Después, restringir permisos y mantenerlo fuera de git:
+
+```bash
+chmod 600 .env
+echo '.env' >> .gitignore
+```
+
+**Solana**
+
+- `solana-keygen new` escribe `~/.config/solana/id.json`. No hay nada que
+  configurar: se encuentra automáticamente. Es la ruta recomendada.
+- **Phantom** → Settings → Export Private Key da una cadena **base58**. Va en
+  `ROZO_CHECKOUT_SOL_KEY`.
+- **Solflare** exporta una cadena base58 en las versiones actuales y un arreglo
+  JSON de bytes en las antiguas. Ambos se aceptan tal cual.
+
+**EVM**
+
+- **MetaMask** y **Rabby** exportan la clave privada como **64 caracteres hex
+  sin el prefijo `0x`**. Hay que añadirlo a mano:
+  `ROZO_CHECKOUT_EVM_KEY=0x<los 64 caracteres>`. Sin él, la clave se rechaza.
+- **Keystore cifrado (más seguro).** Las billeteras de navegador exportan claves
+  en bruto, no keystores. Para convertir una en un keystore cifrado, usar
+  Foundry: `cast wallet import my-hot-wallet --interactive` pide la clave y
+  escribe un keystore V3 cifrado en `~/.foundry/keystores/my-hot-wallet`
+  (`--keystore-dir` cambia la ubicación). Apuntar `ROZO_CHECKOUT_EVM_KEYSTORE` a
+  ese archivo. `geth account import` también genera un keystore V3.
+
+**Billeteras que no se pueden usar con `--send`:** billeteras de hardware
+(Ledger, Trezor), billeteras móviles solo con WalletConnect y cuentas de
+exchange. Por diseño, ninguna entrega una clave de firma. Esos casos usan la
+ruta por defecto sin clave, que funciona con todas ellas.
+
+</details>
+
 ## Tres reglas que conviene conocer
 
 - **La dirección de depósito es de un solo uso.** Nunca reutilizar una de una

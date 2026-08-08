@@ -68,6 +68,75 @@ encrypted JSON keystore whose passphrase is prompted. A raw key in the
 environment (or a gitignored `.env`) still works for unattended automation.
 
 <details>
+<summary><b>Set up a local wallet for <code>--send</code></b> — .env template and per-wallet export steps</summary>
+
+**None of this is needed for the default path.** Paying from your own wallet
+needs no key and no configuration, and works with wallets that can never be
+used here — including hardware wallets and exchange accounts.
+
+A `.env` in the directory you run from, with every variable this tool reads:
+
+```bash
+# None of this is needed to pay from your own wallet. These are read only
+# when you use --send.
+
+# Solana secret key: a base58 string, or a JSON byte array. Only needed if you
+# do NOT have ~/.config/solana/id.json, which is picked up automatically.
+ROZO_CHECKOUT_SOL_KEY=REPLACE_ME_base58_secret_key
+
+# EVM raw private key: 0x followed by 64 hex characters. The least safe
+# option — prefer the keystore below.
+ROZO_CHECKOUT_EVM_KEY=0x0000000000000000000000000000000000000000000000000000000000000000
+
+# EVM encrypted V3 keystore: path to the file. Preferred over the raw key.
+ROZO_CHECKOUT_EVM_KEYSTORE=/replace/me/keystores/my-hot-wallet
+
+# Passphrase for that keystore. Only for unattended runs; on a terminal you
+# are prompted instead, and nothing is stored.
+ROZO_CHECKOUT_KEYSTORE_PASSPHRASE=REPLACE_ME_not_a_real_passphrase
+
+# Optional RPC overrides, one per chain id. 8453 = Base, 900 = Solana.
+ROZO_CHECKOUT_RPC_8453=https://mainnet.base.org
+ROZO_CHECKOUT_RPC_900=https://api.mainnet-beta.solana.com
+```
+
+Then lock it down and keep it out of git:
+
+```bash
+chmod 600 .env
+echo '.env' >> .gitignore
+```
+
+**Solana**
+
+- `solana-keygen new` writes `~/.config/solana/id.json`. Nothing to configure —
+  it is found automatically. This is the path we recommend.
+- **Phantom** → Settings → Export Private Key gives a **base58** string. Put it
+  in `ROZO_CHECKOUT_SOL_KEY`.
+- **Solflare** exports a base58 string in current versions and a JSON byte
+  array in older ones. Both are accepted as-is.
+
+**EVM**
+
+- **MetaMask** and **Rabby** → Export private key gives **64 hex characters with
+  no `0x` prefix**. Add the prefix yourself:
+  `ROZO_CHECKOUT_EVM_KEY=0x<the 64 characters>`. Without it the key is rejected.
+- **Encrypted keystore (safer).** Browser wallets export raw keys, not
+  keystores. To turn one into an encrypted keystore, use Foundry:
+  `cast wallet import my-hot-wallet --interactive` prompts for the key and
+  writes an encrypted V3 keystore to `~/.foundry/keystores/my-hot-wallet`
+  (`--keystore-dir` changes where). Point `ROZO_CHECKOUT_EVM_KEYSTORE` at that
+  file. `geth account import` also produces a V3 keystore.
+
+**Wallets that cannot be used with `--send`:** hardware wallets (Ledger,
+Trezor), WalletConnect-only mobile wallets, and exchange accounts. None of them
+hand over a signing key, by design. Use the default keyless path instead — it
+works with all of them.
+
+</details>
+
+
+<details>
 <summary><b>Claude Code</b> — install the skill, or paste the one-liner</summary>
 
 This repo is a Claude Code skill: it ships `SKILL.md` plus the executables in
