@@ -103,7 +103,7 @@ Para pagar un enlace de pago de OpenRouter / Coinbase, ejecuta:
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-Billetera: cualquier billetera, **sin clave**. `--send` sí necesita la clave del entorno.
+Billetera: cualquier billetera, **sin clave**. Solo `--send` la necesita: firma localmente con el par de claves de la CLI de Solana o un keystore cifrado.
 </details>
 
 <details>
@@ -117,7 +117,7 @@ propio comando:
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-Billetera: cualquier billetera, **sin clave**. `--send` sí necesita la clave del entorno.
+Billetera: cualquier billetera, **sin clave**. Solo `--send` la necesita: firma localmente con el par de claves de la CLI de Solana o un keystore cifrado.
 </details>
 
 <details>
@@ -130,7 +130,7 @@ Para pagar un enlace de pago de OpenRouter / Coinbase, ejecuta:
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-Billetera: cualquier billetera, **sin clave**. `--send` sí necesita la clave del entorno.
+Billetera: cualquier billetera, **sin clave**. Solo `--send` la necesita: firma localmente con el par de claves de la CLI de Solana o un keystore cifrado.
 </details>
 
 <details>
@@ -143,7 +143,7 @@ Para pagar un enlace de pago de OpenRouter / Coinbase, ejecuta:
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-Billetera: cualquier billetera, **sin clave**. `--send` sí necesita la clave del entorno.
+Billetera: cualquier billetera, **sin clave**. Solo `--send` la necesita: firma localmente con el par de claves de la CLI de Solana o un keystore cifrado.
 </details>
 
 <details>
@@ -157,7 +157,7 @@ Descarga https://checkout.rozo.ai/llms.txt y luego paga este enlace de OpenRoute
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-Billetera: cualquier billetera, **sin clave**. `--send` sí necesita la clave del entorno.
+Billetera: cualquier billetera, **sin clave**. Solo `--send` la necesita: firma localmente con el par de claves de la CLI de Solana o un keystore cifrado.
 </details>
 
 <details>
@@ -170,7 +170,7 @@ con un pago que se dispara desde un script o desde un canal de chat:
 openclaw agent exec "Pay this OpenRouter link with USDT on Solana by running: npx @rozoai/checkout pay <coinbase-link> --with usdt-solana"
 ```
 
-Billetera: cualquier billetera, **sin clave**. `--send` sí necesita la clave del entorno.
+Billetera: cualquier billetera, **sin clave**. Solo `--send` la necesita: firma localmente con el par de claves de la CLI de Solana o un keystore cifrado.
 </details>
 
 <details>
@@ -184,7 +184,7 @@ Paga este enlace de OpenRouter con USDT en Solana ejecutando:
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-Billetera: cualquier billetera, **sin clave**. `--send` sí necesita la clave del entorno.
+Billetera: cualquier billetera, **sin clave**. Solo `--send` la necesita: firma localmente con el par de claves de la CLI de Solana o un keystore cifrado.
 </details>
 
 <details>
@@ -233,7 +233,7 @@ para pagar este enlace de OpenRouter: <coinbase-link>
 Si el agente no tiene shell pero puede hacer peticiones HTTP, puede manejar
 directamente los cuatro endpoints públicos — ver [cómo funciona](how-it-works.md).
 
-Billetera: cualquier billetera, **sin clave**. `--send` sí necesita la clave del entorno.
+Billetera: cualquier billetera, **sin clave**. Solo `--send` la necesita: firma localmente con el par de claves de la CLI de Solana o un keystore cifrado.
 </details>
 
 ## Tres reglas que conviene conocer
@@ -260,6 +260,13 @@ La lista completa de lo que esta herramienta se niega a hacer, y por qué, está
 
 ## Registro de cambios
 
+- **0.1.2** — El Modo B ya no necesita una clave privada en bruto en una variable
+  de entorno. En Solana usa el `~/.config/solana/id.json` que `solana-keygen` ya
+  creó; en EVM un keystore V3 cifrado cuya frase de contraseña se solicita.
+  `--keyfile` indica cualquiera de los dos explícitamente, y los ajustes pueden
+  venir de un `.env` incluido en `.gitignore`. Las claves en bruto del entorno
+  siguen funcionando para automatización desatendida. Los archivos de claves y
+  el `.env` deben ser `chmod 600` y no estar bajo seguimiento de git.
 - **0.1.1** — un solo límite de gasto en lugar de dos: un pago individual no
   puede superar los $1,100 (dimensionado para una compra de crédito de $1,000
   más su comisión del 5%); se eliminan el tope acumulado por sesión y la bandera

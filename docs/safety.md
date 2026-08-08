@@ -58,9 +58,13 @@ reviewing or extending the code.
   never become a second transfer. Transactions are signed before broadcast so
   the hash is known in advance; on an ambiguous result the scripts look that
   exact transaction up instead of rebroadcasting.
-- **Hot-wallet controls.** Keys come from the environment only
-  (`ROZO_CHECKOUT_EVM_KEY`, `ROZO_CHECKOUT_SOL_KEY`), are never printed and
-  never accepted on the command line; library and RPC errors are redacted
+- **Hot-wallet controls.** A signing key is read from a local key file (a
+  solana-keygen keypair, or an encrypted V3 keystore whose passphrase is
+  prompted) or from the environment for unattended runs. A key file that is
+  readable by other users, or tracked by git, is refused — as is a `.env`
+  carrying the same settings, which is parsed as plain text and never
+  evaluated by a shell. Keys and passphrases
+  are never accepted on the command line, and are never printed; library and RPC errors are redacted
   before display, including credential-bearing provider URLs, bearer tokens and
   key-shaped strings. The scripts refuse to run when any `.env`/`.env.*` in the
   working directory is git-tracked, and refuse just as hard when git cannot

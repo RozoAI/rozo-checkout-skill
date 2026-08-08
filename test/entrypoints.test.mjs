@@ -27,6 +27,10 @@ const BURNER_SOL_KEY = JSON.stringify(Array.from({ length: 32 }, (_, i) => (i * 
 const ID = '11111111-2222-4333-8444-555555555555';
 
 function run(script, args, { stateDir, env = {} } = {}) {
+  // HOME is redirected to an empty directory so the key-source layer can never
+  // discover a real ~/.config/solana/id.json belonging to whoever runs the
+  // suite. A test must never touch a developer's actual signing key.
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'rozo-home-'));
   return new Promise((resolve) => {
     execFile(
       process.execPath,
@@ -35,6 +39,8 @@ function run(script, args, { stateDir, env = {} } = {}) {
         cwd: os.tmpdir(), // a directory with no .env and no git repo
         env: {
           ...process.env,
+          HOME: fakeHome,
+          USERPROFILE: fakeHome,
           ROZO_CHECKOUT_STATE_DIR: stateDir,
           ROZO_CHECKOUT_EVM_KEY: BURNER_EVM_KEY,
           ROZO_CHECKOUT_SOL_KEY: BURNER_SOL_KEY,
@@ -42,6 +48,7 @@ function run(script, args, { stateDir, env = {} } = {}) {
         },
       },
       (err, stdout) => {
+        fs.rmSync(fakeHome, { recursive: true, force: true });
         let json = null;
         try {
           json = JSON.parse(String(stdout));
@@ -182,14 +189,17 @@ test('a malformed key is rejected without echoing it', async () => {
   }
 });
 
-test('a missing key is reported by name, never by value', async () => {
+test('with no key anywhere, the error names the options and no value', async () => {
   const stateDir = tempStateDir();
   try {
     const res = await run('send-sol.js', ['--rozo-payment-id', ID, '--send'], {
       stateDir,
       env: { ROZO_CHECKOUT_SOL_KEY: '' },
     });
-    assert.equal(res.json?.error?.code, 'MISSING_KEY', res.stdout);
+    // No keyfile, no ~/.config/solana/id.json (HOME is a temp dir), no env key.
+    assert.equal(res.json?.error?.code, 'NO_KEY_SOURCE', res.stdout);
+    assert.match(res.json.error.message, /solana-keygen/);
+    assert.match(res.json.error.message, /--keyfile/);
     assert.match(res.json.error.message, /ROZO_CHECKOUT_SOL_KEY/);
   } finally {
     fs.rmSync(stateDir, { recursive: true, force: true });

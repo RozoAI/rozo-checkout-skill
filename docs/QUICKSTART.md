@@ -175,21 +175,43 @@ That is the whole of Mode A. Skip to step 5.
 ### The optional way: let the script pay (Mode B)
 
 Only if you want this machine to sign for you, and only on EVM chains and
-Solana. This is the only part that needs a private key:
+Solana. This is the only part that needs a key.
+
+**Solana — use the keypair you already have.** If you have ever run
+`solana-keygen`, `~/.config/solana/id.json` already exists and is used
+automatically:
 
 ```bash
-# Preview exactly what would be signed — signs nothing
-ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
-  node scripts/dist/send-sol.js --rozo-payment-id <rozoPaymentId> --dry-run
-
-# Actually send. --send is mandatory.
-ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
-  node scripts/dist/send-sol.js --rozo-payment-id <rozoPaymentId> --send
+node scripts/dist/send-sol.js --rozo-payment-id <rozoPaymentId> --send
 ```
 
-Use `send-evm.js` with `ROZO_CHECKOUT_EVM_KEY` for Ethereum, BNB Chain,
-Polygon and Base. A single payment may not exceed **$1,100**; above that, pay
-from your own wallet as above.
+**EVM — use an encrypted keystore.** Export a V3 JSON keystore from your
+wallet and point at it. The passphrase is prompted; it is never a flag:
+
+```bash
+ROZO_CHECKOUT_EVM_KEYSTORE=~/wallets/hot.json \
+  node scripts/dist/send-evm.js --rozo-payment-id <rozoPaymentId> --send
+```
+
+Either file can also be given explicitly with `--keyfile <path>`, and
+`--dry-run` works with every source: it derives the address and runs all the
+checks without signing anything.
+
+**For unattended automation**, where nobody can type a passphrase, a raw key in
+the environment still works exactly as before — `ROZO_CHECKOUT_SOL_KEY` or
+`ROZO_CHECKOUT_EVM_KEY`, or `ROZO_CHECKOUT_KEYSTORE_PASSPHRASE` alongside a
+keystore. On a machine a person uses, prefer a key file.
+
+These settings can also live in a `.env` in the directory you run from (or
+`--env-file <path>`). Only `ROZO_CHECKOUT_*` keys are read from it, it is
+parsed as plain text and never run through a shell, and anything already in
+your real environment wins. **Add `.env` to your `.gitignore`.**
+
+A key file or `.env` must not be readable by other users (`chmod 600`) and must
+not be tracked by git. Both are refused rather than warned about.
+
+A single payment may not exceed **$1,100**; above that, pay from your own
+wallet as above.
 
 ```json
 {

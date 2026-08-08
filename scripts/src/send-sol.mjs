@@ -28,7 +28,10 @@ import {
 } from './lib/output.mjs';
 import { assertRozoPaymentId, maskAddress } from './lib/ids.mjs';
 import { chainName, decimalsFor } from './lib/amounts.mjs';
-import { readKey, assertNoTrackedDotEnv, SOL_KEY_ENV } from './lib/keys.mjs';
+import { assertNoTrackedDotEnv } from './lib/keys.mjs';
+import { planKeySource, loadKeySource } from './lib/key-source.mjs';
+import { applyDotenv } from './lib/dotenv.mjs';
+import { promptPassphrase } from './lib/passphrase.mjs';
 import { preflight, finalPayabilityCheck } from './lib/presend.mjs';
 import { claimSend, recordSendResult } from './lib/state.mjs';
 import { broadcastOutcome } from './lib/outcomes.mjs';
@@ -51,65 +54,26 @@ import {
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 const MAINNET_GENESIS = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
 
-function decodeSecretKey(raw) {
-  const s = raw.trim();
-  if (s.startsWith('[')) {
-    let arr;
-    try {
-      arr = JSON.parse(s);
-    } catch {
-      throw new SkillError('BAD_KEY_FORMAT', `${SOL_KEY_ENV} looks like a JSON array but is malformed.`);
-    }
-    if (!Array.isArray(arr) || (arr.length !== 64 && arr.length !== 32)) {
-      throw new SkillError('BAD_KEY_FORMAT', `${SOL_KEY_ENV} array must be 32 or 64 bytes.`);
-    }
-    return Uint8Array.from(arr);
-  }
-  // base58
-  try {
-    // web3.js ships bs58 transitively; decode via Keypair to avoid a new dep.
-    const bytes = base58Decode(s);
-    if (bytes.length !== 64 && bytes.length !== 32) {
-      throw new Error('unexpected length');
-    }
-    return bytes;
-  } catch {
-    throw new SkillError(
-      'BAD_KEY_FORMAT',
-      `${SOL_KEY_ENV} must be a base58 secret key or a JSON byte array.`,
-    );
-  }
-}
-
 const B58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-function base58Decode(str) {
-  let num = 0n;
-  for (const ch of str) {
-    const idx = B58_ALPHABET.indexOf(ch);
-    if (idx < 0) throw new Error('bad base58');
-    num = num * 58n + BigInt(idx);
-  }
-  const bytes = [];
-  while (num > 0n) {
-    bytes.unshift(Number(num % 256n));
-    num /= 256n;
-  }
-  for (const ch of str) {
-    if (ch === '1') bytes.unshift(0);
-    else break;
-  }
-  return Uint8Array.from(bytes);
-}
 
 async function main(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = assertRozoPaymentId(args['rozo-payment-id'] || args._[0]);
 
   assertNoTrackedDotEnv();
-  const secret = decodeSecretKey(readKey(SOL_KEY_ENV));
+  // A .env in the working directory supplies the hot-wallet settings when they
+  // are not already in the real environment. Allow-listed keys only, parsed as
+  // plain text — never evaluated by a shell.
+  const dotenv = applyDotenv({ file: args['env-file'] });
+  // Most Solana users already have ~/.config/solana/id.json from solana-keygen;
+  // that is preferred over a raw key in the environment.
+  const plan = planKeySource({ family: 'solana', keyfile: args.keyfile });
+  const loaded = await loadKeySource(plan, { family: 'solana', askPassphrase: promptPassphrase });
+  const secret = loaded.secretKey;
   const keypair =
     secret.length === 64 ? Keypair.fromSecretKey(secret) : Keypair.fromSeed(secret);
   const sender = keypair.publicKey.toBase58();
+  const keySource = loaded.label;
 
   const dryRun = Boolean(args['dry-run']);
   const { source, state, expiry, amountAtomic, payment } = await preflight({
@@ -226,6 +190,9 @@ async function main(argv) {
         withMemo: Boolean(source.receiverMemo),
       },
       confirmedAt: state.confirmation?.confirmedAt ?? null,
+      keySource,
+      // Key NAMES only — a value from a .env is never echoed.
+      envFile: dotenv ? { path: dotenv.path, applied: dotenv.applied } : null,
       minutesOfSlack: Math.floor(expiry.msOfSlack / 60000),
       note: 'Nothing was signed or broadcast. Add --send (without --dry-run) to execute.',
     });
@@ -414,6 +381,7 @@ async function main(argv) {
       toMasked: maskAddress(source.receiverAddress),
       fromMasked: maskAddress(sender),
       withMemo: Boolean(source.receiverMemo),
+      keySource,
     },
     nextStep: `status.js --rozo-payment-id ${rozoPaymentId} --watch`,
     guidance: 'On-chain confirmation is not settlement. Poll status.js until the state is `settled`.',

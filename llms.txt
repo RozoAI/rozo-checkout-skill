@@ -25,8 +25,15 @@ usdc-ethereum, usdt-polygon, usdc-polygon, usdc-base, usdc-stellar, btc-lightnin
 
 DEFAULT PATH NEEDS NO KEY: `pay` prints a deposit address for the user to pay from
 any wallet. No private key, no environment variable, no configuration. Only the
-optional --send flag signs locally, and only that flag reads
-ROZO_CHECKOUT_EVM_KEY / ROZO_CHECKOUT_SOL_KEY (from the environment, never argv).
+optional --send flag signs locally. Its key comes from the first source that
+exists: --keyfile <path>; then ~/.config/solana/id.json (the keypair
+solana-keygen already wrote) for Solana or ROZO_CHECKOUT_EVM_KEYSTORE (an
+encrypted V3 keystore, passphrase prompted, never argv) for EVM; then a raw key
+in ROZO_CHECKOUT_SOL_KEY / ROZO_CHECKOUT_EVM_KEY, which is the unattended-
+automation option. Those settings may also come from a .env in the working
+directory (or --env-file <path>): only ROZO_CHECKOUT_* keys are read from it, it
+is parsed as text and never shell-evaluated, and the real environment wins.
+Key files and .env must be chmod 600 and untracked by git.
 With --send, one limit applies: a single payment may not exceed $1,100, with no
 override; larger invoices go through the keyless path.
 

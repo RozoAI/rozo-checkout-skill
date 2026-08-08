@@ -159,7 +159,7 @@ const BOOLEAN_FLAGS = new Set([
 ]);
 
 /** Flags that take a value. */
-const VALUE_FLAGS = new Set(['with', 'chain', 'token', 'rpc', 'timeout', 'payer']);
+const VALUE_FLAGS = new Set(['with', 'chain', 'token', 'rpc', 'timeout', 'payer', 'keyfile', 'env-file']);
 
 /**
  * Parse a full argv tail (everything after the binary name) into a normalized
@@ -298,6 +298,8 @@ export function parseCliArgs(argv) {
     rpc: flags.rpc,
     payer: flags.payer,
     fresh: flags.fresh === true,
+    keyfile: flags.keyfile,
+    envFile: flags['env-file'],
   };
 }
 
@@ -323,9 +325,15 @@ OPTIONS
   --with <coin>   which coin to pay with. Omit it on a terminal and you get a
                   numbered list to choose from; scripts and agents must pass it.
   --send          optional. Sign from a hot wallet instead of paying yourself.
-                  This is the only option that needs a key, read from
-                  ROZO_CHECKOUT_EVM_KEY or ROZO_CHECKOUT_SOL_KEY. A single
-                  payment may not exceed $1,100; there is no override.
+                  The only option that needs a key. On Solana it uses your
+                  existing ~/.config/solana/id.json; on EVM an encrypted JSON
+                  keystore. A single payment may not exceed $1,100; there is
+                  no override.
+  --keyfile <p>   with --send: the key to sign with. A solana-keygen keypair
+                  file, or an encrypted V3 keystore for EVM (passphrase is
+                  prompted, never passed as a flag).
+  --env-file <p>  with --send: read hot-wallet settings from this file instead
+                  of ./.env. Only ROZO_CHECKOUT_* keys are read from it.
   --yes, -y       skip the interactive confirmation (required when not a TTY)
   --dry-run       with --send, show what would be signed and sign nothing
   --json, -j      machine-readable output

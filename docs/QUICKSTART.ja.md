@@ -62,7 +62,7 @@ LINK="https://payments.coinbase.com/payment-links/pl_01YOURLINKID"
 
 異なるケースが 2 つあります。**Stellar** は共有アドレスと `receiverMemo` の組み合わせで振り分けられるため、送信元で memo を設定できる必要があります。memo を省くと、その支払いは失われます。**Lightning** は `deposit.lnInvoice` にある BOLT11 インボイスに支払います。送金先アドレスというものはありません。
 
-秘密鍵が必要なのは `--send`（Mode B）だけで、`ROZO_CHECKOUT_EVM_KEY` または `ROZO_CHECKOUT_SOL_KEY` から読み込まれ、対象は EVM チェーンと Solana のみです。
+鍵が必要なのは `--send`（Mode B）だけで、対象は EVM チェーンと Solana のみです。Solana では `solana-keygen` が既に作成した `~/.config/solana/id.json` を、EVM では暗号化された keystore（パスフレーズは対話的に入力）を使います。環境変数の生の鍵は無人自動化向けに残されています。
 
 ## 1. 見積もりを取得する（読み取り専用、無料）
 
@@ -163,22 +163,43 @@ satoshi 単位になります。
 
 ### 任意の方法: スクリプトに支払わせる（モード B）
 
-このマシンに署名させたい場合にだけ、そして EVM チェーンと Solana でのみ使えます。
-秘密鍵が必要なのはこの部分だけです:
+このマシンに署名させたい場合のみで、対象は EVM チェーンと Solana だけです。鍵が
+必要なのはこの部分だけです。
+
+**Solana — すでにある鍵ペアをそのまま使います。** `solana-keygen` を一度でも実行して
+いれば `~/.config/solana/id.json` が既に存在し、自動的に使われます:
 
 ```bash
-# 署名される内容を正確にプレビューします — 署名は一切行いません
-ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
-  node scripts/dist/send-sol.js --rozo-payment-id <rozoPaymentId> --dry-run
-
-# 実際に送金します。--send は必須です。
-ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
-  node scripts/dist/send-sol.js --rozo-payment-id <rozoPaymentId> --send
+node scripts/dist/send-sol.js --rozo-payment-id <rozoPaymentId> --send
 ```
 
-Ethereum、BNB Chain、Polygon、Base では `send-evm.js` を `ROZO_CHECKOUT_EVM_KEY` と
-併せて使います。1 回の支払いは **$1,100** を超えられません。それを超える場合は、上記の
-とおり自分のウォレットから支払ってください。
+**EVM — 暗号化された keystore を使います。** ウォレットから V3 形式の JSON keystore を
+書き出し、それを指定してください。パスフレーズは対話的に尋ねられ、フラグとして渡す
+ことは決してありません:
+
+```bash
+ROZO_CHECKOUT_EVM_KEYSTORE=~/wallets/hot.json \
+  node scripts/dist/send-evm.js --rozo-payment-id <rozoPaymentId> --send
+```
+
+どちらのファイルも `--keyfile <path>` で明示的に指定できます。`--dry-run` はすべての
+取得元で機能し、アドレスを導出してすべてのチェックを実行しますが、署名は行いません。
+
+**無人自動化の場合**（パスフレーズを入力できる人がいない場合）は、環境変数の生の鍵が
+これまでどおり使えます — `ROZO_CHECKOUT_SOL_KEY` または `ROZO_CHECKOUT_EVM_KEY`、
+あるいは keystore と併せて `ROZO_CHECKOUT_KEYSTORE_PASSPHRASE` です。人が使うマシンでは
+鍵ファイルを優先してください。
+
+これらの設定は、実行するディレクトリの `.env` に置くこともできます（`--env-file <path>`
+でも指定できます）。読み込まれるのは `ROZO_CHECKOUT_*` のキーだけで、ファイルはテキスト
+として解析され、シェルで評価されることは決してありません。実際の環境変数のほうが優先
+されます。**`.env` は `.gitignore` に追加してください。**
+
+鍵ファイルと `.env` は他のユーザーから読めてはならず（`chmod 600`）、git で追跡されて
+いてもいけません。どちらの場合も警告ではなく拒否されます。
+
+1 回の支払いは **$1,100** を超えられません。それ以上は上記のとおり自分のウォレットから
+支払ってください。
 
 ```json
 {

@@ -20457,8 +20457,8 @@ var require_dist = __commonJS({
         constructor(failure, failures) {
           let cached2;
           const { message, explanation, ...rest } = failure;
-          const { path: path4 } = failure;
-          const msg = path4.length === 0 ? message : `At path: ${path4.join(".")} -- ${message}`;
+          const { path: path7 } = failure;
+          const msg = path7.length === 0 ? message : `At path: ${path7.join(".")} -- ${message}`;
           super(explanation ?? msg);
           if (explanation != null)
             this.cause = msg;
@@ -20503,15 +20503,15 @@ var require_dist = __commonJS({
         } else if (typeof result === "string") {
           result = { message: result };
         }
-        const { path: path4, branch } = context;
+        const { path: path7, branch } = context;
         const { type: type2 } = struct6;
         const { refinement, message = `Expected a value of type \`${type2}\`${refinement ? ` with refinement \`${refinement}\`` : ""}, but received: \`${print(value)}\`` } = result;
         return {
           value,
           type: type2,
           refinement,
-          key: path4[path4.length - 1],
-          path: path4,
+          key: path7[path7.length - 1],
+          path: path7,
           branch,
           ...result,
           message
@@ -20529,8 +20529,8 @@ var require_dist = __commonJS({
         }
       }
       function* run6(value, struct6, options = {}) {
-        const { path: path4 = [], branch = [value], coerce: coerce2 = false, mask: mask2 = false } = options;
-        const ctx = { path: path4, branch, mask: mask2 };
+        const { path: path7 = [], branch = [value], coerce: coerce2 = false, mask: mask2 = false } = options;
+        const ctx = { path: path7, branch, mask: mask2 };
         if (coerce2) {
           value = struct6.coercer(value, ctx);
         }
@@ -20542,7 +20542,7 @@ var require_dist = __commonJS({
         }
         for (let [k, v, s] of struct6.entries(value, ctx)) {
           const ts = run6(v, s, {
-            path: k === void 0 ? path4 : [...path4, k],
+            path: k === void 0 ? path7 : [...path7, k],
             branch: k === void 0 ? branch : [...branch, v],
             coerce: coerce2,
             mask: mask2,
@@ -21257,10 +21257,10 @@ var require_dist = __commonJS({
 });
 
 // node_modules/uuid/dist/esm-node/rng.js
-import crypto5 from "crypto";
+import crypto6 from "crypto";
 function rng() {
   if (poolPtr > rnds8Pool.length - 16) {
-    crypto5.randomFillSync(rnds8Pool);
+    crypto6.randomFillSync(rnds8Pool);
     poolPtr = 0;
   }
   return rnds8Pool.slice(poolPtr, poolPtr += 16);
@@ -21460,14 +21460,14 @@ var init_v35 = __esm({
 });
 
 // node_modules/uuid/dist/esm-node/md5.js
-import crypto6 from "crypto";
+import crypto7 from "crypto";
 function md5(bytes) {
   if (Array.isArray(bytes)) {
     bytes = Buffer.from(bytes);
   } else if (typeof bytes === "string") {
     bytes = Buffer.from(bytes, "utf8");
   }
-  return crypto6.createHash("md5").update(bytes).digest();
+  return crypto7.createHash("md5").update(bytes).digest();
 }
 var md5_default;
 var init_md5 = __esm({
@@ -21512,14 +21512,14 @@ var init_v4 = __esm({
 });
 
 // node_modules/uuid/dist/esm-node/sha1.js
-import crypto7 from "crypto";
+import crypto8 from "crypto";
 function sha1(bytes) {
   if (Array.isArray(bytes)) {
     bytes = Buffer.from(bytes);
   } else if (typeof bytes === "string") {
     bytes = Buffer.from(bytes, "utf8");
   }
-  return crypto7.createHash("sha1").update(bytes).digest();
+  return crypto8.createHash("sha1").update(bytes).digest();
 }
 var sha1_default;
 var init_sha1 = __esm({
@@ -22472,14 +22472,14 @@ var require_url_state_machine = __commonJS({
       return url.replace(/\u0009|\u000A|\u000D/g, "");
     }
     function shortenPath(url) {
-      const path4 = url.path;
-      if (path4.length === 0) {
+      const path7 = url.path;
+      if (path7.length === 0) {
         return;
       }
-      if (url.scheme === "file" && path4.length === 1 && isNormalizedWindowsDriveLetter(path4[0])) {
+      if (url.scheme === "file" && path7.length === 1 && isNormalizedWindowsDriveLetter(path7[0])) {
         return;
       }
-      path4.pop();
+      path7.pop();
     }
     function includesCredentials(url) {
       return url.username !== "" || url.password !== "";
@@ -24774,16 +24774,16 @@ var require_constants = __commonJS({
 // node_modules/node-gyp-build/node-gyp-build.js
 var require_node_gyp_build = __commonJS({
   "node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
-    var fs5 = __require("fs");
-    var path4 = __require("path");
-    var os3 = __require("os");
+    var fs7 = __require("fs");
+    var path7 = __require("path");
+    var os4 = __require("os");
     var runtimeRequire = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
     var vars = process.config && process.config.variables || {};
     var prebuildsOnly = !!process.env.PREBUILDS_ONLY;
     var abi2 = process.versions.modules;
     var runtime = isElectron() ? "electron" : isNwjs() ? "node-webkit" : "node";
-    var arch = process.env.npm_config_arch || os3.arch();
-    var platform = process.env.npm_config_platform || os3.platform();
+    var arch = process.env.npm_config_arch || os4.arch();
+    var platform = process.env.npm_config_platform || os4.platform();
     var libc = process.env.LIBC || (isAlpine(platform) ? "musl" : "glibc");
     var armv = process.env.ARM_VERSION || (arch === "arm64" ? "8" : vars.arm_version) || "";
     var uv = (process.versions.uv || "").split(".")[0];
@@ -24792,21 +24792,21 @@ var require_node_gyp_build = __commonJS({
       return runtimeRequire(load.resolve(dir));
     }
     load.resolve = load.path = function(dir) {
-      dir = path4.resolve(dir || ".");
+      dir = path7.resolve(dir || ".");
       try {
-        var name = runtimeRequire(path4.join(dir, "package.json")).name.toUpperCase().replace(/-/g, "_");
+        var name = runtimeRequire(path7.join(dir, "package.json")).name.toUpperCase().replace(/-/g, "_");
         if (process.env[name + "_PREBUILD"]) dir = process.env[name + "_PREBUILD"];
       } catch (err) {
       }
       if (!prebuildsOnly) {
-        var release = getFirst(path4.join(dir, "build/Release"), matchBuild);
+        var release = getFirst(path7.join(dir, "build/Release"), matchBuild);
         if (release) return release;
-        var debug = getFirst(path4.join(dir, "build/Debug"), matchBuild);
+        var debug = getFirst(path7.join(dir, "build/Debug"), matchBuild);
         if (debug) return debug;
       }
       var prebuild = resolve(dir);
       if (prebuild) return prebuild;
-      var nearby = resolve(path4.dirname(process.execPath));
+      var nearby = resolve(path7.dirname(process.execPath));
       if (nearby) return nearby;
       var target = [
         "platform=" + platform,
@@ -24823,26 +24823,26 @@ var require_node_gyp_build = __commonJS({
       ].filter(Boolean).join(" ");
       throw new Error("No native build was found for " + target + "\n    loaded from: " + dir + "\n");
       function resolve(dir2) {
-        var tuples = readdirSync(path4.join(dir2, "prebuilds")).map(parseTuple);
+        var tuples = readdirSync(path7.join(dir2, "prebuilds")).map(parseTuple);
         var tuple = tuples.filter(matchTuple(platform, arch)).sort(compareTuples)[0];
         if (!tuple) return;
-        var prebuilds = path4.join(dir2, "prebuilds", tuple.name);
+        var prebuilds = path7.join(dir2, "prebuilds", tuple.name);
         var parsed = readdirSync(prebuilds).map(parseTags);
         var candidates = parsed.filter(matchTags(runtime, abi2));
         var winner = candidates.sort(compareTags(runtime))[0];
-        if (winner) return path4.join(prebuilds, winner.file);
+        if (winner) return path7.join(prebuilds, winner.file);
       }
     };
     function readdirSync(dir) {
       try {
-        return fs5.readdirSync(dir);
+        return fs7.readdirSync(dir);
       } catch (err) {
         return [];
       }
     }
     function getFirst(dir, filter) {
       var files = readdirSync(dir).filter(filter);
-      return files[0] && path4.join(dir, files[0]);
+      return files[0] && path7.join(dir, files[0]);
     }
     function matchBuild(name) {
       return /\.node$/.test(name);
@@ -24929,7 +24929,7 @@ var require_node_gyp_build = __commonJS({
       return typeof window !== "undefined" && window.process && window.process.type === "renderer";
     }
     function isAlpine(platform2) {
-      return platform2 === "linux" && fs5.existsSync("/etc/alpine-release");
+      return platform2 === "linux" && fs7.existsSync("/etc/alpine-release");
     }
     load.parseTags = parseTags;
     load.matchTags = matchTags;
@@ -41168,20 +41168,20 @@ var require_file_uri_to_path = __commonJS({
       var rest = decodeURI(uri.substring(7));
       var firstSlash = rest.indexOf("/");
       var host = rest.substring(0, firstSlash);
-      var path4 = rest.substring(firstSlash + 1);
+      var path7 = rest.substring(firstSlash + 1);
       if ("localhost" == host) host = "";
       if (host) {
         host = sep + sep + host;
       }
-      path4 = path4.replace(/^(.+)\|/, "$1:");
+      path7 = path7.replace(/^(.+)\|/, "$1:");
       if (sep == "\\") {
-        path4 = path4.replace(/\//g, "\\");
+        path7 = path7.replace(/\//g, "\\");
       }
-      if (/^.+\:/.test(path4)) {
+      if (/^.+\:/.test(path7)) {
       } else {
-        path4 = sep + path4;
+        path7 = sep + path7;
       }
-      return host + path4;
+      return host + path7;
     }
   }
 });
@@ -41189,19 +41189,19 @@ var require_file_uri_to_path = __commonJS({
 // node_modules/bindings/bindings.js
 var require_bindings = __commonJS({
   "node_modules/bindings/bindings.js"(exports, module) {
-    var fs5 = __require("fs");
-    var path4 = __require("path");
+    var fs7 = __require("fs");
+    var path7 = __require("path");
     var fileURLToPath2 = require_file_uri_to_path();
-    var join = path4.join;
-    var dirname = path4.dirname;
-    var exists = fs5.accessSync && function(path5) {
+    var join = path7.join;
+    var dirname = path7.dirname;
+    var exists = fs7.accessSync && function(path8) {
       try {
-        fs5.accessSync(path5);
+        fs7.accessSync(path8);
       } catch (e) {
         return false;
       }
       return true;
-    } || fs5.existsSync || path4.existsSync;
+    } || fs7.existsSync || path7.existsSync;
     var defaults = {
       arrow: process.env.NODE_BINDINGS_ARROW || " \u2192 ",
       compiled: process.env.NODE_BINDINGS_COMPILED_DIR || "compiled",
@@ -41246,7 +41246,7 @@ var require_bindings = __commonJS({
       if (!opts.module_root) {
         opts.module_root = exports.getRoot(exports.getFileName());
       }
-      if (path4.extname(opts.bindings) != ".node") {
+      if (path7.extname(opts.bindings) != ".node") {
         opts.bindings += ".node";
       }
       var requireFunc = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
@@ -41403,7 +41403,7 @@ process.on("warning", (warning) => {
 });
 
 // scripts/src/cli.mjs
-import readline from "node:readline";
+import readline2 from "node:readline";
 import { createRequire } from "node:module";
 
 // scripts/src/lib/output.mjs
@@ -41779,7 +41779,7 @@ var BOOLEAN_FLAGS = /* @__PURE__ */ new Set([
   "watch",
   "fresh"
 ]);
-var VALUE_FLAGS = /* @__PURE__ */ new Set(["with", "chain", "token", "rpc", "timeout", "payer"]);
+var VALUE_FLAGS = /* @__PURE__ */ new Set(["with", "chain", "token", "rpc", "timeout", "payer", "keyfile", "env-file"]);
 function parseCliArgs(argv) {
   const positional = [];
   const flags = {};
@@ -41897,7 +41897,9 @@ function parseCliArgs(argv) {
     timeout,
     rpc: flags.rpc,
     payer: flags.payer,
-    fresh: flags.fresh === true
+    fresh: flags.fresh === true,
+    keyfile: flags.keyfile,
+    envFile: flags["env-file"]
   };
 }
 var HELP = `rozo-checkout \u2014 pay a Coinbase Payment Link with BTC Lightning,
@@ -41922,9 +41924,15 @@ OPTIONS
   --with <coin>   which coin to pay with. Omit it on a terminal and you get a
                   numbered list to choose from; scripts and agents must pass it.
   --send          optional. Sign from a hot wallet instead of paying yourself.
-                  This is the only option that needs a key, read from
-                  ROZO_CHECKOUT_EVM_KEY or ROZO_CHECKOUT_SOL_KEY. A single
-                  payment may not exceed $1,100; there is no override.
+                  The only option that needs a key. On Solana it uses your
+                  existing ~/.config/solana/id.json; on EVM an encrypted JSON
+                  keystore. A single payment may not exceed $1,100; there is
+                  no override.
+  --keyfile <p>   with --send: the key to sign with. A solana-keygen keypair
+                  file, or an encrypted V3 keystore for EVM (passphrase is
+                  prompted, never passed as a flag).
+  --env-file <p>  with --send: read hot-wallet settings from this file instead
+                  of ./.env. Only ROZO_CHECKOUT_* keys are read from it.
   --yes, -y       skip the interactive confirmation (required when not a TTY)
   --dry-run       with --send, show what would be signed and sign nothing
   --json, -j      machine-readable output
@@ -43637,21 +43645,51 @@ async function run3(argv = process.argv.slice(2)) {
 
 // scripts/src/lib/keys.mjs
 import fs4 from "node:fs";
+import path4 from "node:path";
 import { execFileSync } from "node:child_process";
-var EVM_KEY_ENV = "ROZO_CHECKOUT_EVM_KEY";
-var SOL_KEY_ENV = "ROZO_CHECKOUT_SOL_KEY";
-function readKey(envName) {
-  const v = process.env[envName];
-  if (!v || !String(v).trim()) {
-    throw new SkillError(
-      "MISSING_KEY",
-      `${envName} is not set. Export it in the shell that runs this script; the script never accepts a key on the command line.`
-    );
-  }
-  return String(v).trim();
-}
 var ENV_FILE_RE = /^\.env(\..+)?$/;
 var PUBLIC_ENV_RE = /^\.env\.(example|sample|template)$/;
+function insideGitWorkTree(dir, whatFor) {
+  try {
+    return execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
+      cwd: dir,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8"
+    }).trim() === "true";
+  } catch (err) {
+    const stderr = String(err?.stderr || "");
+    if (/not a git repository|does not appear to be a git repository/i.test(stderr)) return false;
+    throw new SkillError(
+      "TRACKED_DOTENV_UNVERIFIABLE",
+      `git could not be consulted (${err?.code || "unknown error"}), so it cannot be proved that ${whatFor} is untracked. Refusing rather than assuming it is safe.`
+    );
+  }
+}
+function assertNotTrackedByGit(file) {
+  const dir = path4.dirname(path4.resolve(file));
+  const base = path4.basename(file);
+  if (!insideGitWorkTree(dir, "this key file")) return { checked: true, tracked: false };
+  let out2;
+  try {
+    out2 = execFileSync("git", ["ls-files", "-z", "--", base], {
+      cwd: dir,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8"
+    });
+  } catch {
+    throw new SkillError(
+      "TRACKED_DOTENV_UNVERIFIABLE",
+      "git could not report whether this key file is tracked. Refusing to use it."
+    );
+  }
+  if (out2.split("\0").filter(Boolean).length) {
+    throw new SkillError(
+      "TRACKED_KEYFILE",
+      `${base} is tracked by git. A committed key is one push from being public \u2014 untrack it (git rm --cached ${base}) and gitignore it before using it to sign.`
+    );
+  }
+  return { checked: true, tracked: false };
+}
 function assertNoTrackedDotEnv(cwd = process.cwd()) {
   let candidates = [];
   try {
@@ -43703,172 +43741,11 @@ function assertNoTrackedDotEnv(cwd = process.cwd()) {
   return { checked: true, tracked: false, candidates };
 }
 
-// scripts/src/lib/presend.mjs
-async function preflight({
-  rozoPaymentId,
-  expectFamily,
-  senderAddress,
-  send = false,
-  dryRun = false
-}) {
-  if (!send && !dryRun) {
-    throw new SkillError(
-      "SEND_NOT_OPTED_IN",
-      "Refusing to move funds without the explicit --send flag. Add --dry-run to see exactly what would be signed instead."
-    );
-  }
-  let blacklist;
-  try {
-    blacklist = loadBlacklist();
-  } catch (err) {
-    throw new SkillError(
-      "BLACKLIST_UNAVAILABLE",
-      `Compromised-address list unusable: ${err.message} Refusing to send.`
-    );
-  }
-  const state = readState(rozoPaymentId);
-  if (!state) {
-    throw new SkillError(
-      "NO_ORDER_STATE",
-      "No local record for this order. Run create-order.js first, in the same environment."
-    );
-  }
-  if (state.send) {
-    throw new SkillError(
-      "ALREADY_SENT",
-      `A send was already recorded for this order at ${state.send.claimedAt} (status: ${state.send.status}). Refusing to send twice.`,
-      { send: state.send }
-    );
-  }
-  if (!state.confirmation) {
-    throw new SkillError(
-      "NOT_CONFIRMED",
-      "This order has never been confirmed. Run `create-order.js --url <link> --chain <id> --token <SYM> --confirm` first, show the user the deposit block it prints, and get an explicit yes before sending."
-    );
-  }
-  const payment = await getPayment(rozoPaymentId);
-  const source = payment?.source || {};
-  const family = chainFamily(source.chainId);
-  if (family !== expectFamily) {
-    throw new SkillError(
-      "WRONG_SENDER_SCRIPT",
-      `This order settles on a ${family ?? "unknown"} chain; use the matching send script.`
-    );
-  }
-  const guard = reuseGuard({
-    payment,
-    requested: { chainId: state.source.chainId, tokenSymbol: state.source.tokenSymbol }
-  });
-  if (!guard.ok) {
-    throw new SkillError(guard.code, guard.reason, {
-      ...guard.evidence,
-      moneyDetected: guard.moneyDetected
-    });
-  }
-  const deposit = validateDepositInstructions(source);
-  if (!deposit.ok) throw new SkillError(deposit.code, deposit.reason);
-  const liveDigest = depositDigest(source);
-  if (liveDigest !== state.confirmation.depositDigest) {
-    throw new SkillError(
-      "CONFIRMATION_STALE",
-      "The live deposit instructions differ from the ones that were confirmed. Re-run create-order.js --confirm, show the user the new details, and get a fresh yes."
-    );
-  }
-  if (source.receiverAddress !== state.receiverAddress) {
-    throw new SkillError(
-      "DEPOSIT_CHANGED",
-      "The live deposit address differs from the one recorded at create time. Refusing to send."
-    );
-  }
-  if (String(source.amount) !== String(state.amount)) {
-    throw new SkillError(
-      "DEPOSIT_CHANGED",
-      `The live deposit amount (${source.amount}) differs from the recorded one (${state.amount}).`
-    );
-  }
-  if ((source.receiverMemo ?? null) !== (state.receiverMemo ?? null)) {
-    throw new SkillError("DEPOSIT_CHANGED", "The live deposit memo differs from the recorded one.");
-  }
-  const statusNow = await invoiceStatus({ linkId: state.linkId });
-  const expiry = checkExpiry({
-    now: Date.now(),
-    chainId: source.chainId,
-    intentExpiresAt: payment?.expiresAt,
-    coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry
-  });
-  if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
-  const payable = checkPayable(statusNow, Date.now());
-  if (!payable.ok) throw new SkillError(payable.code, payable.reason, payable.derived);
-  assertNotBlacklisted(
-    [
-      { address: source.receiverAddress, family, role: "deposit address" },
-      { address: senderAddress, family, role: "sender wallet" }
-    ],
-    blacklist
-  );
-  return {
-    payment,
-    source,
-    state,
-    expiry,
-    blacklist,
-    amountAtomic: deposit.amountAtomic,
-    deposit,
-    statusNow
-  };
-}
-async function finalPayabilityCheck({ linkId, chainId, intentExpiresAt }) {
-  const statusNow = await invoiceStatus({ linkId });
-  const payable = checkPayable(statusNow, Date.now());
-  if (!payable.ok) throw new SkillError(payable.code, payable.reason, payable.derived);
-  const expiry = checkExpiry({
-    now: Date.now(),
-    chainId,
-    intentExpiresAt,
-    coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry
-  });
-  if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
-  return { statusNow, payable, expiry };
-}
-
-// scripts/src/lib/outcomes.mjs
-function broadcastOutcome({ receiptStatus, executionError = null, receiptSeen = void 0 }) {
-  const seen = receiptSeen ?? (receiptStatus !== null && receiptStatus !== void 0);
-  if (executionError) {
-    return {
-      state: "failed",
-      success: false,
-      exitCode: EXIT_ERROR,
-      code: "TX_FAILED",
-      recordStatus: "failed"
-    };
-  }
-  if (!seen) {
-    return {
-      state: "unconfirmed",
-      success: true,
-      exitCode: EXIT_UNCONFIRMED,
-      code: null,
-      recordStatus: "submitted"
-    };
-  }
-  if (receiptStatus === "success") {
-    return {
-      state: "confirmed",
-      success: true,
-      exitCode: EXIT_OK,
-      code: null,
-      recordStatus: "confirmed"
-    };
-  }
-  return {
-    state: "reverted",
-    success: false,
-    exitCode: EXIT_ERROR,
-    code: "TX_REVERTED",
-    recordStatus: "failed"
-  };
-}
+// scripts/src/lib/key-source.mjs
+import fs5 from "node:fs";
+import path5 from "node:path";
+import os3 from "node:os";
+import crypto5 from "node:crypto";
 
 // node_modules/viem/_esm/utils/getAction.js
 function getAction(client, actionFn, name) {
@@ -54833,6 +54710,586 @@ function http(url, config = {}) {
 init_encodeFunctionData();
 init_keccak256();
 
+// scripts/src/lib/key-source.mjs
+var EVM_KEY_ENV = "ROZO_CHECKOUT_EVM_KEY";
+var SOL_KEY_ENV = "ROZO_CHECKOUT_SOL_KEY";
+var EVM_KEYSTORE_ENV = "ROZO_CHECKOUT_EVM_KEYSTORE";
+var KEYSTORE_PASSPHRASE_ENV = "ROZO_CHECKOUT_KEYSTORE_PASSPHRASE";
+function defaultSolanaKeypairPath() {
+  return path5.join(os3.homedir(), ".config", "solana", "id.json");
+}
+function assertKeyfileSafe(file) {
+  let stat;
+  try {
+    stat = fs5.statSync(file);
+  } catch (err) {
+    throw new SkillError(
+      "KEYFILE_UNREADABLE",
+      `Cannot read key file (${err.code || "unknown error"}). Check the path.`
+    );
+  }
+  if (!stat.isFile()) {
+    throw new SkillError("KEYFILE_UNREADABLE", "That key file path is not a regular file.");
+  }
+  if (process.platform !== "win32" && stat.mode & 63) {
+    const mode = (stat.mode & 511).toString(8).padStart(3, "0");
+    throw new SkillError(
+      "KEYFILE_PERMISSIONS",
+      `That key file is readable by other users (mode ${mode}). Run: chmod 600 ${file}`
+    );
+  }
+  assertNotTrackedByGit(file);
+  return true;
+}
+function parseSolanaKeypairJson(text) {
+  let arr;
+  try {
+    arr = JSON.parse(String(text));
+  } catch {
+    throw new SkillError(
+      "BAD_KEYPAIR_FILE",
+      "That file is not a Solana keypair: expected a JSON array of bytes."
+    );
+  }
+  if (!Array.isArray(arr)) {
+    throw new SkillError("BAD_KEYPAIR_FILE", "A Solana keypair file must contain a JSON array.");
+  }
+  if (arr.length !== 64 && arr.length !== 32) {
+    throw new SkillError(
+      "BAD_KEYPAIR_FILE",
+      `A Solana keypair must be 64 bytes (or a 32-byte seed); this file has ${arr.length}.`
+    );
+  }
+  for (const b of arr) {
+    if (!Number.isInteger(b) || b < 0 || b > 255) {
+      throw new SkillError("BAD_KEYPAIR_FILE", "A Solana keypair must contain byte values 0-255.");
+    }
+  }
+  return Uint8Array.from(arr);
+}
+function decodeSolanaEnvKey(raw) {
+  const s = String(raw ?? "").trim();
+  if (!s) throw new SkillError("MISSING_KEY", `${SOL_KEY_ENV} is empty.`);
+  if (s.startsWith("[")) return parseSolanaKeypairJson(s);
+  const bytes = base58Decode(s);
+  if (bytes.length !== 64 && bytes.length !== 32) {
+    throw new SkillError(
+      "BAD_KEY_FORMAT",
+      `${SOL_KEY_ENV} must be a base58 secret key or a JSON byte array.`
+    );
+  }
+  return bytes;
+}
+var B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function base58Decode(str) {
+  let num2 = 0n;
+  for (const ch of str) {
+    const idx = B58.indexOf(ch);
+    if (idx < 0) throw new SkillError("BAD_KEY_FORMAT", "Not valid base58.");
+    num2 = num2 * 58n + BigInt(idx);
+  }
+  const bytes = [];
+  while (num2 > 0n) {
+    bytes.unshift(Number(num2 % 256n));
+    num2 /= 256n;
+  }
+  for (const ch of str) {
+    if (ch === "1") bytes.unshift(0);
+    else break;
+  }
+  return Uint8Array.from(bytes);
+}
+function decryptKeystoreV3(keystore, passphrase) {
+  const ks = typeof keystore === "string" ? safeParseJson(keystore) : keystore;
+  if (!ks || typeof ks !== "object" || !ks.crypto) {
+    throw new SkillError(
+      "BAD_KEYSTORE",
+      'That file is not a V3 keystore (no "crypto" section). Export an encrypted JSON keystore from your wallet, or use a raw key in the environment.'
+    );
+  }
+  if (ks.version !== void 0 && Number(ks.version) !== 3) {
+    throw new SkillError("BAD_KEYSTORE", `Unsupported keystore version ${ks.version}; expected 3.`);
+  }
+  const c2 = ks.crypto;
+  const kdfparams = c2.kdfparams || {};
+  const pass = Buffer.from(String(passphrase ?? ""), "utf8");
+  let derived;
+  if (c2.kdf === "scrypt") {
+    const { n, r, p, dklen, salt } = kdfparams;
+    if (!n || !r || !p || !dklen || !salt) {
+      throw new SkillError("BAD_KEYSTORE", "The keystore scrypt parameters are incomplete.");
+    }
+    derived = crypto5.scryptSync(pass, Buffer.from(salt, "hex"), dklen, {
+      N: n,
+      r,
+      p,
+      // geth's default N=262144 needs roughly 256 MB; the Node default cap is
+      // far lower, so raise it with headroom rather than failing on a normal file.
+      maxmem: 256 * n * r + 64 * 1024 * 1024
+    });
+  } else if (c2.kdf === "pbkdf2") {
+    const { c: iterations, dklen, salt, prf } = kdfparams;
+    if (prf && prf !== "hmac-sha256") {
+      throw new SkillError("BAD_KEYSTORE", `Unsupported keystore PRF "${prf}".`);
+    }
+    if (!iterations || !dklen || !salt) {
+      throw new SkillError("BAD_KEYSTORE", "The keystore pbkdf2 parameters are incomplete.");
+    }
+    derived = crypto5.pbkdf2Sync(pass, Buffer.from(salt, "hex"), iterations, dklen, "sha256");
+  } else {
+    throw new SkillError("BAD_KEYSTORE", `Unsupported keystore KDF "${c2.kdf}".`);
+  }
+  const ciphertext = Buffer.from(c2.ciphertext, "hex");
+  const mac = keccak256(Buffer.concat([derived.subarray(16, 32), ciphertext])).slice(2);
+  if (!timingSafeEqualHex(mac, String(c2.mac || ""))) {
+    throw new SkillError(
+      "KEYSTORE_BAD_PASSPHRASE",
+      "Wrong passphrase for that keystore (the MAC did not verify)."
+    );
+  }
+  if (c2.cipher !== "aes-128-ctr") {
+    throw new SkillError("BAD_KEYSTORE", `Unsupported keystore cipher "${c2.cipher}".`);
+  }
+  const decipher = crypto5.createDecipheriv(
+    "aes-128-ctr",
+    derived.subarray(0, 16),
+    Buffer.from(c2.cipherparams.iv, "hex")
+  );
+  const secret = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  if (secret.length !== 32) {
+    throw new SkillError("BAD_KEYSTORE", "The decrypted key is not 32 bytes.");
+  }
+  return `0x${secret.toString("hex")}`;
+}
+function safeParseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new SkillError("BAD_KEYSTORE", "That keystore file is not valid JSON.");
+  }
+}
+function timingSafeEqualHex(a, b) {
+  const ab = Buffer.from(String(a).toLowerCase(), "hex");
+  const bb = Buffer.from(String(b).toLowerCase(), "hex");
+  if (ab.length === 0 || ab.length !== bb.length) return false;
+  return crypto5.timingSafeEqual(ab, bb);
+}
+function looksLikeKeystore(text) {
+  const t = String(text).trimStart();
+  if (!t.startsWith("{")) return false;
+  try {
+    const o = JSON.parse(t);
+    return Boolean(o && typeof o === "object" && o.crypto);
+  } catch {
+    return false;
+  }
+}
+function planKeySource({ family, keyfile, env = process.env }) {
+  if (keyfile) {
+    const resolved = expandHome(keyfile);
+    let text;
+    try {
+      text = fs5.readFileSync(resolved, "utf8");
+    } catch (err) {
+      throw new SkillError(
+        "KEYFILE_UNREADABLE",
+        `Cannot read ${displayPath(resolved)} (${err.code || "unknown error"}).`
+      );
+    }
+    const kind = looksLikeKeystore(text) ? "keystore" : "keypair-file";
+    if (kind === "keypair-file" && family === "evm") {
+      throw new SkillError(
+        "BAD_KEYSTORE",
+        "That file is not a V3 keystore. For EVM, --keyfile expects an encrypted JSON keystore."
+      );
+    }
+    if (kind === "keystore" && family === "solana") {
+      throw new SkillError(
+        "BAD_KEYPAIR_FILE",
+        "That looks like an EVM keystore. For Solana, --keyfile expects a solana-keygen keypair file (a JSON array of bytes)."
+      );
+    }
+    return { kind, path: resolved, label: displayPath(resolved) };
+  }
+  if (family === "solana") {
+    const standard = defaultSolanaKeypairPath();
+    if (fs5.existsSync(standard)) {
+      return { kind: "keypair-file", path: standard, label: displayPath(standard) };
+    }
+    if (env[SOL_KEY_ENV]) return { kind: "env", label: SOL_KEY_ENV };
+    throw new SkillError(
+      "NO_KEY_SOURCE",
+      `No signing key found. Either create one with solana-keygen (writes ${displayPath(standard)}), pass --keyfile <path>, or set ${SOL_KEY_ENV}.`
+    );
+  }
+  if (family === "evm") {
+    const fromEnv = env[EVM_KEYSTORE_ENV];
+    if (fromEnv) {
+      const resolved = expandHome(fromEnv);
+      return { kind: "keystore", path: resolved, label: displayPath(resolved) };
+    }
+    if (env[EVM_KEY_ENV]) return { kind: "env", label: EVM_KEY_ENV };
+    throw new SkillError(
+      "NO_KEY_SOURCE",
+      `No signing key found. Either point ${EVM_KEYSTORE_ENV} at an encrypted JSON keystore, pass --keyfile <path>, or set ${EVM_KEY_ENV}.`
+    );
+  }
+  throw new SkillError("NO_KEY_SOURCE", `No key source for family "${family}".`);
+}
+async function loadKeySource(plan, { family, env = process.env, askPassphrase } = {}) {
+  if (plan.kind === "env") {
+    const name = family === "evm" ? EVM_KEY_ENV : SOL_KEY_ENV;
+    const raw = env[name];
+    if (!raw || !String(raw).trim()) {
+      throw new SkillError("MISSING_KEY", `${name} is not set.`);
+    }
+    if (family === "evm") {
+      const key = String(raw).trim();
+      if (!/^0x[0-9a-fA-F]{64}$/.test(key)) {
+        throw new SkillError(
+          "BAD_KEY_FORMAT",
+          `${EVM_KEY_ENV} must be a 0x-prefixed 32-byte hex private key.`
+        );
+      }
+      return { privateKey: key, label: plan.label, kind: plan.kind };
+    }
+    return { secretKey: decodeSolanaEnvKey(raw), label: plan.label, kind: plan.kind };
+  }
+  assertKeyfileSafe(plan.path);
+  const text = fs5.readFileSync(plan.path, "utf8");
+  if (plan.kind === "keypair-file") {
+    return { secretKey: parseSolanaKeypairJson(text), label: plan.label, kind: plan.kind };
+  }
+  let passphrase = env[KEYSTORE_PASSPHRASE_ENV];
+  if (passphrase === void 0 || passphrase === "") {
+    if (!askPassphrase) {
+      throw new SkillError(
+        "KEYSTORE_PASSPHRASE_REQUIRED",
+        `That keystore needs a passphrase. Run this on a terminal to be prompted, or set ${KEYSTORE_PASSPHRASE_ENV} for unattended use.`
+      );
+    }
+    passphrase = await askPassphrase();
+  }
+  const privateKey = decryptKeystoreV3(text, passphrase);
+  return { privateKey, label: plan.label, kind: plan.kind };
+}
+function expandHome(p) {
+  const s = String(p);
+  if (s === "~") return os3.homedir();
+  if (s.startsWith("~/")) return path5.join(os3.homedir(), s.slice(2));
+  return s;
+}
+function displayPath(p) {
+  const home = os3.homedir();
+  const s = String(p);
+  return s.startsWith(home + path5.sep) ? `~${s.slice(home.length)}` : s;
+}
+
+// scripts/src/lib/dotenv.mjs
+import fs6 from "node:fs";
+import path6 from "node:path";
+var ALLOWED_KEYS = [
+  "ROZO_CHECKOUT_EVM_KEY",
+  "ROZO_CHECKOUT_SOL_KEY",
+  "ROZO_CHECKOUT_EVM_KEYSTORE",
+  "ROZO_CHECKOUT_KEYSTORE_PASSPHRASE"
+];
+var ALLOWED_PATTERN = /^ROZO_CHECKOUT_RPC_[A-Za-z0-9_]+$/;
+function isAllowedKey(key) {
+  return ALLOWED_KEYS.includes(key) || ALLOWED_PATTERN.test(key);
+}
+function parseDotenv(text) {
+  const vars = {};
+  const lines = String(text).split(/\r?\n/);
+  lines.forEach((rawLine, i) => {
+    const lineNo = i + 1;
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) return;
+    const withoutExport = line.startsWith("export ") ? line.slice(7).trim() : line;
+    const eq = withoutExport.indexOf("=");
+    if (eq === -1) {
+      throw new SkillError(
+        "BAD_ENV_FILE",
+        `Malformed .env: line ${lineNo} is not KEY=VALUE. (Content withheld \u2014 it may be a secret.)`
+      );
+    }
+    const key = withoutExport.slice(0, eq).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      throw new SkillError(
+        "BAD_ENV_FILE",
+        `Malformed .env: line ${lineNo} has an invalid key name. (Content withheld.)`
+      );
+    }
+    let value = withoutExport.slice(eq + 1).trim();
+    if (value.length >= 2 && (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    vars[key] = value;
+  });
+  return vars;
+}
+function filterAllowed(vars) {
+  const out2 = {};
+  for (const [k, v] of Object.entries(vars)) if (isAllowedKey(k)) out2[k] = v;
+  return out2;
+}
+function resolveEnvFile({ file, cwd = process.cwd() } = {}) {
+  if (file) {
+    const p = path6.resolve(file);
+    if (!fs6.existsSync(p)) {
+      throw new SkillError("ENV_FILE_MISSING", `No such env file: ${file}`);
+    }
+    return p;
+  }
+  const fallback = path6.join(cwd, ".env");
+  return fs6.existsSync(fallback) ? fallback : null;
+}
+function applyDotenv({ file, cwd = process.cwd(), env = process.env } = {}) {
+  const target = resolveEnvFile({ file, cwd });
+  if (!target) return null;
+  let stat;
+  try {
+    stat = fs6.statSync(target);
+  } catch (err) {
+    throw new SkillError("ENV_FILE_MISSING", `Cannot read env file (${err.code || "error"}).`);
+  }
+  if (process.platform !== "win32" && stat.mode & 63) {
+    const mode = (stat.mode & 511).toString(8).padStart(3, "0");
+    throw new SkillError(
+      "ENV_FILE_PERMISSIONS",
+      `That .env is readable by other users (mode ${mode}). Run: chmod 600 ${target}`
+    );
+  }
+  assertNotTrackedByGit(target);
+  const parsed = parseDotenv(fs6.readFileSync(target, "utf8"));
+  const allowed = filterAllowed(parsed);
+  const applied = [];
+  for (const [k, v] of Object.entries(allowed)) {
+    const existing = env[k];
+    if (existing !== void 0 && String(existing).trim() !== "") continue;
+    env[k] = v;
+    applied.push(k);
+  }
+  return {
+    path: target,
+    applied,
+    ignored: Object.keys(parsed).length - Object.keys(allowed).length
+  };
+}
+
+// scripts/src/lib/passphrase.mjs
+import readline from "node:readline";
+function promptPassphrase(prompt = "  Keystore passphrase: ") {
+  if (!process.stdin.isTTY) {
+    throw new SkillError(
+      "KEYSTORE_PASSPHRASE_REQUIRED",
+      "A keystore passphrase is needed but this is not a terminal. Set ROZO_CHECKOUT_KEYSTORE_PASSPHRASE for unattended use."
+    );
+  }
+  return new Promise((resolve, reject) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      terminal: true
+    });
+    let muted = false;
+    const originalWrite = rl._writeToOutput?.bind(rl);
+    rl._writeToOutput = (chunk) => {
+      if (!muted) {
+        if (originalWrite) originalWrite(chunk);
+        else process.stdout.write(chunk);
+        return;
+      }
+      if (chunk.includes(prompt)) process.stdout.write(prompt);
+    };
+    rl.question(prompt, (answer) => {
+      rl._writeToOutput = originalWrite;
+      rl.close();
+      process.stdout.write("\n");
+      const value = String(answer ?? "");
+      if (!value) {
+        reject(new SkillError("KEYSTORE_PASSPHRASE_REQUIRED", "No passphrase entered."));
+        return;
+      }
+      resolve(value);
+    });
+    muted = true;
+    rl.on("SIGINT", () => {
+      rl._writeToOutput = originalWrite;
+      rl.close();
+      process.stdout.write("\n");
+      reject(new SkillError("CANCELLED", "Cancelled."));
+    });
+  });
+}
+
+// scripts/src/lib/presend.mjs
+async function preflight({
+  rozoPaymentId,
+  expectFamily,
+  senderAddress,
+  send = false,
+  dryRun = false
+}) {
+  if (!send && !dryRun) {
+    throw new SkillError(
+      "SEND_NOT_OPTED_IN",
+      "Refusing to move funds without the explicit --send flag. Add --dry-run to see exactly what would be signed instead."
+    );
+  }
+  let blacklist;
+  try {
+    blacklist = loadBlacklist();
+  } catch (err) {
+    throw new SkillError(
+      "BLACKLIST_UNAVAILABLE",
+      `Compromised-address list unusable: ${err.message} Refusing to send.`
+    );
+  }
+  const state = readState(rozoPaymentId);
+  if (!state) {
+    throw new SkillError(
+      "NO_ORDER_STATE",
+      "No local record for this order. Run create-order.js first, in the same environment."
+    );
+  }
+  if (state.send) {
+    throw new SkillError(
+      "ALREADY_SENT",
+      `A send was already recorded for this order at ${state.send.claimedAt} (status: ${state.send.status}). Refusing to send twice.`,
+      { send: state.send }
+    );
+  }
+  if (!state.confirmation) {
+    throw new SkillError(
+      "NOT_CONFIRMED",
+      "This order has never been confirmed. Run `create-order.js --url <link> --chain <id> --token <SYM> --confirm` first, show the user the deposit block it prints, and get an explicit yes before sending."
+    );
+  }
+  const payment = await getPayment(rozoPaymentId);
+  const source = payment?.source || {};
+  const family = chainFamily(source.chainId);
+  if (family !== expectFamily) {
+    throw new SkillError(
+      "WRONG_SENDER_SCRIPT",
+      `This order settles on a ${family ?? "unknown"} chain; use the matching send script.`
+    );
+  }
+  const guard = reuseGuard({
+    payment,
+    requested: { chainId: state.source.chainId, tokenSymbol: state.source.tokenSymbol }
+  });
+  if (!guard.ok) {
+    throw new SkillError(guard.code, guard.reason, {
+      ...guard.evidence,
+      moneyDetected: guard.moneyDetected
+    });
+  }
+  const deposit = validateDepositInstructions(source);
+  if (!deposit.ok) throw new SkillError(deposit.code, deposit.reason);
+  const liveDigest = depositDigest(source);
+  if (liveDigest !== state.confirmation.depositDigest) {
+    throw new SkillError(
+      "CONFIRMATION_STALE",
+      "The live deposit instructions differ from the ones that were confirmed. Re-run create-order.js --confirm, show the user the new details, and get a fresh yes."
+    );
+  }
+  if (source.receiverAddress !== state.receiverAddress) {
+    throw new SkillError(
+      "DEPOSIT_CHANGED",
+      "The live deposit address differs from the one recorded at create time. Refusing to send."
+    );
+  }
+  if (String(source.amount) !== String(state.amount)) {
+    throw new SkillError(
+      "DEPOSIT_CHANGED",
+      `The live deposit amount (${source.amount}) differs from the recorded one (${state.amount}).`
+    );
+  }
+  if ((source.receiverMemo ?? null) !== (state.receiverMemo ?? null)) {
+    throw new SkillError("DEPOSIT_CHANGED", "The live deposit memo differs from the recorded one.");
+  }
+  const statusNow = await invoiceStatus({ linkId: state.linkId });
+  const expiry = checkExpiry({
+    now: Date.now(),
+    chainId: source.chainId,
+    intentExpiresAt: payment?.expiresAt,
+    coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry
+  });
+  if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
+  const payable = checkPayable(statusNow, Date.now());
+  if (!payable.ok) throw new SkillError(payable.code, payable.reason, payable.derived);
+  assertNotBlacklisted(
+    [
+      { address: source.receiverAddress, family, role: "deposit address" },
+      { address: senderAddress, family, role: "sender wallet" }
+    ],
+    blacklist
+  );
+  return {
+    payment,
+    source,
+    state,
+    expiry,
+    blacklist,
+    amountAtomic: deposit.amountAtomic,
+    deposit,
+    statusNow
+  };
+}
+async function finalPayabilityCheck({ linkId, chainId, intentExpiresAt }) {
+  const statusNow = await invoiceStatus({ linkId });
+  const payable = checkPayable(statusNow, Date.now());
+  if (!payable.ok) throw new SkillError(payable.code, payable.reason, payable.derived);
+  const expiry = checkExpiry({
+    now: Date.now(),
+    chainId,
+    intentExpiresAt,
+    coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry
+  });
+  if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
+  return { statusNow, payable, expiry };
+}
+
+// scripts/src/lib/outcomes.mjs
+function broadcastOutcome({ receiptStatus, executionError = null, receiptSeen = void 0 }) {
+  const seen = receiptSeen ?? (receiptStatus !== null && receiptStatus !== void 0);
+  if (executionError) {
+    return {
+      state: "failed",
+      success: false,
+      exitCode: EXIT_ERROR,
+      code: "TX_FAILED",
+      recordStatus: "failed"
+    };
+  }
+  if (!seen) {
+    return {
+      state: "unconfirmed",
+      success: true,
+      exitCode: EXIT_UNCONFIRMED,
+      code: null,
+      recordStatus: "submitted"
+    };
+  }
+  if (receiptStatus === "success") {
+    return {
+      state: "confirmed",
+      success: true,
+      exitCode: EXIT_OK,
+      code: null,
+      recordStatus: "confirmed"
+    };
+  }
+  return {
+    state: "reverted",
+    success: false,
+    exitCode: EXIT_ERROR,
+    code: "TX_REVERTED",
+    recordStatus: "failed"
+  };
+}
+
 // node_modules/viem/_esm/accounts/privateKeyToAccount.js
 init_secp256k1();
 init_toHex();
@@ -55030,15 +55487,12 @@ async function main4(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = assertRozoPaymentId(args["rozo-payment-id"] || args._[0]);
   assertNoTrackedDotEnv();
-  const key = readKey(EVM_KEY_ENV);
-  if (!/^0x[0-9a-fA-F]{64}$/.test(key)) {
-    throw new SkillError(
-      "BAD_KEY_FORMAT",
-      `${EVM_KEY_ENV} must be a 0x-prefixed 32-byte hex private key.`
-    );
-  }
-  const account = privateKeyToAccount(key);
+  const dotenv = applyDotenv({ file: args["env-file"] });
+  const plan = planKeySource({ family: "evm", keyfile: args.keyfile });
+  const loaded = await loadKeySource(plan, { family: "evm", askPassphrase: promptPassphrase });
+  const account = privateKeyToAccount(loaded.privateKey);
   const sender = account.address;
+  const keySource = loaded.label;
   const dryRun = Boolean(args["dry-run"]);
   const { source, state, expiry, amountAtomic, payment } = await preflight({
     rozoPaymentId,
@@ -55119,6 +55573,9 @@ async function main4(argv) {
         fromMasked: maskAddress2(sender)
       },
       confirmedAt: state.confirmation?.confirmedAt ?? null,
+      keySource,
+      // Key NAMES only — a value from a .env is never echoed.
+      envFile: dotenv ? { path: dotenv.path, applied: dotenv.applied } : null,
       minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4),
       note: "Nothing was signed or broadcast. Add --send (without --dry-run) to execute."
     });
@@ -55238,7 +55695,8 @@ async function main4(argv) {
         tokenSymbol: source.tokenSymbol,
         amount: source.amount,
         toMasked: maskAddress2(to),
-        fromMasked: maskAddress2(sender)
+        fromMasked: maskAddress2(sender),
+        keySource
       },
       nextStep: `status.js --rozo-payment-id ${rozoPaymentId} --watch`,
       guidance: succeeded ? "On-chain confirmation is not settlement. Poll status.js until the state is `settled`." : "The transfer reverted, so no funds moved \u2014 but this order stays locked against a second automated send. Investigate before retrying anything."
@@ -56968,59 +57426,18 @@ async function getAssociatedTokenAddress(mint, owner, allowOwnerOffCurve = false
 // scripts/src/send-sol.mjs
 var MEMO_PROGRAM_ID = new import_web36.PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 var MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
-function decodeSecretKey(raw) {
-  const s = raw.trim();
-  if (s.startsWith("[")) {
-    let arr;
-    try {
-      arr = JSON.parse(s);
-    } catch {
-      throw new SkillError("BAD_KEY_FORMAT", `${SOL_KEY_ENV} looks like a JSON array but is malformed.`);
-    }
-    if (!Array.isArray(arr) || arr.length !== 64 && arr.length !== 32) {
-      throw new SkillError("BAD_KEY_FORMAT", `${SOL_KEY_ENV} array must be 32 or 64 bytes.`);
-    }
-    return Uint8Array.from(arr);
-  }
-  try {
-    const bytes = base58Decode(s);
-    if (bytes.length !== 64 && bytes.length !== 32) {
-      throw new Error("unexpected length");
-    }
-    return bytes;
-  } catch {
-    throw new SkillError(
-      "BAD_KEY_FORMAT",
-      `${SOL_KEY_ENV} must be a base58 secret key or a JSON byte array.`
-    );
-  }
-}
 var B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-function base58Decode(str) {
-  let num2 = 0n;
-  for (const ch of str) {
-    const idx = B58_ALPHABET.indexOf(ch);
-    if (idx < 0) throw new Error("bad base58");
-    num2 = num2 * 58n + BigInt(idx);
-  }
-  const bytes = [];
-  while (num2 > 0n) {
-    bytes.unshift(Number(num2 % 256n));
-    num2 /= 256n;
-  }
-  for (const ch of str) {
-    if (ch === "1") bytes.unshift(0);
-    else break;
-  }
-  return Uint8Array.from(bytes);
-}
 async function main5(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = assertRozoPaymentId(args["rozo-payment-id"] || args._[0]);
   assertNoTrackedDotEnv();
-  const secret = decodeSecretKey(readKey(SOL_KEY_ENV));
+  const dotenv = applyDotenv({ file: args["env-file"] });
+  const plan = planKeySource({ family: "solana", keyfile: args.keyfile });
+  const loaded = await loadKeySource(plan, { family: "solana", askPassphrase: promptPassphrase });
+  const secret = loaded.secretKey;
   const keypair = secret.length === 64 ? import_web36.Keypair.fromSecretKey(secret) : import_web36.Keypair.fromSeed(secret);
   const sender = keypair.publicKey.toBase58();
+  const keySource = loaded.label;
   const dryRun = Boolean(args["dry-run"]);
   const { source, state, expiry, amountAtomic, payment } = await preflight({
     rozoPaymentId,
@@ -57120,6 +57537,9 @@ async function main5(argv) {
         withMemo: Boolean(source.receiverMemo)
       },
       confirmedAt: state.confirmation?.confirmedAt ?? null,
+      keySource,
+      // Key NAMES only — a value from a .env is never echoed.
+      envFile: dotenv ? { path: dotenv.path, applied: dotenv.applied } : null,
       minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4),
       note: "Nothing was signed or broadcast. Add --send (without --dry-run) to execute."
     });
@@ -57275,7 +57695,8 @@ async function main5(argv) {
       amount: source.amount,
       toMasked: maskAddress2(source.receiverAddress),
       fromMasked: maskAddress2(sender),
-      withMemo: Boolean(source.receiverMemo)
+      withMemo: Boolean(source.receiverMemo),
+      keySource
     },
     nextStep: `status.js --rozo-payment-id ${rozoPaymentId} --watch`,
     guidance: "On-chain confirmation is not settlement. Poll status.js until the state is `settled`."
@@ -57350,7 +57771,7 @@ function targetToArgs(target) {
   return ["--link-id", linkId];
 }
 async function ask(question) {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const rl = readline2.createInterface({ input: process.stdin, output: process.stdout });
   try {
     return await new Promise((resolve) => rl.question(question, resolve));
   } finally {
@@ -57439,7 +57860,7 @@ async function pickSource({ invoiceUsd, saved, fresh }) {
   throw new CliError("BAD_CHOICE", "No valid choice after three attempts.");
 }
 async function askYesNo(question) {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const rl = readline2.createInterface({ input: process.stdin, output: process.stdout });
   try {
     const answer = await new Promise((resolve) => rl.question(question, resolve));
     return /^(y|yes)$/i.test(String(answer).trim());
@@ -57623,6 +58044,8 @@ async function cmdPay(opts) {
     if (opts.dryRun) sendArgs.push("--dry-run");
     else sendArgs.push("--send");
     if (opts.rpc) sendArgs.push("--rpc", opts.rpc);
+    if (opts.keyfile) sendArgs.push("--keyfile", opts.keyfile);
+    if (opts.envFile) sendArgs.push("--env-file", opts.envFile);
     if (!opts.json) out(dim(opts.dryRun ? "  Preparing (dry run)\u2026" : "  Sending\u2026"));
     const sent = await step(sender, sendArgs);
     sendResult = sent.payload;
@@ -57636,10 +58059,14 @@ async function cmdPay(opts) {
       printMoneyWarning(sent.payload);
       return sent.exitCode;
     } else if (opts.dryRun) {
+      if (sent.payload.keySource) out(`  ${dim(`would sign with ${sent.payload.keySource}`)}`);
       out(`  ${green("\u2713")} Dry run only \u2014 nothing was signed or broadcast.`);
       out();
       return sent.exitCode;
     } else {
+      if (sent.payload.sent?.keySource) {
+        out(`  ${dim(`signing with ${sent.payload.sent.keySource}`)}`);
+      }
       out(`  ${green("\u2713")} Sent. tx ${sent.payload.txHash}`);
       out();
       savePrefs({ lastPreset: chosenPreset || presetFor(chainId, tokenSymbol) });

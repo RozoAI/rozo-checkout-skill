@@ -68,7 +68,7 @@ git clone https://github.com/RozoAI/rozo-checkout-skill ~/.claude/skills/rozo-ch
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-钱包：任意钱包，**无需私钥**。只有当你想让 Claude 用热钱包签名时才加 `--send`，
+钱包：任意钱包，**无需私钥**。只有当你想让 Claude 用热钱包签名时才加 `--send`（用你的 Solana CLI 密钥对或加密 keystore），
 那一步才需要环境变量里的私钥。
 </details>
 
@@ -82,7 +82,7 @@ Codex 会读取项目根目录的 `AGENTS.md`。加一条常驻指令，它就�
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-钱包：任意钱包，**无需私钥**。`--send` 才需要环境变量里的私钥。
+钱包：任意钱包，**无需私钥**。只有 `--send` 需要，它用你的 Solana CLI 密钥对或加密 keystore 在本地签名。
 </details>
 
 <details>
@@ -95,7 +95,7 @@ OpenCode 同样读取项目根目录的 `AGENTS.md`，所以上面那段 Codex �
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-钱包：任意钱包，**无需私钥**。`--send` 才需要环境变量里的私钥。
+钱包：任意钱包，**无需私钥**。只有 `--send` 需要，它用你的 Solana CLI 密钥对或加密 keystore 在本地签名。
 </details>
 
 <details>
@@ -108,7 +108,7 @@ Cline 从项目根目录的 `.clinerules` 读取常驻指令：
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-钱包：任意钱包，**无需私钥**。`--send` 才需要环境变量里的私钥。
+钱包：任意钱包，**无需私钥**。只有 `--send` 需要，它用你的 Solana CLI 密钥对或加密 keystore 在本地签名。
 </details>
 
 <details>
@@ -121,7 +121,7 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-钱包：任意钱包，**无需私钥**。`--send` 才需要环境变量里的私钥。
+钱包：任意钱包，**无需私钥**。只有 `--send` 需要，它用你的 Solana CLI 密钥对或加密 keystore 在本地签名。
 </details>
 
 <details>
@@ -135,7 +135,7 @@ Hermes Agent（Nous Research）有 shell 权限，也有自己的 skill 体系�
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-钱包：任意钱包，**无需私钥**。`--send` 才需要环境变量里的私钥。
+钱包：任意钱包，**无需私钥**。只有 `--send` 需要，它用你的 Solana CLI 密钥对或加密 keystore 在本地签名。
 </details>
 
 <details>
@@ -147,7 +147,7 @@ OpenClaw 的无头入口用来跑一次性任务，很适合从脚本或聊天�
 openclaw agent exec "Pay this OpenRouter link with USDT on Solana by running: npx @rozoai/checkout pay <coinbase-link> --with usdt-solana"
 ```
 
-钱包：任意钱包，**无需私钥**。`--send` 才需要环境变量里的私钥。
+钱包：任意钱包，**无需私钥**。只有 `--send` 需要，它用你的 Solana CLI 密钥对或加密 keystore 在本地签名。
 </details>
 
 <details>
@@ -161,7 +161,7 @@ Pi 是一个 BYOK 终端 agent，内置工具里就有 `bash`，可以直接执�
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-钱包：任意钱包，**无需私钥**。`--send` 才需要环境变量里的私钥。
+钱包：任意钱包，**无需私钥**。只有 `--send` 需要，它用你的 Solana CLI 密钥对或加密 keystore 在本地签名。
 </details>
 
 <details>
@@ -208,7 +208,7 @@ node scripts/dist/status.js --rozo-payment-id <uuid> --watch
 如果 agent 没有 shell 但能发 HTTP 请求，它可以直接调用那四个公开端点 —— 见
 [工作原理](how-it-works.md)。
 
-钱包：任意钱包，**无需私钥**。`--send` 才需要环境变量里的私钥。
+钱包：任意钱包，**无需私钥**。只有 `--send` 需要，它用你的 Solana CLI 密钥对或加密 keystore 在本地签名。
 </details>
 
 ## 三条必须知道的规则
@@ -232,6 +232,11 @@ node scripts/dist/status.js --rozo-payment-id <uuid> --watch
 
 ## 更新日志
 
+- **0.1.2** —— 模式 B 不再需要把原始私钥放进环境变量。Solana 直接用 `solana-keygen`
+  已经写好的 `~/.config/solana/id.json`；EVM 用加密的 V3 keystore，口令交互式提示输入。
+  `--keyfile` 可以显式指定其中任一种，相关设置也可以放进已 gitignore 的 `.env`。
+  环境变量里的原始私钥仍然可用于无人值守的自动化。密钥文件和 `.env` 必须
+  `chmod 600` 且不被 git 跟踪。
 - **0.1.1** —— 两条额度上限合并为一条：单笔付款不得超过 $1,100（按购买 $1,000
   额度加 5% 手续费来设定），单会话累计上限与 `--yes-large` 绕过开关均已移除。文档
   明确说明：用你自己的钱包付款不需要私钥，也不需要任何配置。

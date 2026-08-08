@@ -75,9 +75,10 @@ permitirte fijar un memo: si lo omites, el pago se pierde. **Lightning** paga
 la factura BOLT11 de `deposit.lnInvoice`; no hay ninguna dirección a la que
 enviar.
 
-Solo `--send` (Mode B) necesita una clave privada, de
-`ROZO_CHECKOUT_EVM_KEY` o `ROZO_CHECKOUT_SOL_KEY`, y cubre únicamente las
-cadenas EVM y Solana.
+Solo `--send` (Mode B) necesita una clave, y cubre únicamente las cadenas EVM y
+Solana: en Solana usa el `~/.config/solana/id.json` que `solana-keygen` ya creó,
+y en EVM un keystore cifrado cuya frase de contraseña se solicita. Una clave en
+bruto en el entorno queda para la automatización desatendida.
 
 ## 1. Cotizarlo (solo lectura, gratis)
 
@@ -181,22 +182,45 @@ Eso es todo el Modo A. Continuar en el paso 5.
 
 ### La forma opcional: dejar que el script pague (Modo B)
 
-Solo si se quiere que esta máquina firme por uno, y solo en cadenas EVM y Solana.
-Esta es la única parte que necesita una clave privada:
+Solo si se quiere que esta máquina firme, y únicamente en cadenas EVM y Solana.
+Esta es la única parte que necesita una clave.
+
+**Solana: usar el par de claves que ya se tiene.** Si alguna vez se ejecutó
+`solana-keygen`, `~/.config/solana/id.json` ya existe y se usa automáticamente:
 
 ```bash
-# Previsualizar exactamente lo que se firmaría — no firma nada
-ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
-  node scripts/dist/send-sol.js --rozo-payment-id <rozoPaymentId> --dry-run
-
-# Enviar de verdad. --send es obligatorio.
-ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
-  node scripts/dist/send-sol.js --rozo-payment-id <rozoPaymentId> --send
+node scripts/dist/send-sol.js --rozo-payment-id <rozoPaymentId> --send
 ```
 
-Usar `send-evm.js` con `ROZO_CHECKOUT_EVM_KEY` para Ethereum, BNB Chain,
-Polygon y Base. Un solo pago no puede superar los **$1,100**; por encima de eso,
-pagar desde la propia billetera como se explica arriba.
+**EVM: usar un keystore cifrado.** Exportar un keystore JSON V3 desde la
+billetera y apuntar a él. La frase de contraseña (passphrase) se solicita de
+forma interactiva; nunca se pasa como bandera:
+
+```bash
+ROZO_CHECKOUT_EVM_KEYSTORE=~/wallets/hot.json \
+  node scripts/dist/send-evm.js --rozo-payment-id <rozoPaymentId> --send
+```
+
+Cualquiera de los dos archivos se puede indicar explícitamente con
+`--keyfile <path>`, y `--dry-run` funciona con todas las fuentes: deriva la
+dirección y ejecuta todas las comprobaciones sin firmar nada.
+
+**Para automatización desatendida**, donde nadie puede escribir una frase de
+contraseña, una clave en bruto en el entorno sigue funcionando igual que antes:
+`ROZO_CHECKOUT_SOL_KEY` o `ROZO_CHECKOUT_EVM_KEY`, o bien
+`ROZO_CHECKOUT_KEYSTORE_PASSPHRASE` junto a un keystore. En una máquina que usa
+una persona, es preferible un archivo de claves.
+
+Estos ajustes también pueden vivir en un `.env` en el directorio desde el que se
+ejecuta (o `--env-file <path>`). Solo se leen de él las claves `ROZO_CHECKOUT_*`,
+se analiza como texto plano y nunca se pasa por un shell, y lo que ya esté en el
+entorno real tiene prioridad. **Añadir `.env` al `.gitignore`.**
+
+Un archivo de claves o un `.env` no debe ser legible por otros usuarios
+(`chmod 600`) ni estar bajo seguimiento de git. Ambos casos se rechazan, no se advierten.
+
+Un solo pago no puede superar **$1,100**; por encima de eso, pagar desde la
+propia billetera como arriba.
 
 ```json
 {

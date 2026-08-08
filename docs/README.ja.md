@@ -89,7 +89,7 @@ OpenRouter / Coinbase の決済リンクを支払うには、次を実行して�
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-ウォレット: どのウォレットでも構いません。**鍵は不要です。** `--send` を使う場合だけ
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** Solana CLI の鍵ペアまたは暗号化された keystore を使う `--send` の場合だけ
 環境変数の鍵が必要です。
 </details>
 
@@ -103,7 +103,7 @@ OpenCode もプロジェクトルートの `AGENTS.md` を読むため、上の 
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-ウォレット: どのウォレットでも構いません。**鍵は不要です。** `--send` を使う場合だけ
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** Solana CLI の鍵ペアまたは暗号化された keystore を使う `--send` の場合だけ
 環境変数の鍵が必要です。
 </details>
 
@@ -117,7 +117,7 @@ OpenRouter / Coinbase の決済リンクを支払うには、次を実行して�
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-ウォレット: どのウォレットでも構いません。**鍵は不要です。** `--send` を使う場合だけ
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** Solana CLI の鍵ペアまたは暗号化された keystore を使う `--send` の場合だけ
 環境変数の鍵が必要です。
 </details>
 
@@ -131,7 +131,7 @@ OpenRouter / Coinbase の決済リンクを支払うには、次を実行して�
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-ウォレット: どのウォレットでも構いません。**鍵は不要です。** `--send` を使う場合だけ
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** Solana CLI の鍵ペアまたは暗号化された keystore を使う `--send` の場合だけ
 環境変数の鍵が必要です。
 </details>
 
@@ -146,7 +146,7 @@ https://checkout.rozo.ai/llms.txt を取得したうえで、この OpenRouter �
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-ウォレット: どのウォレットでも構いません。**鍵は不要です。** `--send` を使う場合だけ
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** Solana CLI の鍵ペアまたは暗号化された keystore を使う `--send` の場合だけ
 環境変数の鍵が必要です。
 </details>
 
@@ -160,7 +160,7 @@ OpenClaw のヘッドレス入口は単発のタスクを実行するため、�
 openclaw agent exec "Pay this OpenRouter link with USDT on Solana by running: npx @rozoai/checkout pay <coinbase-link> --with usdt-solana"
 ```
 
-ウォレット: どのウォレットでも構いません。**鍵は不要です。** `--send` を使う場合だけ
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** Solana CLI の鍵ペアまたは暗号化された keystore を使う `--send` の場合だけ
 環境変数の鍵が必要です。
 </details>
 
@@ -175,7 +175,7 @@ Pi は BYOK のターミナルエージェントで、組み込みツールに `
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-ウォレット: どのウォレットでも構いません。**鍵は不要です。** `--send` を使う場合だけ
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** Solana CLI の鍵ペアまたは暗号化された keystore を使う `--send` の場合だけ
 環境変数の鍵が必要です。
 </details>
 
@@ -225,7 +225,7 @@ https://checkout.rozo.ai/llms.txt を自分のコンテキストに読み込み�
 シェルを持たないエージェントでも、HTTP リクエストが可能なら 4 つの公開エンドポイントを
 直接操作できます — [仕組み](how-it-works.md) を参照してください。
 
-ウォレット: どのウォレットでも構いません。**鍵は不要です。** `--send` を使う場合だけ
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** Solana CLI の鍵ペアまたは暗号化された keystore を使う `--send` の場合だけ
 環境変数の鍵が必要です。
 </details>
 
@@ -253,6 +253,12 @@ https://checkout.rozo.ai/llms.txt を自分のコンテキストに読み込み�
 
 ## 変更履歴
 
+- **0.1.2** — モード B で環境変数に生の秘密鍵を置く必要がなくなりました。Solana では
+  `solana-keygen` が既に作成した `~/.config/solana/id.json` を、EVM では暗号化された
+  V3 keystore（パスフレーズは対話的に入力）を使います。`--keyfile` でどちらも明示でき、
+  設定は gitignore した `.env` に置くこともできます。環境変数の生の鍵は無人自動化向けに
+  引き続き利用できます。鍵ファイルと `.env` は `chmod 600` かつ git 未追跡である必要が
+  あります。
 - **0.1.1** — 支出上限を 2 つから 1 つに変更しました。1 回の支払いは $1,100 を超えられず
   （$1,000 のクレジット購入とその 5% の手数料に合わせた値です）、セッション累計の上限と
   `--yes-large` による上書きは削除されました。自分のウォレットから支払う場合は鍵も設定も

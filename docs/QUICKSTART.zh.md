@@ -52,7 +52,7 @@ LINK="https://payments.coinbase.com/payment-links/pl_01YOURLINKID"
 
 有两种情况不一样。**Stellar** 走的是共享地址加 `receiverMemo` 的方式，所以你的付款来源必须能填写 memo——漏掉 memo，这笔钱就丢了。**闪电网络**付的是 `deposit.lnInvoice` 里的 BOLT11 invoice，没有可转账的地址。
 
-只有 `--send`（Mode B）需要私钥，从 `ROZO_CHECKOUT_EVM_KEY` 或 `ROZO_CHECKOUT_SOL_KEY` 读取，且仅支持 EVM 链和 Solana。
+只有 `--send`（Mode B）需要私钥，且仅支持 EVM 链和 Solana：Solana 直接用 `solana-keygen` 已经生成的 `~/.config/solana/id.json`，EVM 用加密的 keystore（口令交互式输入）。环境变量里的原始私钥保留给无人值守的自动化。
 
 ## 1. 报价（只读，免费）
 
@@ -150,21 +150,39 @@ BOLT11 字符串，`deposit.amount` 的单位是聪 (satoshis)。
 
 ### 可选的方式：让脚本替你付（模式 B）
 
-只有当你想让这台机器替你签名时才需要，而且仅限 EVM 链与 Solana。这是唯一需要私钥的
-部分：
+只有当你想让这台机器替你签名时才需要，而且只支持 EVM 链和 Solana。这是整个流程里
+唯一需要私钥的部分。
+
+**Solana —— 直接用你已有的密钥对。** 只要你跑过 `solana-keygen`，
+`~/.config/solana/id.json` 就已经存在，脚本会自动使用它：
 
 ```bash
-# 预览将要签名的确切内容 —— 不会签任何名
-ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
-  node scripts/dist/send-sol.js --rozo-payment-id <rozoPaymentId> --dry-run
-
-# 真正发送。--send 是必需的。
-ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
-  node scripts/dist/send-sol.js --rozo-payment-id <rozoPaymentId> --send
+node scripts/dist/send-sol.js --rozo-payment-id <rozoPaymentId> --send
 ```
 
-Ethereum、BNB Chain、Polygon 和 Base 用 `send-evm.js` 配合 `ROZO_CHECKOUT_EVM_KEY`。
-单笔付款不得超过 **$1,100**；超过这个数就按上面的方式用你自己的钱包付。
+**EVM —— 用加密的 keystore。** 从你的钱包导出一个 V3 JSON keystore 并指向它。
+口令 (passphrase) 会交互式提示输入，永远不会作为命令行参数传递：
+
+```bash
+ROZO_CHECKOUT_EVM_KEYSTORE=~/wallets/hot.json \
+  node scripts/dist/send-evm.js --rozo-payment-id <rozoPaymentId> --send
+```
+
+两种文件也都可以用 `--keyfile <path>` 显式指定；`--dry-run` 对所有来源都有效：
+它会推导出地址并跑完所有检查，但不签任何名。
+
+**用于无人值守的自动化**（没有人能输入口令的场景），环境变量里的原始私钥依然照旧
+可用 —— `ROZO_CHECKOUT_SOL_KEY` 或 `ROZO_CHECKOUT_EVM_KEY`，或者配合 keystore 使用
+`ROZO_CHECKOUT_KEYSTORE_PASSPHRASE`。在有人使用的机器上，优先用密钥文件。
+
+这些设置也可以放在你运行命令所在目录的 `.env` 里（或者用 `--env-file <path>` 指定）。
+其中只有 `ROZO_CHECKOUT_*` 开头的键会被读取，文件按纯文本解析、绝不交给 shell 执行，
+而且真实环境变量优先级更高。**记得把 `.env` 加进 `.gitignore`。**
+
+密钥文件和 `.env` 都不能被其他用户读取（`chmod 600`），也不能被 git 跟踪。这两种情况都会被
+直接拒绝，而不是只给个警告。
+
+单笔付款不得超过 **$1,100**；超过就按上面的方式用你自己的钱包付。
 
 ```json
 {

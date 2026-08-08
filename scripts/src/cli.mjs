@@ -463,6 +463,8 @@ async function cmdPay(opts) {
     if (opts.dryRun) sendArgs.push('--dry-run');
     else sendArgs.push('--send');
     if (opts.rpc) sendArgs.push('--rpc', opts.rpc);
+    if (opts.keyfile) sendArgs.push('--keyfile', opts.keyfile);
+    if (opts.envFile) sendArgs.push('--env-file', opts.envFile);
 
     if (!opts.json) out(dim(opts.dryRun ? '  Preparing (dry run)…' : '  Sending…'));
     const sent = await step(sender, sendArgs);
@@ -477,10 +479,14 @@ async function cmdPay(opts) {
       printMoneyWarning(sent.payload);
       return sent.exitCode;
     } else if (opts.dryRun) {
+      if (sent.payload.keySource) out(`  ${dim(`would sign with ${sent.payload.keySource}`)}`);
       out(`  ${green('✓')} Dry run only — nothing was signed or broadcast.`);
       out();
       return sent.exitCode;
     } else {
+      if (sent.payload.sent?.keySource) {
+        out(`  ${dim(`signing with ${sent.payload.sent.keySource}`)}`);
+      }
       out(`  ${green('✓')} Sent. tx ${sent.payload.txHash}`);
       out();
       savePrefs({ lastPreset: chosenPreset || presetFor(chainId, tokenSymbol) });

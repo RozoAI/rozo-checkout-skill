@@ -33,7 +33,10 @@ import {
 } from './lib/output.mjs';
 import { assertRozoPaymentId, maskAddress } from './lib/ids.mjs';
 import { chainName, decimalsFor } from './lib/amounts.mjs';
-import { readKey, assertNoTrackedDotEnv, EVM_KEY_ENV } from './lib/keys.mjs';
+import { assertNoTrackedDotEnv } from './lib/keys.mjs';
+import { planKeySource, loadKeySource } from './lib/key-source.mjs';
+import { applyDotenv } from './lib/dotenv.mjs';
+import { promptPassphrase } from './lib/passphrase.mjs';
 import { preflight, finalPayabilityCheck } from './lib/presend.mjs';
 import { claimSend, recordSendResult } from './lib/state.mjs';
 import { broadcastOutcome } from './lib/outcomes.mjs';
@@ -110,15 +113,17 @@ async function main(argv) {
   const rozoPaymentId = assertRozoPaymentId(args['rozo-payment-id'] || args._[0]);
 
   assertNoTrackedDotEnv();
-  const key = readKey(EVM_KEY_ENV);
-  if (!/^0x[0-9a-fA-F]{64}$/.test(key)) {
-    throw new SkillError(
-      'BAD_KEY_FORMAT',
-      `${EVM_KEY_ENV} must be a 0x-prefixed 32-byte hex private key.`,
-    );
-  }
-  const account = privateKeyToAccount(key);
+  // A .env in the working directory supplies the hot-wallet settings when they
+  // are not already in the real environment. Allow-listed keys only, parsed as
+  // plain text — never evaluated by a shell.
+  const dotenv = applyDotenv({ file: args['env-file'] });
+  // Where the key comes from is the only thing this resolves; every gate below
+  // runs identically whichever source wins.
+  const plan = planKeySource({ family: 'evm', keyfile: args.keyfile });
+  const loaded = await loadKeySource(plan, { family: 'evm', askPassphrase: promptPassphrase });
+  const account = privateKeyToAccount(loaded.privateKey);
   const sender = account.address;
+  const keySource = loaded.label;
 
   const dryRun = Boolean(args['dry-run']);
   const { source, state, expiry, amountAtomic, payment } = await preflight({
@@ -212,6 +217,9 @@ async function main(argv) {
         fromMasked: maskAddress(sender),
       },
       confirmedAt: state.confirmation?.confirmedAt ?? null,
+      keySource,
+      // Key NAMES only — a value from a .env is never echoed.
+      envFile: dotenv ? { path: dotenv.path, applied: dotenv.applied } : null,
       minutesOfSlack: Math.floor(expiry.msOfSlack / 60000),
       note: 'Nothing was signed or broadcast. Add --send (without --dry-run) to execute.',
     });
@@ -359,6 +367,7 @@ async function main(argv) {
         amount: source.amount,
         toMasked: maskAddress(to),
         fromMasked: maskAddress(sender),
+        keySource,
       },
       nextStep: `status.js --rozo-payment-id ${rozoPaymentId} --watch`,
       guidance: succeeded

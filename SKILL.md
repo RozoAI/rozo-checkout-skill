@@ -72,10 +72,19 @@ configuration at all.** The variables below exist only for Mode B (`--send`),
 where this machine signs on the user's behalf. Never ask a user to set one
 unless they have explicitly asked for Mode B.
 
+Mode B takes its signing key from the first of these that exists:
+`--keyfile <path>`; then `~/.config/solana/id.json` for Solana or
+`ROZO_CHECKOUT_EVM_KEYSTORE` for EVM; then a raw key in the environment. The
+environment variables below may also be set in a `.env` in the working
+directory (or `--env-file <path>`); only `ROZO_CHECKOUT_*` keys are read from
+it, and the real environment wins over the file.
+
 | Variable | Used by | Notes |
 |---|---|---|
-| `ROZO_CHECKOUT_EVM_KEY` | `send-evm.js` | **Mode B only.** 0x-prefixed 32-byte hex private key. |
-| `ROZO_CHECKOUT_SOL_KEY` | `send-sol.js` | **Mode B only.** base58 secret key or JSON byte array. |
+| `ROZO_CHECKOUT_EVM_KEYSTORE` | `send-evm.js` | **Mode B only.** Path to an encrypted V3 JSON keystore. Preferred over a raw key. |
+| `ROZO_CHECKOUT_KEYSTORE_PASSPHRASE` | `send-evm.js` | **Mode B only.** Keystore passphrase for unattended runs. On a terminal it is prompted instead. |
+| `ROZO_CHECKOUT_EVM_KEY` | `send-evm.js` | **Mode B only.** Raw 0x-prefixed 32-byte hex private key. For unattended automation. |
+| `ROZO_CHECKOUT_SOL_KEY` | `send-sol.js` | **Mode B only.** Raw base58 secret key or JSON byte array. For unattended automation; `~/.config/solana/id.json` is used first when present. |
 | `ROZO_CHECKOUT_RPC_<chainId>` | send scripts | optional RPC override, e.g. `ROZO_CHECKOUT_RPC_8453` |
 | `ROZO_CHECKOUT_STATE_DIR` | all | optional; defaults to `$HOME/.rozo-checkout/state` |
 
@@ -195,8 +204,11 @@ true) — never call it "X BTC".
 
 **Mode B (`--send`, optional) — this machine pays from a hot wallet.** Only
 when the user has asked for it. Only EVM chains and Solana. Only after the
-confirmation above. This is the only path that needs a key, read from the
-environment:
+confirmation above. This is the only path that needs a key. On Solana it uses
+the `~/.config/solana/id.json` that `solana-keygen` already wrote; on EVM an
+encrypted V3 keystore whose passphrase is prompted (never a flag). Either can
+be named with `--keyfile`. A raw key in the environment still works for
+unattended automation:
 
 ```bash
 # EVM (Ethereum, BNB Chain, Polygon, Base)
@@ -296,6 +308,13 @@ Then stop and hand off. Do not run any send script again.
 | `DECIMALS_MISMATCH` | the token's on-chain decimals disagree with expectations | do not sign — the amount could be off by orders of magnitude |
 | `CAP_PER_TX` | above the $1,100 per-payment limit for automated sending | no override exists; have the user pay from their own wallet (Mode A), which has no limit |
 | `UNSUPPORTED_SOURCE` | that coin/chain pair is not accepted | offer the table at the top of this file (the server's own list omits Lightning) |
+| `NO_KEY_SOURCE` | no keyfile, no `~/.config/solana/id.json`, no key env var | tell the user the three options; do not pick one for them |
+| `KEYFILE_PERMISSIONS` | the key file is readable by other users | have them run `chmod 600 <path>` |
+| `TRACKED_KEYFILE` | the key file is tracked by git | have them untrack it before signing with it |
+| `ENV_FILE_PERMISSIONS` | the `.env` is readable by other users | have them run `chmod 600 .env` |
+| `BAD_ENV_FILE` | a line in the `.env` is not `KEY=VALUE` | the error names the line number only; do not ask them to paste the line |
+| `KEYSTORE_BAD_PASSPHRASE` | wrong keystore passphrase | let them retry; never echo or store what they typed |
+| `KEYSTORE_PASSPHRASE_REQUIRED` | a keystore needs a passphrase but there is no terminal | set `ROZO_CHECKOUT_KEYSTORE_PASSPHRASE` for unattended runs |
 | `MISSING_KEY` | the key env var is not exported | ask the user to export it in their own shell |
 | `TRACKED_DOTENV` | a `.env` in this directory is tracked by git | untrack it before using hot-wallet keys here |
 | `EXPIRY_UNPARSABLE` | a deadline is missing or unreadable | abort; never treat an unknown deadline as "probably fine" |

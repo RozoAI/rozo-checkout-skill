@@ -44,6 +44,64 @@ export function readKey(envName) {
 const ENV_FILE_RE = /^\.env(\..+)?$/;
 const PUBLIC_ENV_RE = /^\.env\.(example|sample|template)$/;
 
+/**
+ * Is `dir` inside a git work tree? Fails CLOSED: git being unavailable or
+ * erroring in an uninterpretable way is a refusal, not a pass. The one
+ * interpretable failure — git saying it is not a repository — is a definite
+ * answer and returns false.
+ */
+function insideGitWorkTree(dir, whatFor) {
+  try {
+    return (
+      execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
+        cwd: dir,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        encoding: 'utf8',
+      }).trim() === 'true'
+    );
+  } catch (err) {
+    const stderr = String(err?.stderr || '');
+    if (/not a git repository|does not appear to be a git repository/i.test(stderr)) return false;
+    throw new SkillError(
+      'TRACKED_DOTENV_UNVERIFIABLE',
+      `git could not be consulted (${err?.code || 'unknown error'}), so it cannot be proved ` +
+        `that ${whatFor} is untracked. Refusing rather than assuming it is safe.`,
+    );
+  }
+}
+
+/**
+ * Refuse a secret-bearing file that git tracks. A key file committed to a
+ * repository is one `git push` from being public.
+ */
+export function assertNotTrackedByGit(file) {
+  const dir = path.dirname(path.resolve(file));
+  const base = path.basename(file);
+  if (!insideGitWorkTree(dir, 'this key file')) return { checked: true, tracked: false };
+
+  let out;
+  try {
+    out = execFileSync('git', ['ls-files', '-z', '--', base], {
+      cwd: dir,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf8',
+    });
+  } catch {
+    throw new SkillError(
+      'TRACKED_DOTENV_UNVERIFIABLE',
+      'git could not report whether this key file is tracked. Refusing to use it.',
+    );
+  }
+  if (out.split('\0').filter(Boolean).length) {
+    throw new SkillError(
+      'TRACKED_KEYFILE',
+      `${base} is tracked by git. A committed key is one push from being public — ` +
+        `untrack it (git rm --cached ${base}) and gitignore it before using it to sign.`,
+    );
+  }
+  return { checked: true, tracked: false };
+}
+
 export function assertNoTrackedDotEnv(cwd = process.cwd()) {
   let candidates = [];
   try {

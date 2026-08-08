@@ -62,8 +62,10 @@ already hold and pay from wherever it already lives.
 The payload is the same everywhere: the one-liner above, or point the agent at
 [llms.txt](llms.txt). Agents and scripts should always pass `--with` — the
 picker only appears on a terminal, and there is deliberately no default coin. **Paying from your own wallet never needs a key.** Only
-the optional `--send` flag signs locally, and only that flag reads
-`ROZO_CHECKOUT_EVM_KEY` / `ROZO_CHECKOUT_SOL_KEY`.
+the optional `--send` flag signs locally: on Solana it uses the
+`~/.config/solana/id.json` that `solana-keygen` already created, and on EVM an
+encrypted JSON keystore whose passphrase is prompted. A raw key in the
+environment (or a gitignored `.env`) still works for unattended automation.
 
 <details>
 <summary><b>Claude Code</b> — install the skill, or paste the one-liner</summary>
@@ -98,7 +100,8 @@ To pay an OpenRouter / Coinbase payment link, run:
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-Wallet: any wallet, no key. `--send` needs the env key.
+Wallet: any wallet, no key. `--send` signs locally using your Solana CLI
+keypair or an encrypted keystore.
 </details>
 
 <details>
@@ -111,7 +114,8 @@ above works unchanged. The shortest path is still the command itself:
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-Wallet: any wallet, no key. `--send` needs the env key.
+Wallet: any wallet, no key. `--send` signs locally using your Solana CLI
+keypair or an encrypted keystore.
 </details>
 
 <details>
@@ -124,7 +128,8 @@ To pay an OpenRouter / Coinbase payment link, run:
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-Wallet: any wallet, no key. `--send` needs the env key.
+Wallet: any wallet, no key. `--send` signs locally using your Solana CLI
+keypair or an encrypted keystore.
 </details>
 
 <details>
@@ -137,7 +142,8 @@ To pay an OpenRouter / Coinbase payment link, run:
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-Wallet: any wallet, no key. `--send` needs the env key.
+Wallet: any wallet, no key. `--send` signs locally using your Solana CLI
+keypair or an encrypted keystore.
 </details>
 
 <details>
@@ -151,7 +157,8 @@ Fetch https://checkout.rozo.ai/llms.txt, then pay this OpenRouter link:
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-Wallet: any wallet, no key. `--send` needs the env key.
+Wallet: any wallet, no key. `--send` signs locally using your Solana CLI
+keypair or an encrypted keystore.
 </details>
 
 <details>
@@ -164,7 +171,8 @@ trigger from a script or a chat channel:
 openclaw agent exec "Pay this OpenRouter link with USDT on Solana by running: npx @rozoai/checkout pay <coinbase-link> --with usdt-solana"
 ```
 
-Wallet: any wallet, no key. `--send` needs the env key.
+Wallet: any wallet, no key. `--send` signs locally using your Solana CLI
+keypair or an encrypted keystore.
 </details>
 
 <details>
@@ -178,7 +186,8 @@ Pay this OpenRouter link with USDT on Solana by running:
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-Wallet: any wallet, no key. `--send` needs the env key.
+Wallet: any wallet, no key. `--send` signs locally using your Solana CLI
+keypair or an encrypted keystore.
 </details>
 
 <details>
@@ -210,7 +219,7 @@ refused/failed (read `error.code`), `2` usage, `3` submitted but unconfirmed.
 Full walkthrough: [QUICKSTART](docs/QUICKSTART.md).
 
 Wallet: any wallet, no key. For hot-wallet sending see `send-evm.js` /
-`send-sol.js`, which read `ROZO_CHECKOUT_EVM_KEY` / `ROZO_CHECKOUT_SOL_KEY`.
+`send-sol.js`, which use your Solana CLI keypair or an encrypted keystore.
 </details>
 
 <details>
@@ -226,7 +235,8 @@ to pay this OpenRouter link: <coinbase-link>
 If the agent has no shell but can make HTTP requests, it can drive the four
 public endpoints directly — see [how it works](docs/how-it-works.md).
 
-Wallet: any wallet, no key. `--send` needs the env key.
+Wallet: any wallet, no key. `--send` signs locally using your Solana CLI
+keypair or an encrypted keystore.
 </details>
 
 ## Three rules worth knowing
@@ -253,6 +263,12 @@ The full list of what this refuses to do, and why, is in
 
 ## Changelog
 
+- **0.1.2** — Mode B no longer needs a raw private key in an environment
+  variable. On Solana it uses the `~/.config/solana/id.json` that
+  `solana-keygen` already wrote; on EVM an encrypted V3 keystore whose
+  passphrase is prompted. `--keyfile` names either explicitly, and settings can
+  come from a gitignored `.env`. Raw env keys still work for unattended
+  automation. Key files and `.env` must be `chmod 600` and untracked by git.
 - **0.1.1** — one spend limit instead of two: a single payment may not exceed
   $1,100 (sized for a $1,000 credit purchase plus its 5% fee), the cumulative
   session cap and the `--yes-large` override are removed. Docs make it explicit
