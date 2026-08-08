@@ -1,0 +1,75 @@
+# rozo-checkout
+
+> Pay an OpenRouter Coinbase Payment Link (payments.coinbase.com/payment-links/pl_* or
+> /payment-sessions/paymentSession_*) with BTC over Lightning, or USDT/USDC on Solana,
+> BNB Chain, Ethereum, Polygon, Base, or Stellar. Public HTTP endpoints, no API key.
+> The payer funds a one-time deposit address; a bridge and a funder wallet settle the
+> Coinbase link automatically. No discount: you pay the invoice amount, plus the
+> deposit normally carries a small bridge/source-chain fee on top.
+
+This file teaches the whole flow to any agent or script. Repo (scripts, safety rails,
+full docs): https://github.com/RozoAI/rozo-checkout-skill — see QUICKSTART.md.
+
+## Supported sources
+
+chainId "1" Ethereum (USDC, USDT) · "56" BNB Chain (USDC, USDT; 18-decimals) ·
+"137" Polygon (USDC, USDT) · "8453" Base (USDC) · "900" Solana (USDC, USDT) ·
+"1500" Stellar (USDC; deposit memo REQUIRED) · "lightning" (BTC; BOLT11 invoice,
+amounts in integer satoshis via source.amountUnit=="sats").
+Native SOL/ETH/BNB are NOT supported — stablecoins (or Lightning BTC) only.
+
+## Flow (4 HTTP calls, all public)
+
+1) Quote (read-only, safe):
+   curl -X POST https://apiserver.mpprouter.dev/v1/services/rozo-agent-api/quote-invoice \
+     -H 'content-type: application/json' \
+     -d '{"url":"https://payments.coinbase.com/payment-links/pl_XXXX"}'
+   -> { linkId, merchant, original, callerPays, discount:"0", quoteReceipt, ... }
+   callerPays always equals the invoice amount (discount is always "0").
+
+2) Create (or reuse) the order:
+   curl -X POST https://apiserver.mpprouter.dev/v1/services/rozo-agent-api/create-invoice \
+     -H 'content-type: application/json' \
+     -d '{"url":"https://payments.coinbase.com/payment-links/pl_XXXX",
+          "source":{"chainId":"900","tokenSymbol":"USDT"}}'
+   -> { ok, reused, linkId, rozoPaymentId, paymentLink, expiresAt, source, ... }
+   WARNING: if an unexpired order already exists for this link it is REUSED as-is,
+   even with a different chain/token than you asked for. Always verify the returned
+   source matches your request; abort on mismatch.
+
+3) Fetch authoritative deposit instructions (public, keyless GET):
+   curl https://intentapiv4.rozo.ai/functions/v1/payment-api/payments/<rozoPaymentId>
+   -> { status, expiresAt, source:{ receiverAddress, receiverMemo, amount, amountUnit,
+        lnInvoice, txHash, amountReceived, confirmedAt, ... }, destination:{...} }
+   Pay EXACTLY source.amount of the requested token on the requested chain to
+   source.receiverAddress (include receiverMemo when present — Stellar requires it).
+   For Lightning, pay the BOLT11 in source.lnInvoice (receiverAddress is empty).
+
+4) Poll until settled:
+   curl "https://apiserver.mpprouter.dev/v1/services/rozo-agent-api/invoice-status?payment_id=<linkId>"
+   and re-GET the payments/<rozoPaymentId> URL above. The Coinbase link is settled
+   only when the router reports paid / coinbase.settled — an intents status of
+   payment_completed alone is the bridge lifecycle, not final settlement.
+
+## Safety rules (encode these, they prevent fund loss)
+
+- Before paying, require: status == "payment_unpaid" AND source.txHash == null AND
+  source.amountReceived in {null,"0"} AND source.confirmedAt == null. Anything else
+  means the order is already funded — do NOT pay again; escalate for reconciliation.
+- Deposit addresses are one-time and quote-bound. Never reuse an address from an old
+  order, a cached response, or a document. Always re-fetch step 3 in the same run.
+- Respect expiry with margin: do not send if now > min(order expiresAt, Coinbase
+  link expiry) minus a safety margin (10 min EVM/Stellar, 5 min Solana; Lightning:
+  only pay a BOLT11 with >= 10 min validity left).
+- Re-check step 4 payability immediately before broadcasting a transaction: the
+  Coinbase link can be consumed by another payer at any moment.
+- Wrong token, wrong network, wrong amount, or paying twice is usually unrecoverable.
+- After any on-chain payment is detected, never retry into a new order and never
+  label the payment a normal failure — keep the tx hash and rozoPaymentId, keep
+  polling, and escalate if it stays stuck.
+
+## Errors
+
+409 = link already used · 410 = link expired · UNSUPPORTED_SOURCE = the response's
+"supported" object lists valid (chainId, tokenSymbol) pairs (Lightning is supported
+but omitted from that list) · RATE_LIMITED = per-IP creation cap, retry later.
