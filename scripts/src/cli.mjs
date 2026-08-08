@@ -245,7 +245,6 @@ async function cmdPay(opts) {
     const sendArgs = ['--rozo-payment-id', rozoPaymentId];
     if (opts.dryRun) sendArgs.push('--dry-run');
     else sendArgs.push('--send');
-    if (opts.yesLarge) sendArgs.push('--yes-large');
     if (opts.rpc) sendArgs.push('--rpc', opts.rpc);
 
     if (!opts.json) out(dim(opts.dryRun ? '  Preparing (dry run)…' : '  Sending…'));

@@ -21,11 +21,19 @@ calls with every safety rule already enforced:
 
 --with accepts usdt-solana, usdc-solana, usdt-bnb, usdc-bnb, usdt-ethereum,
 usdc-ethereum, usdt-polygon, usdc-polygon, usdc-base, usdc-stellar, btc-lightning
-(or raw: --chain 900 --token USDT). Flags: --send (pay from a hot wallet, keys from
-ROZO_CHECKOUT_EVM_KEY / ROZO_CHECKOUT_SOL_KEY, never from argv), --yes (skip the
-interactive confirm; required when stdin is not a TTY), --dry-run, --json (exactly
-one JSON object on stdout), --no-watch, --timeout <s>. Exit codes: 0 success,
-1 refused/failed (read error.code), 2 usage, 3 submitted but unconfirmed.
+(or raw: --chain 900 --token USDT).
+
+DEFAULT PATH NEEDS NO KEY: `pay` prints a deposit address for the user to pay from
+any wallet. No private key, no environment variable, no configuration. Only the
+optional --send flag signs locally, and only that flag reads
+ROZO_CHECKOUT_EVM_KEY / ROZO_CHECKOUT_SOL_KEY (from the environment, never argv).
+With --send, one limit applies: a single payment may not exceed $1,100, with no
+override; larger invoices go through the keyless path.
+
+Other flags: --yes (skip the interactive confirm; required when stdin is not a
+TTY), --dry-run, --json (exactly one JSON object on stdout), --no-watch,
+--timeout <s>. Exit codes: 0 success, 1 refused/failed (read error.code),
+2 usage, 3 submitted but unconfirmed.
 
 `pay` withholds the full deposit address until you confirm, then prints it as a
 copy-pastable block. Creating an order moves no money; an unfunded order expires.
@@ -62,7 +70,9 @@ Native SOL/ETH/BNB are NOT supported — stablecoins (or Lightning BTC) only.
    -> { status, expiresAt, source:{ receiverAddress, receiverMemo, amount, amountUnit,
         lnInvoice, txHash, amountReceived, confirmedAt, ... }, destination:{...} }
    Pay EXACTLY source.amount of the requested token on the requested chain to
-   source.receiverAddress (include receiverMemo when present — Stellar requires it).
+   source.receiverAddress, including every other field the block carries (Stellar
+   routes on a shared hub address plus source.receiverMemo, so omitting the memo
+   loses the payment).
    For Lightning, pay the BOLT11 in source.lnInvoice (receiverAddress is empty).
 
 4) Poll until settled:

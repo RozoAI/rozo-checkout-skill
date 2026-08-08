@@ -246,7 +246,7 @@ export function recordConfirmation(rozoPaymentId, { source, invoiceAmount, tier 
  * even merely claimed) — we never blind-retry, because a claimed-but-unknown
  * send may well be on chain.
  */
-export function claimSend(rozoPaymentId, intent, { allowLarge = false, skipCaps = false } = {}) {
+export function claimSend(rozoPaymentId, intent, { skipCaps = false } = {}) {
   return withLock(() => {
     const state = readState(rozoPaymentId);
     if (!state) {
@@ -265,11 +265,7 @@ export function claimSend(rozoPaymentId, intent, { allowLarge = false, skipCaps 
       );
     }
 
-    // The cap must be evaluated and consumed inside the same lock as the
-    // claim, otherwise two processes can each see themselves as under budget.
-    const caps = skipCaps
-      ? null
-      : assertSpendCapsUnlocked(state.invoiceAmount, { allowLarge, excludeId: rozoPaymentId });
+    const caps = skipCaps ? null : assertPaymentLimit(state.invoiceAmount);
 
     const next = {
       ...state,
@@ -346,64 +342,40 @@ export function findByLinkId(linkId) {
   return best;
 }
 
-/** Cumulative USD already claimed in this state dir, for the per-session cap. */
-export function sessionSpendUsd({ excludeId = null } = {}) {
-  const dir = stateRoot();
-  let files = [];
-  try {
-    files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
-  } catch {
-    return 0;
-  }
-  let total = 0;
-  for (const f of files) {
-    if (excludeId && f === `${excludeId}.json`) continue;
-    try {
-      const s = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-      if (s?.send && ['claimed', 'submitted', 'confirmed', 'ambiguous'].includes(s.send.status)) {
-        const usd = Number(s.invoiceAmount);
-        // An unreadable amount on a real claim must not count as zero.
-        total += Number.isFinite(usd) ? usd : MAX_TX_USD;
-      }
-    } catch {
-      // A corrupt neighbour must not silently lower the running total, so we
-      // count it as the maximum single-tx cap.
-      total += MAX_TX_USD;
-    }
-  }
-  return total;
-}
-
-export const MAX_TX_USD = 100;
-export const MAX_SESSION_USD = 200;
+/**
+ * The one hot-wallet limit (PLAN §5.3, simplified 2026-08).
+ *
+ * Exactly one rule: a single payment may not exceed MAX_PAYMENT_USD. There is
+ * no cumulative session cap and no override flag — an amount above the limit
+ * is a hard refusal, and the answer is to pay it from a wallet you control
+ * (Mode A) rather than from an automated hot wallet.
+ *
+ * $1,100 is sized to clear the largest real invoice on this route (a $1,000
+ * credit purchase plus its 5% fee) with headroom.
+ */
+export const MAX_PAYMENT_USD = 1100;
 
 /**
- * Hot-wallet spend caps (PLAN §5.3). Assumes the caller already holds the
- * lock — use `assertSpendCaps` (or `claimSend`) from outside.
+ * Depends only on this order's own amount, so it needs no lock and no shared
+ * state. claimSend still calls it inside the lock, which is harmless.
  */
-export function assertSpendCapsUnlocked(invoiceUsd, { allowLarge = false, excludeId = null } = {}) {
+export function assertPaymentLimit(invoiceUsd) {
+  // Number(null) and Number('') are both 0, which would read as a free
+  // payment. A missing amount is a refusal, not a zero.
+  if (invoiceUsd === null || invoiceUsd === undefined || String(invoiceUsd).trim() === '') {
+    throw new SkillError('BAD_INVOICE_AMOUNT', 'Cannot evaluate the payment limit without a USD amount.');
+  }
   const usd = Number(invoiceUsd);
   if (!Number.isFinite(usd) || usd < 0) {
-    throw new SkillError('BAD_INVOICE_AMOUNT', 'Cannot evaluate spend caps without a USD amount.');
+    throw new SkillError('BAD_INVOICE_AMOUNT', 'Cannot evaluate the payment limit without a USD amount.');
   }
-  if (usd > MAX_TX_USD && !allowLarge) {
+  if (usd > MAX_PAYMENT_USD) {
     throw new SkillError(
       'CAP_PER_TX',
-      `$${usd} exceeds the $${MAX_TX_USD} per-transaction cap. Re-run with --yes-large to override.`,
+      `$${usd} is above the $${MAX_PAYMENT_USD} per-payment limit for automated sending. ` +
+        'This limit has no override. Pay this invoice from a wallet you control instead — ' +
+        'that path needs no key and has no limit.',
     );
   }
-  const prior = sessionSpendUsd({ excludeId });
-  if (prior + usd > MAX_SESSION_USD) {
-    throw new SkillError(
-      'CAP_SESSION',
-      `This send would bring cumulative spend to $${(prior + usd).toFixed(2)}, past the ` +
-        `$${MAX_SESSION_USD} session cap. Clear or archive the state directory to start a new session.`,
-    );
-  }
-  return { priorUsd: prior, totalUsd: prior + usd };
-}
-
-/** Lock-taking wrapper, for callers that only want to preview the caps. */
-export function assertSpendCaps(invoiceUsd, opts = {}) {
-  return withLock(() => assertSpendCapsUnlocked(invoiceUsd, opts));
+  return { usd, limitUsd: MAX_PAYMENT_USD };
 }

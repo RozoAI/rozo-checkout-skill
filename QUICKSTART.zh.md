@@ -14,7 +14,7 @@ npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLI
 
 这一条命令会替你跑完下面的每一步：报价、创建订单、核对、确认、充值指令，然后一直轮询到结清。`--with` 可选的币种有：`usdt-solana`、`usdc-solana`、`usdt-bnb`、`usdc-bnb`、`usdt-ethereum`、`usdc-ethereum`、`usdt-polygon`、`usdc-polygon`、`usdc-base`、`usdc-stellar`、`btc-lightning`。
 
-加 `--send` 就用热钱包付款而不是用你自己的钱包，加 `--json` 输出机器可读格式。
+默认情况下它只是打印一个地址，让你用任意钱包去付 —— 不需要私钥，也不需要任何配置。只有当你想让 CLI 改从热钱包签名时才加 `--send`；加 `--json` 输出机器可读格式。
 
 本页剩下的内容就是同一套流程，只不过一步一步来 —— 如果出了问题，或者你想自己写脚本，那才需要看它们。
 
@@ -74,8 +74,7 @@ node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT
   "display": {
     "chain": "Solana",
     "amount": "5.021000 USDT",
-    "payToMasked": "9WzDXw...AWWM",
-    "memoRequirement": "This deposit REQUIRES the memo/tag below. ..."
+    "payToMasked": "9WzDXw...AWWM"
   },
   "expiry": { "effectiveDeadlineIso": "2026-08-08T11:00:00.000Z", "minutesOfSlack": 55 }
 }
@@ -109,16 +108,29 @@ node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT --confi
 }
 ```
 
-对于 Lightning，`deposit.lnInvoice` 里是供扫码的 BOLT11 字符串，`deposit.amount`
-的单位是聪 (satoshis)。
+严格按这个信息块给出的字段来发送。对于 Lightning，`deposit.lnInvoice` 里是供扫码的
+BOLT11 字符串，`deposit.amount` 的单位是聪 (satoshis)。
 
 ## 4. 付款
 
-二选一。**模式 A** —— 用你自己的钱包付：在 `deposit.chain` 上，把恰好
-`deposit.amount` 数量的 `deposit.tokenSymbol` 发送到 `deposit.receiverAddress`，
-如果有 `deposit.receiverMemo` 就带上它。地址直接从 JSON 里复制；绝不要手打重输。
+### 最简单的方式：用你自己的钱包
 
-**模式 B** —— 让脚本从热钱包付款（仅限 EVM 与 Solana）：
+**无需私钥、无需环境变量、无需任何配置。** 打开任意一个钱包，严格按上面那个
+`deposit` 信息块所写的去发送：
+
+- `amount` 数量的 `tokenSymbol`，
+- 在 `chain` 这条链上，
+- 发往 `receiverAddress` —— 从 JSON 里复制，绝不要手打重输。
+
+如果这个信息块里还有别的字段，比如 `receiverMemo`，就原样一并带上；在那条链上它属于
+地址的一部分。对于 Lightning，改为扫码或粘贴 `deposit.lnInvoice`。
+
+模式 A 到这里就全部结束了。直接跳到第 5 步。
+
+### 可选的方式：让脚本替你付（模式 B）
+
+只有当你想让这台机器替你签名时才需要，而且仅限 EVM 链与 Solana。这是唯一需要私钥的
+部分：
 
 ```bash
 # 预览将要签名的确切内容 —— 不会签任何名
@@ -131,7 +143,7 @@ ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
 ```
 
 Ethereum、BNB Chain、Polygon 和 Base 用 `send-evm.js` 配合 `ROZO_CHECKOUT_EVM_KEY`。
-额度上限：单笔 $100，单会话 $200。
+单笔付款不得超过 **$1,100**；超过这个数就按上面的方式用你自己的钱包付。
 
 ```json
 {

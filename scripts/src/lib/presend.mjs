@@ -16,7 +16,7 @@
  *   EXPIRY_MARGIN      -> not enough time left on this chain
  *   LINK_NO_LONGER_PAYABLE / LINK_PAYABILITY_UNKNOWN -> Coinbase state
  *   BLACKLIST_UNAVAILABLE / BLACKLIST_HIT -> compromised-address rails
- *   CAP_PER_TX / CAP_SESSION -> hot-wallet spend caps (charged at claim time)
+ *   CAP_PER_TX -> the single per-payment limit (charged at claim time)
  *
  * `finalPayabilityCheck` is exported separately and MUST be called again as the
  * very last step before signing, after all the slow RPC preparation.
@@ -35,7 +35,6 @@ import { SkillError } from './output.mjs';
  * @param {string} args.rozoPaymentId
  * @param {string} args.expectFamily   "evm" | "solana"
  * @param {string} args.senderAddress  derived from the env key, never printed as a key
- * @param {boolean} [args.allowLarge]
  * @returns {Promise<{payment, source, state, expiry, caps, blacklist}>}
  */
 export async function preflight({
@@ -173,8 +172,8 @@ export async function preflight({
     blacklist,
   );
 
-  // 8. Spend caps are charged atomically at claim time (see claimSend), not
-  //    here, so two concurrent runs cannot both pass a preview check.
+  // 8. The payment limit is charged atomically at claim time (see claimSend),
+  //    not here, so two concurrent runs cannot both pass a preview check.
 
   return {
     payment,

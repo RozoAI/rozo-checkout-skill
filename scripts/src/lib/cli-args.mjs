@@ -99,7 +99,6 @@ const BOOLEAN_FLAGS = new Set([
   'help',
   'version',
   'dry-run',
-  'yes-large',
   'no-watch',
   'watch',
 ]);
@@ -234,7 +233,6 @@ export function parseCliArgs(argv) {
     send: flags.send === true,
     yes: flags.yes === true,
     dryRun: flags['dry-run'] === true,
-    yesLarge: flags['yes-large'] === true,
     watch: flags['no-watch'] !== true,
     timeout,
     rpc: flags.rpc,
@@ -255,13 +253,17 @@ COINS (--with)
   usdc-base     usdc-stellar  btc-lightning
   or give them raw:  --chain 900 --token USDT
 
+By default, pay just prints an address for you to pay from any wallet:
+no private key, no environment variable, no configuration.
+
 OPTIONS
   --with <coin>   which coin to pay with (see above)
-  --send          after you confirm, pay from a hot wallet instead of your own
-                  wallet. Needs ROZO_CHECKOUT_EVM_KEY or ROZO_CHECKOUT_SOL_KEY.
+  --send          optional. Sign from a hot wallet instead of paying yourself.
+                  This is the only option that needs a key, read from
+                  ROZO_CHECKOUT_EVM_KEY or ROZO_CHECKOUT_SOL_KEY. A single
+                  payment may not exceed $1,100; there is no override.
   --yes, -y       skip the interactive confirmation (required when not a TTY)
   --dry-run       with --send, show what would be signed and sign nothing
-  --yes-large     allow a single payment above the $100 cap
   --json, -j      machine-readable output
   --no-watch      stop after showing the deposit instructions
   --timeout <s>   how long to poll for settlement (default 900)

@@ -17,8 +17,9 @@ npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLI
 `usdc-solana`、`usdt-bnb`、`usdc-bnb`、`usdt-ethereum`、`usdc-ethereum`、
 `usdt-polygon`、`usdc-polygon`、`usdc-base`、`usdc-stellar`、`btc-lightning`。
 
-自分のウォレットではなくホットウォレットから支払う場合は `--send` を、機械可読な出力が
-必要な場合は `--json` を追加してください。
+既定では、任意のウォレットから支払うためのアドレスを表示するだけです — 鍵も設定も
+不要です。CLI にホットウォレットから署名させたい場合にだけ `--send` を、機械可読な
+出力が必要な場合は `--json` を追加してください。
 
 このページの残りは、同じフローを 1 ステップずつ実行するものです。うまくいかないときや、
 自分でスクリプトを書くときは、こちらが必要になります。
@@ -79,8 +80,7 @@ node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT
   "display": {
     "chain": "Solana",
     "amount": "5.021000 USDT",
-    "payToMasked": "9WzDXw...AWWM",
-    "memoRequirement": "This deposit REQUIRES the memo/tag below. ..."
+    "payToMasked": "9WzDXw...AWWM"
   },
   "expiry": { "effectiveDeadlineIso": "2026-08-08T11:00:00.000Z", "minutesOfSlack": 55 }
 }
@@ -115,17 +115,31 @@ node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT --confi
 }
 ```
 
-Lightning の場合、`deposit.lnInvoice` にスキャン用の BOLT11 文字列が入り、
-`deposit.amount` は satoshi 単位になります。
+このブロックが示すフィールドを、そのとおりに送金してください。Lightning の場合、
+`deposit.lnInvoice` にスキャン用の BOLT11 文字列が入り、`deposit.amount` は
+satoshi 単位になります。
 
 ## 4. 支払う
 
-どちらか一方を選びます。**モード A** — 自分のウォレットから支払う: `deposit.chain` 上で、
-`deposit.tokenSymbol` をちょうど `deposit.amount` だけ `deposit.receiverAddress` へ送金します。
-`deposit.receiverMemo` がある場合はそれも付けてください。アドレスは JSON から
-コピーしてください。決して手入力し直さないでください。
+### 簡単な方法: 自分のウォレットから
 
-**モード B** — スクリプトにホットウォレットから支払わせる（EVM と Solana のみ）:
+**秘密鍵も環境変数も設定も一切不要です。** 好きなウォレットを開き、上の `deposit`
+ブロックが示すとおりに送金してください:
+
+- `tokenSymbol` を `amount` だけ、
+- `chain` の上で、
+- `receiverAddress` へ — JSON からコピーし、決して手入力し直さないでください。
+
+ブロックに `receiverMemo` などそれ以外のフィールドが含まれている場合は、示されたとおりに
+そのまま付けてください。それはそのチェーンにおけるアドレスの一部です。Lightning の場合は
+代わりに `deposit.lnInvoice` をスキャンするか貼り付けてください。
+
+モード A はこれで全部です。ステップ 5 へ進んでください。
+
+### 任意の方法: スクリプトに支払わせる（モード B）
+
+このマシンに署名させたい場合にだけ、そして EVM チェーンと Solana でのみ使えます。
+秘密鍵が必要なのはこの部分だけです:
 
 ```bash
 # 署名される内容を正確にプレビューします — 署名は一切行いません
@@ -138,7 +152,8 @@ ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
 ```
 
 Ethereum、BNB Chain、Polygon、Base では `send-evm.js` を `ROZO_CHECKOUT_EVM_KEY` と
-併せて使います。上限: トランザクションごとに $100、セッションごとに $200。
+併せて使います。1 回の支払いは **$1,100** を超えられません。それを超える場合は、上記の
+とおり自分のウォレットから支払ってください。
 
 ```json
 {

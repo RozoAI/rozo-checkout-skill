@@ -30,9 +30,9 @@ const {
   findByLinkId,
   statePath,
   stateRoot,
-  assertSpendCaps,
+  assertPaymentLimit,
   withLock,
-  MAX_TX_USD,
+  MAX_PAYMENT_USD,
 } = await import('../scripts/src/lib/state.mjs');
 
 const ORDER = {
@@ -118,19 +118,82 @@ test('state paths cannot be built from hostile ids', () => {
   });
 });
 
-test('spend caps: per transaction and per session', () => {
+test('the payment limit is a single hard ceiling at $1,100', () => {
   withTempStateDir(() => {
-    assert.doesNotThrow(() => assertSpendCaps('5.00'));
-    assert.throws(() => assertSpendCaps(String(MAX_TX_USD + 1)), (e) => e.code === 'CAP_PER_TX');
-    assert.doesNotThrow(() => assertSpendCaps(String(MAX_TX_USD + 1), { allowLarge: true }));
+    assert.equal(MAX_PAYMENT_USD, 1100);
 
-    // Two claimed sends of $90 each put the session over the $200 ceiling.
-    for (const [i, amount] of [['a', '90'], ['b', '90']]) {
-      const id = `1111111${i === 'a' ? 'a' : 'b'}-2222-4333-8444-555555555555`;
-      createOrderRecord({ ...ORDER, rozoPaymentId: id, invoiceAmount: amount });
-      claimSend(id, INTENT);
+    // The case this limit was sized for: a $1,000 credit purchase plus its 5%
+    // fee. It must pass.
+    assert.doesNotThrow(() => assertPaymentLimit('1050'));
+    assert.doesNotThrow(() => assertPaymentLimit('1050.00'));
+    assert.deepEqual(assertPaymentLimit('1050'), { usd: 1050, limitUsd: 1100 });
+
+    // Everyday amounts pass.
+    for (const ok of ['0', '5.00', '99.99', '100', '250', '999.99']) {
+      assert.doesNotThrow(() => assertPaymentLimit(ok), ok);
     }
-    assert.throws(() => assertSpendCaps('90'), (e) => e.code === 'CAP_SESSION');
-    assert.doesNotThrow(() => assertSpendCaps('5'));
+
+    // The boundary itself is allowed; a cent over is not.
+    assert.doesNotThrow(() => assertPaymentLimit('1100'));
+    assert.doesNotThrow(() => assertPaymentLimit('1100.00'));
+    assert.throws(() => assertPaymentLimit('1100.01'), (e) => e.code === 'CAP_PER_TX');
+    assert.throws(() => assertPaymentLimit('1101'), (e) => e.code === 'CAP_PER_TX');
+    assert.throws(() => assertPaymentLimit('5000'), (e) => e.code === 'CAP_PER_TX');
+  });
+});
+
+test('the limit has no override and no session component', async () => {
+  // There is exactly one rule. Nothing may re-enable an override.
+  const mod = await import('../scripts/src/lib/state.mjs');
+  assert.equal(mod.MAX_SESSION_USD, undefined, 'the session cap must be gone');
+  assert.equal(mod.sessionSpendUsd, undefined, 'session accounting must be gone');
+  assert.equal(mod.assertSpendCaps, undefined, 'the old caps API must be gone');
+
+  // No option object can lift the ceiling.
+  for (const opts of [{ allowLarge: true }, { yesLarge: true }, { force: true }]) {
+    assert.throws(
+      () => assertPaymentLimit('2000', opts),
+      (e) => e.code === 'CAP_PER_TX',
+      JSON.stringify(opts),
+    );
+  }
+
+  // The refusal must point at the keyless path rather than at a flag.
+  const err = (() => {
+    try {
+      assertPaymentLimit('2000');
+    } catch (e) {
+      return e;
+    }
+  })();
+  assert.match(err.message, /no override/i);
+  assert.doesNotMatch(err.message, /--yes-large/);
+});
+
+test('a bad amount is refused rather than treated as zero', () => {
+  for (const bad of [undefined, null, '', 'abc', '-1', NaN]) {
+    assert.throws(() => assertPaymentLimit(bad), (e) => e.code === 'BAD_INVOICE_AMOUNT', String(bad));
+  }
+});
+
+test('claimSend enforces the limit from the recorded invoice amount', () => {
+  withTempStateDir(() => {
+    createOrderRecord({ ...ORDER, invoiceAmount: '1050' });
+    assert.doesNotThrow(() => claimSend(ID, INTENT));
+  });
+  withTempStateDir(() => {
+    const big = `2222222a-2222-4333-8444-555555555555`;
+    createOrderRecord({ ...ORDER, rozoPaymentId: big, invoiceAmount: '1200' });
+    assert.throws(() => claimSend(big, INTENT), (e) => e.code === 'CAP_PER_TX');
+    // A refused claim must not leave a claim behind.
+    assert.equal(readState(big).send, null);
+  });
+  withTempStateDir(() => {
+    // Two separate large-but-legal payments both succeed: no session ceiling.
+    for (const n of ['a', 'b', 'c']) {
+      const id = `3333333${n}-2222-4333-8444-555555555555`;
+      createOrderRecord({ ...ORDER, rozoPaymentId: id, invoiceAmount: '1000' });
+      assert.doesNotThrow(() => claimSend(id, INTENT), `payment ${n}`);
+    }
   });
 });

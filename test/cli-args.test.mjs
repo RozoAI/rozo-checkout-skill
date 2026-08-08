@@ -115,7 +115,6 @@ test('pay: flags', () => {
     '--no-watch',
     '--timeout',
     '120',
-    '--yes-large',
     '--rpc',
     'https://rpc.example.com',
   ]);
@@ -124,7 +123,6 @@ test('pay: flags', () => {
   assert.equal(r.json, true);
   assert.equal(r.watch, false);
   assert.equal(r.timeout, 120);
-  assert.equal(r.yesLarge, true);
   assert.equal(r.rpc, 'https://rpc.example.com');
   assert.deepEqual(r.source, { chainId: '8453', tokenSymbol: 'USDC' });
 });
@@ -188,6 +186,14 @@ test('help and version', () => {
   }
   assert.equal(parseCliArgs(['--version']).command, 'version');
   assert.equal(parseCliArgs(['-v']).command, 'version');
+});
+
+test('--yes-large no longer exists: the payment limit has no override', () => {
+  assert.throws(
+    () => parseCliArgs(['pay', 'pl_01ABC', '--with', 'usdt-solana', '--yes-large']),
+    (e) => e.code === 'UNKNOWN_FLAG',
+  );
+  assert.doesNotMatch(HELP, /yes-large/);
 });
 
 test('unknown commands and flags are refused with a usable message', () => {

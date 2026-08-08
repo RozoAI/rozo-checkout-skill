@@ -10899,7 +10899,7 @@ function depositDigest(source) {
   });
   return crypto3.createHash("sha256").update(canonical, "utf8").digest("hex");
 }
-function claimSend(rozoPaymentId, intent, { allowLarge = false, skipCaps = false } = {}) {
+function claimSend(rozoPaymentId, intent, { skipCaps = false } = {}) {
   return withLock(() => {
     const state = readState(rozoPaymentId);
     if (!state) {
@@ -10915,7 +10915,7 @@ function claimSend(rozoPaymentId, intent, { allowLarge = false, skipCaps = false
         { send: state.send }
       );
     }
-    const caps = skipCaps ? null : assertSpendCapsUnlocked(state.invoiceAmount, { allowLarge, excludeId: rozoPaymentId });
+    const caps = skipCaps ? null : assertPaymentLimit(state.invoiceAmount);
     const next = {
       ...state,
       updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -10958,50 +10958,22 @@ function recordSendResult(rozoPaymentId, { status, txHash = null, note = null })
     return next;
   });
 }
-function sessionSpendUsd({ excludeId = null } = {}) {
-  const dir = stateRoot();
-  let files = [];
-  try {
-    files = fs3.readdirSync(dir).filter((f) => f.endsWith(".json"));
-  } catch {
-    return 0;
+var MAX_PAYMENT_USD = 1100;
+function assertPaymentLimit(invoiceUsd) {
+  if (invoiceUsd === null || invoiceUsd === void 0 || String(invoiceUsd).trim() === "") {
+    throw new SkillError("BAD_INVOICE_AMOUNT", "Cannot evaluate the payment limit without a USD amount.");
   }
-  let total = 0;
-  for (const f of files) {
-    if (excludeId && f === `${excludeId}.json`) continue;
-    try {
-      const s = JSON.parse(fs3.readFileSync(path2.join(dir, f), "utf8"));
-      if (s?.send && ["claimed", "submitted", "confirmed", "ambiguous"].includes(s.send.status)) {
-        const usd = Number(s.invoiceAmount);
-        total += Number.isFinite(usd) ? usd : MAX_TX_USD;
-      }
-    } catch {
-      total += MAX_TX_USD;
-    }
-  }
-  return total;
-}
-var MAX_TX_USD = 100;
-var MAX_SESSION_USD = 200;
-function assertSpendCapsUnlocked(invoiceUsd, { allowLarge = false, excludeId = null } = {}) {
   const usd = Number(invoiceUsd);
   if (!Number.isFinite(usd) || usd < 0) {
-    throw new SkillError("BAD_INVOICE_AMOUNT", "Cannot evaluate spend caps without a USD amount.");
+    throw new SkillError("BAD_INVOICE_AMOUNT", "Cannot evaluate the payment limit without a USD amount.");
   }
-  if (usd > MAX_TX_USD && !allowLarge) {
+  if (usd > MAX_PAYMENT_USD) {
     throw new SkillError(
       "CAP_PER_TX",
-      `$${usd} exceeds the $${MAX_TX_USD} per-transaction cap. Re-run with --yes-large to override.`
+      `$${usd} is above the $${MAX_PAYMENT_USD} per-payment limit for automated sending. This limit has no override. Pay this invoice from a wallet you control instead \u2014 that path needs no key and has no limit.`
     );
   }
-  const prior = sessionSpendUsd({ excludeId });
-  if (prior + usd > MAX_SESSION_USD) {
-    throw new SkillError(
-      "CAP_SESSION",
-      `This send would bring cumulative spend to $${(prior + usd).toFixed(2)}, past the $${MAX_SESSION_USD} session cap. Clear or archive the state directory to start a new session.`
-    );
-  }
-  return { priorUsd: prior, totalUsd: prior + usd };
+  return { usd, limitUsd: MAX_PAYMENT_USD };
 }
 
 // scripts/src/lib/presend.mjs
@@ -22454,8 +22426,7 @@ async function main(argv) {
       memo: null,
       nonceBefore,
       expectedTxHash
-    },
-    { allowLarge: Boolean(args["yes-large"]) }
+    }
   );
   let txHash = null;
   try {

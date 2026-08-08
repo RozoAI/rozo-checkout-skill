@@ -284,7 +284,6 @@ async function main(argv) {
       memo: source.receiverMemo ?? null,
       expectedTxHash: signature,
     },
-    { allowLarge: Boolean(args['yes-large']) },
   );
 
   let sent = null;

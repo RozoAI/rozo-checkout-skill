@@ -67,10 +67,15 @@ to rebuild them (`npm run build`).
 
 ## Environment variables
 
+**Mode A — the default path — needs no key, no environment variable and no
+configuration at all.** The variables below exist only for Mode B (`--send`),
+where this machine signs on the user's behalf. Never ask a user to set one
+unless they have explicitly asked for Mode B.
+
 | Variable | Used by | Notes |
 |---|---|---|
-| `ROZO_CHECKOUT_EVM_KEY` | `send-evm.js` | 0x-prefixed 32-byte hex private key. Mode B only. |
-| `ROZO_CHECKOUT_SOL_KEY` | `send-sol.js` | base58 secret key or JSON byte array. Mode B only. |
+| `ROZO_CHECKOUT_EVM_KEY` | `send-evm.js` | **Mode B only.** 0x-prefixed 32-byte hex private key. |
+| `ROZO_CHECKOUT_SOL_KEY` | `send-sol.js` | **Mode B only.** base58 secret key or JSON byte array. |
 | `ROZO_CHECKOUT_RPC_<chainId>` | send scripts | optional RPC override, e.g. `ROZO_CHECKOUT_RPC_8453` |
 | `ROZO_CHECKOUT_STATE_DIR` | all | optional; defaults to `$HOME/.rozo-checkout/state` |
 
@@ -140,7 +145,7 @@ Coinbase link is still payable.
 
 **Without `--confirm` the full deposit address, memo and BOLT11 are withheld**
 (`deposit: null`, `depositWithheld: true`). You get everything you need to ask
-the user — masked address, exact amount, memo requirement, both expiries, the
+the user — masked address, exact amount, both expiries, the
 reused flag — and nothing that could be paid by accident.
 
 Any non-zero exit here means **do not fund the order**. See Troubleshooting.
@@ -155,7 +160,6 @@ About to pay:
   Invoice:    {invoice.amount} USD   (you pay the full amount, no discount)
   Send:       {display.amount} on {display.chain}
   To:         {display.payToMasked}                <- masked, always
-  Memo/tag:   {display.memoRequirement}
   Order ends: {expiry.effectiveDeadlineIso}  ({expiry.minutesOfSlack} min of slack)
   Reused existing order: {reused}
 
@@ -183,13 +187,15 @@ it, and never re-type an address by hand.
 
 Then pick a mode.
 
-**Mode A (default) — the user pays from their own wallet.** Give them the
+**Mode A (default) — the user pays from their own wallet. No key, no env var,
+no setup.** Give them the
 `deposit` block. For Lightning, `deposit.lnInvoice` is the BOLT11 string to
 scan or paste, and `deposit.amount` is in **satoshis** (`deposit.isSats` is
 true) — never call it "X BTC".
 
-**Mode B (`--send`) — this machine pays from a hot wallet.** Only EVM chains
-and Solana. Only after the confirmation above. Only with the key in the
+**Mode B (`--send`, optional) — this machine pays from a hot wallet.** Only
+when the user has asked for it. Only EVM chains and Solana. Only after the
+confirmation above. This is the only path that needs a key, read from the
 environment:
 
 ```bash
@@ -200,7 +206,6 @@ ROZO_CHECKOUT_EVM_KEY=... node scripts/dist/send-evm.js --rozo-payment-id <uuid>
 ROZO_CHECKOUT_SOL_KEY=... node scripts/dist/send-sol.js --rozo-payment-id <uuid> --send
 
 # --dry-run shows exactly what would be signed and signs nothing (no --send needed)
-# --yes-large exceeds the $100 per-transaction cap
 ```
 
 `--send` is mandatory; without it the script exits with `SEND_NOT_OPTED_IN`
@@ -209,7 +214,8 @@ payability as the last step before broadcast, verifies the RPC really is on the
 intended chain, verifies the token's on-chain decimals, signs before
 broadcasting so the transaction hash is known in advance, and records the send
 locally **before** broadcasting so the same order can never be paid twice.
-Caps: **$100 per transaction**, **$200 cumulative per session**.
+One limit: a single payment may not exceed **$1,100**. There is no override
+flag. A larger invoice is paid via Mode A, which needs no key and has no limit.
 
 ### Step 5 — poll
 
@@ -271,7 +277,7 @@ Then stop and hand off. Do not run any send script again.
 | `LINK_NO_LONGER_PAYABLE` | the Coinbase link is used, expired, settled, or was consumed by someone else between quote and now | ask the merchant for a fresh link; do not fund anything |
 | `LINK_PAYABILITY_UNKNOWN` | the Coinbase state was incomplete, so payability could not be proved | treat as not payable; retry, and do not fund on a guess |
 | `DEPOSIT_INCOMPLETE` | no positive amount, or a Lightning order with no BOLT11 yet | wait and re-run; nothing is payable yet |
-| `DEPOSIT_MEMO_REQUIRED` | a Stellar order arrived without its memo | do not send; a Stellar deposit without its memo is usually lost |
+| `DEPOSIT_MEMO_REQUIRED` | a Stellar order arrived without its memo | do not send; Stellar routes on a shared hub address plus the memo, so without it the payment is lost |
 | `LOCK_TIMEOUT` | another rozo-checkout process holds the send lock | wait for it; never bypass by clearing the lock mid-flight |
 | `TRACKED_DOTENV_UNVERIFIABLE` | env files exist but git could not prove they are untracked | fix git, or run from a directory with no env files |
 | `TX_REVERTED` / `TX_FAILED` | the transfer landed and failed | no funds moved, but the order stays locked; investigate before retrying |
@@ -288,7 +294,7 @@ Then stop and hand off. Do not run any send script again.
 | `BROADCAST_AMBIGUOUS` | the RPC errored but a transaction may be in flight | do **not** resend; check the sender on an explorer, then poll |
 | `RPC_CHAIN_MISMATCH` | the RPC is not on the chain the order settles on | fix `ROZO_CHECKOUT_RPC_<chainId>`; never sign against it |
 | `DECIMALS_MISMATCH` | the token's on-chain decimals disagree with expectations | do not sign — the amount could be off by orders of magnitude |
-| `CAP_PER_TX` / `CAP_SESSION` | hot-wallet spend caps | `--yes-large` for a single large payment; the session cap needs a fresh state directory and a human decision |
+| `CAP_PER_TX` | above the $1,100 per-payment limit for automated sending | no override exists; have the user pay from their own wallet (Mode A), which has no limit |
 | `UNSUPPORTED_SOURCE` | that coin/chain pair is not accepted | offer the table at the top of this file (the server's own list omits Lightning) |
 | `MISSING_KEY` | the key env var is not exported | ask the user to export it in their own shell |
 | `TRACKED_DOTENV` | a `.env` in this directory is tracked by git | untrack it before using hot-wallet keys here |

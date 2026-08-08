@@ -154,20 +154,21 @@ test('a concurrent re-create or re-confirm can never erase a send claim', async 
   }
 });
 
-test('the session cap cannot be exceeded by concurrent claims', async () => {
+test('concurrent claims on different orders all succeed: there is no session cap', async () => {
   const dir = tempDir();
   try {
     const { createOrderRecord } = await import(`file://${STATE_LIB}`);
     const prev = process.env.ROZO_CHECKOUT_STATE_DIR;
     process.env.ROZO_CHECKOUT_STATE_DIR = dir;
 
-    // Five separate $60 orders against a $200 session cap: at most three may
-    // ever be claimed, no matter how they interleave.
+    // Five separate $1,000 payments. Each is under the single $1,100 limit, so
+    // every one must be allowed no matter how they interleave — the old
+    // cumulative ceiling is gone by design.
     const ids = [];
     for (let i = 0; i < 5; i++) {
       const id = `6666666${i}-2222-4333-8444-555555555555`;
       ids.push(id);
-      createOrderRecord({ ...ORDER, rozoPaymentId: id, invoiceAmount: '60' });
+      createOrderRecord({ ...ORDER, rozoPaymentId: id, invoiceAmount: '1000' });
     }
     if (prev === undefined) delete process.env.ROZO_CHECKOUT_STATE_DIR;
     else process.env.ROZO_CHECKOUT_STATE_DIR = prev;
@@ -190,16 +191,30 @@ test('the session cap cannot be exceeded by concurrent claims', async () => {
     );
 
     const claimed = results.filter((r) => r.stdout.includes('CLAIMED')).length;
-    assert.ok(claimed <= 3, `at most 3 x $60 fits under the $200 cap, got ${claimed}`);
-    assert.ok(claimed >= 1);
+    assert.equal(claimed, 5, 'every payment under the single limit must be allowed');
 
-    // Total committed spend must never exceed the cap.
-    let total = 0;
-    for (const id of ids) {
-      const s = JSON.parse(fs.readFileSync(path.join(dir, `${id}.json`), 'utf8'));
-      if (s.send) total += Number(s.invoiceAmount);
-    }
-    assert.ok(total <= 200, `cumulative committed spend ${total} must stay within the cap`);
+    // But an order above the limit is still refused, even concurrently.
+    const bigId = '7777777a-2222-4333-8444-555555555555';
+    process.env.ROZO_CHECKOUT_STATE_DIR = dir;
+    createOrderRecord({ ...ORDER, rozoPaymentId: bigId, invoiceAmount: '1200' });
+    if (prev === undefined) delete process.env.ROZO_CHECKOUT_STATE_DIR;
+    else process.env.ROZO_CHECKOUT_STATE_DIR = prev;
+
+    const refused = await Promise.all(
+      [0, 1, 2].map(() =>
+        runNode(
+          `
+          import { claimSend } from ${libUrl};
+          try {
+            claimSend(${JSON.stringify(bigId)}, ${JSON.stringify(INTENT)});
+            console.log("CLAIMED");
+          } catch (e) { console.log("REFUSED:" + e.code); }
+        `,
+          dir,
+        ),
+      ),
+    );
+    for (const r of refused) assert.match(r.stdout, /REFUSED:CAP_PER_TX/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

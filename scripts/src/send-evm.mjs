@@ -257,7 +257,6 @@ async function main(argv) {
       nonceBefore,
       expectedTxHash,
     },
-    { allowLarge: Boolean(args['yes-large']) },
   );
 
   let txHash = null;

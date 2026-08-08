@@ -19,8 +19,10 @@ instrucciones de depósito y luego consultar hasta la liquidación. Monedas para
 `usdc-ethereum`, `usdt-polygon`, `usdc-polygon`, `usdc-base`, `usdc-stellar`,
 `btc-lightning`.
 
-Añadir `--send` para pagar desde una billetera caliente en lugar de la propia, y
-`--json` para obtener una salida legible por máquina.
+Por defecto solo imprime una dirección para pagar desde cualquier billetera: sin
+clave privada y sin configuración. Añadir `--send` únicamente si se quiere que la
+CLI firme desde una billetera caliente, y `--json` para obtener una salida
+legible por máquina.
 
 El resto de esta página es el mismo flujo ejecutado paso a paso, que es lo que
 conviene si algo sale mal o si se quiere automatizar por cuenta propia.
@@ -83,8 +85,7 @@ resumen enmascarado para revisarlo primero.
   "display": {
     "chain": "Solana",
     "amount": "5.021000 USDT",
-    "payToMasked": "9WzDXw...AWWM",
-    "memoRequirement": "This deposit REQUIRES the memo/tag below. ..."
+    "payToMasked": "9WzDXw...AWWM"
   },
   "expiry": { "effectiveDeadlineIso": "2026-08-08T11:00:00.000Z", "minutesOfSlack": 55 }
 }
@@ -120,17 +121,32 @@ exigen los scripts de envío.
 }
 ```
 
-Para Lightning, `deposit.lnInvoice` contiene la cadena BOLT11 que hay que
-escanear, y `deposit.amount` está en satoshis.
+Enviar exactamente los campos que entrega este bloque. Para Lightning,
+`deposit.lnInvoice` contiene la cadena BOLT11 que hay que escanear, y
+`deposit.amount` está en satoshis.
 
 ## 4. Pagar
 
-Elegir uno. **Modo A** — pagar desde la propia billetera: enviar exactamente
-`deposit.amount` de `deposit.tokenSymbol` a `deposit.receiverAddress`, en
-`deposit.chain`, incluyendo `deposit.receiverMemo` si lo hay. Copiar la
-dirección del JSON; nunca teclearla de nuevo.
+### La forma sencilla: desde la propia billetera
 
-**Modo B** — dejar que el script pague desde una billetera caliente (solo EVM y Solana):
+**Sin clave privada, sin variables de entorno, sin configuración.** Abrir
+cualquier billetera y enviar exactamente lo que indica el bloque `deposit` de
+arriba:
+
+- el `amount` del `tokenSymbol`,
+- en la `chain`,
+- a la `receiverAddress`, copiada del JSON, nunca tecleada de nuevo.
+
+Si el bloque contiene algún otro campo, como `receiverMemo`, incluirlo tal cual;
+forma parte del destino en esa cadena. Para Lightning, escanear o pegar
+`deposit.lnInvoice` en su lugar.
+
+Eso es todo el Modo A. Continuar en el paso 5.
+
+### La forma opcional: dejar que el script pague (Modo B)
+
+Solo si se quiere que esta máquina firme por uno, y solo en cadenas EVM y Solana.
+Esta es la única parte que necesita una clave privada:
 
 ```bash
 # Previsualizar exactamente lo que se firmaría — no firma nada
@@ -143,7 +159,8 @@ ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
 ```
 
 Usar `send-evm.js` con `ROZO_CHECKOUT_EVM_KEY` para Ethereum, BNB Chain,
-Polygon y Base. Topes: $100 por transacción, $200 por sesión.
+Polygon y Base. Un solo pago no puede superar los **$1,100**; por encima de eso,
+pagar desde la propia billetera como se explica arriba.
 
 ```json
 {

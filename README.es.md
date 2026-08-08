@@ -86,8 +86,8 @@ Aparecen tres identificadores a lo largo del documento y nunca son intercambiabl
 | BNB Chain | `56` | USDC, USDT | **18 decimales**: la causa habitual de errores por un factor de 10^12 |
 | Polygon | `137` | USDC, USDT | 6 decimales |
 | Base | `8453` | USDC | 6 decimales |
-| Solana | `900` | USDC, USDT | 6 decimales; SPL, puede requerir un memo. SOL nativo **no** está admitido |
-| Stellar | `1500` | USDC | 7 decimales; requiere el memo |
+| Solana | `900` | USDC, USDT | 6 decimales; SPL. SOL nativo **no** está admitido |
+| Stellar | `1500` | USDC | 7 decimales; memo obligatorio, mostrado en el bloque de depósito |
 | Bitcoin Lightning | `lightning` | BTC | los importes son **satoshis** enteros, pagados mediante una factura BOLT11 (BOLT11) |
 
 Las monedas de gas nativas (SOL, BNB, ETH, MATIC) y el BTC on-chain no se aceptan.
@@ -159,18 +159,19 @@ node scripts/dist/quote.js --url "$LINK"
 #          el resumen enmascarado para revisar, y `depositWithheld: true`.
 node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT
 
-# Paso 3 — revisar el importe, la cadena, la dirección enmascarada, el requisito
-#          de memo y la expiración. Solo cuando se haya decidido pagar, volver a
-#          ejecutar el mismo comando con --confirm. Esto libera el bloque de
-#          depósito completo y registra la confirmación que exigen los scripts de envío.
+# Paso 3 — revisar el importe, la cadena, la dirección enmascarada y la expiración.
+#          Solo cuando se haya decidido pagar, volver a ejecutar el mismo comando
+#          con --confirm. Esto libera el bloque de depósito completo y registra la
+#          confirmación que exigen los scripts de envío.
 node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT --confirm
 
-# Paso 4a — Modo A: pagar el bloque de depósito desde la propia billetera,
-#           y luego observar la liquidación
+# Paso 4a — Modo A (por defecto): pagar el bloque de depósito desde cualquier billetera.
+#           No necesita clave privada ni configuración. Luego observar la liquidación.
 node scripts/dist/status.js --rozo-payment-id <uuid> --watch --timeout 600
 
-# Paso 4b — Modo B: dejar que el script pague desde una billetera caliente.
-#           --dry-run no firma nada; un envío real requiere además --send.
+# Paso 4b — Modo B (opcional): dejar que el script firme por uno. Este es el único
+#           paso que necesita una clave privada. --dry-run no firma nada; un envío
+#           real requiere además --send.
 ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
   node scripts/dist/send-sol.js --rozo-payment-id <uuid> --dry-run
 ```
@@ -233,8 +234,10 @@ Lo más interesante de este repositorio es aquello que se niega a hacer.
   backend ilegible se reporta como `unknown`, nunca como `awaiting_deposit`.
 - **Instrucciones de depósito completas.** Un importe cero, negativo o no
   interpretable aborta la operación. Lightning requiere la BOLT11 (que llega en
-  `source.lnInvoice` con una dirección vacía). Stellar requiere su memo: un memo
-  ausente es un aborto duro, nunca se representa como "no se requiere memo".
+  `source.lnInvoice` con una dirección vacía). Un depósito en Stellar es una
+  dirección de hub compartida más un memo por orden, así que el memo forma parte
+  del destino: una orden que llega sin él es un aborto duro, nunca se representa
+  como "no se requiere memo".
 - **Márgenes de expiración.** El pago se rechaza salvo que la más temprana entre
   la expiración de la orden y la de Coinbase esté a más de un margen por cadena
   (10 min en EVM y Stellar, 5 min en Solana). Lightning exige además al menos 10
@@ -276,11 +279,23 @@ Lo más interesante de este repositorio es aquello que se niega a hacer.
   trabajo está bajo seguimiento de git, y se niegan con igual firmeza cuando git
   no puede demostrar que no lo está. El id de cadena del RPC (o el hash génesis
   de Solana) y los decimales on-chain del token se verifican antes de firmar.
-  Topes: $100 por transacción, $200 acumulados por sesión.
+  Se aplica un único límite: un solo pago no puede superar los $1,100. No hay
+  bandera para saltárselo ni tope acumulado por sesión: una factura mayor se
+  paga desde la propia billetera, que no necesita clave privada y no tiene
+  límite.
 - **Enmascaramiento de direcciones.** El texto muestra `first6...last4`. La
   dirección de depósito completa, el memo y la cadena BOLT11 aparecen solo
   dentro del objeto `deposit` legible por máquina, de modo que siguen siendo
   copiables sin quedar dispersos por los registros.
+
+## Registro de cambios
+
+- **0.1.1** — un solo límite de gasto en lugar de dos: un pago individual no
+  puede superar los $1,100 (dimensionado para una compra de crédito de $1,000
+  más su comisión del 5%); se eliminan el tope acumulado por sesión y la bandera
+  `--yes-large`. La documentación deja explícito que pagar desde la propia
+  billetera no necesita clave privada ni configuración.
+- **0.1.0** — primera versión: `npx @rozoai/checkout`.
 
 ## Licencia
 

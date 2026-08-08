@@ -84,8 +84,8 @@ Three identifiers appear throughout and are never interchangeable:
 | BNB Chain | `56` | USDC, USDT | **18 decimals** — the usual source of off-by-10^12 bugs |
 | Polygon | `137` | USDC, USDT | 6 decimals |
 | Base | `8453` | USDC | 6 decimals |
-| Solana | `900` | USDC, USDT | 6 decimals; SPL, may require a memo. Native SOL is **not** supported |
-| Stellar | `1500` | USDC | 7 decimals; requires the memo |
+| Solana | `900` | USDC, USDT | 6 decimals; SPL. Native SOL is **not** supported |
+| Stellar | `1500` | USDC | 7 decimals; memo required — shown in the deposit block |
 | Bitcoin Lightning | `lightning` | BTC | amounts are integer **satoshis**, paid via a BOLT11 invoice |
 
 Native gas coins (SOL, BNB, ETH, MATIC) and on-chain BTC are not accepted.
@@ -155,18 +155,19 @@ node scripts/dist/quote.js --url "$LINK"
 #          masked summary to review, and `depositWithheld: true`.
 node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT
 
-# Step 3 — review the amount, chain, masked address, memo requirement and
-#          expiry. Only when you have decided to pay, re-run the same command
+# Step 3 — review the amount, chain, masked address and expiry.
+#          Only when you have decided to pay, re-run the same command
 #          with --confirm. This releases the full deposit block and records the
 #          confirmation the send scripts require.
 node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT --confirm
 
-# Step 4a — Mode A: pay the deposit block from your own wallet,
-#           then watch it settle
+# Step 4a — Mode A (default): pay the deposit block from any wallet.
+#           Needs no key and no configuration. Then watch it settle.
 node scripts/dist/status.js --rozo-payment-id <uuid> --watch --timeout 600
 
-# Step 4b — Mode B: let the script pay from a hot wallet. --dry-run signs
-#           nothing; a real send additionally requires --send.
+# Step 4b — Mode B (optional): let the script sign for you. This is the only
+#           step that needs a private key. --dry-run signs nothing; a real
+#           send additionally requires --send.
 ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
   node scripts/dist/send-sol.js --rozo-payment-id <uuid> --dry-run
 ```
@@ -224,8 +225,9 @@ The interesting part of this repo is what it refuses to do.
   never `awaiting_deposit`.
 - **Complete deposit instructions.** A zero, negative or unparsable amount
   aborts. Lightning requires the BOLT11 (which arrives in `source.lnInvoice`
-  with an empty address). Stellar requires its memo — a missing memo is a hard
-  abort, never rendered as "no memo required".
+  with an empty address). A Stellar deposit is a shared hub address plus a
+  per-order memo, so the memo is part of the destination: an order that
+  arrives without one is a hard abort, never rendered as "no memo required".
 - **Expiry margins.** Payment is refused unless the earlier of the order expiry
   and the Coinbase expiry is more than a per-chain margin away (10 min EVM and
   Stellar, 5 min Solana). Lightning additionally requires at least 10 minutes
@@ -259,11 +261,21 @@ The interesting part of this repo is what it refuses to do.
   key-shaped strings. The scripts refuse to run when any `.env`/`.env.*` in the
   working directory is git-tracked, and refuse just as hard when git cannot
   prove it is untracked. The RPC's chain id (or Solana genesis hash) and the token's
-  on-chain decimals are verified before signing. Caps: $100 per transaction,
-  $200 cumulative per session.
+  on-chain decimals are verified before signing. One limit applies: a single
+  payment may not exceed $1,100. There is no override flag and no cumulative
+  session cap — a larger invoice is paid from your own wallet, which needs no
+  key and has no limit.
 - **Address masking.** Prose shows `first6...last4`. The full deposit address,
   memo and BOLT11 string appear only inside the machine-readable `deposit`
   object, so they stay copy-pastable without being scattered through logs.
+
+## Changelog
+
+- **0.1.1** — one spend limit instead of two: a single payment may not exceed
+  $1,100 (sized for a $1,000 credit purchase plus its 5% fee), the cumulative
+  session cap and the `--yes-large` override are removed. Docs make it explicit
+  that paying from your own wallet needs no key or configuration.
+- **0.1.0** — first release: `npx @rozoai/checkout`.
 
 ## License
 
