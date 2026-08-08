@@ -249,9 +249,9 @@ echo '.env' >> .gitignore
 
 **EVM**
 
-- **MetaMask** と **Rabby** の秘密鍵の書き出しは **`0x` の付かない 16 進 64 文字**です。
-  接頭辞は自分で付けてください: `ROZO_CHECKOUT_EVM_KEY=0x<その 64 文字>`。
-  付けない場合、その鍵は拒否されます。
+- **MetaMask** と **Rabby** の秘密鍵の書き出しは 16 進 64 文字です。そのまま
+  `ROZO_CHECKOUT_EVM_KEY` に貼り付けてください。`0x` 接頭辞は付けても付けなくても
+  構いません。
 - **暗号化 keystore (より安全)。** ブラウザーウォレットが書き出せるのは生の鍵だけで、
   keystore ではありません。生の鍵を暗号化 keystore に変えるには Foundry を使います:
   `cast wallet import my-hot-wallet --interactive` が鍵の入力を促し、暗号化された

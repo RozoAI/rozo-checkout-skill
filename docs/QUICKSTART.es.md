@@ -272,9 +272,8 @@ echo '.env' >> .gitignore
 
 **EVM**
 
-- **MetaMask** y **Rabby** exportan la clave privada como **64 caracteres hex
-  sin el prefijo `0x`**. Hay que añadirlo a mano:
-  `ROZO_CHECKOUT_EVM_KEY=0x<los 64 caracteres>`. Sin él, la clave se rechaza.
+- **MetaMask** y **Rabby** exportan la clave privada como 64 caracteres hex.
+  Pegarla tal cual en `ROZO_CHECKOUT_EVM_KEY`; el prefijo `0x` es opcional.
 - **Keystore cifrado (más seguro).** Las billeteras de navegador exportan claves
   en bruto, no keystores. Para convertir una en un keystore cifrado, usar
   Foundry: `cast wallet import my-hot-wallet --interactive` pide la clave y

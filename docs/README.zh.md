@@ -257,8 +257,8 @@ echo '.env' >> .gitignore
 
 **EVM**
 
-- **MetaMask** 和 **Rabby** → 导出私钥给出的是 **64 位十六进制、不带 `0x` 前缀**。
-  你需要自己补上前缀：`ROZO_CHECKOUT_EVM_KEY=0x<那 64 个字符>`。不加会被拒绝。
+- **MetaMask** 和 **Rabby** → 导出私钥给出的是 64 位十六进制字符串。直接原样粘贴到
+  `ROZO_CHECKOUT_EVM_KEY` 即可；`0x` 前缀加不加都行。
 - **加密 keystore（更安全）。** 浏览器钱包只能导出原始私钥，不能导出 keystore。
   想把私钥变成加密 keystore，可以用 Foundry：`cast wallet import my-hot-wallet
   --interactive` 会提示你输入私钥，并把加密的 V3 keystore 写到

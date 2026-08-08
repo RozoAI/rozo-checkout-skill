@@ -32507,6 +32507,20 @@ function parseSolanaKeypairJson(text) {
   }
   return Uint8Array.from(arr);
 }
+function normalizeEvmPrivateKey(raw) {
+  const s = String(raw ?? "").trim();
+  if (!s) {
+    throw new SkillError("MISSING_KEY", "No EVM private key supplied.");
+  }
+  const body = /^0[xX]/.test(s) ? s.slice(2) : s;
+  if (!/^[0-9a-fA-F]{64}$/.test(body)) {
+    throw new SkillError(
+      "BAD_KEY_FORMAT",
+      `An EVM private key must be 64 hex characters, with or without a 0x prefix (got ${body.length} characters after any prefix). Value withheld.`
+    );
+  }
+  return `0x${body.toLowerCase()}`;
+}
 function decodeSolanaEnvKey(raw) {
   const s = String(raw ?? "").trim();
   if (!s) throw new SkillError("MISSING_KEY", `${SOL_KEY_ENV} is empty.`);
@@ -32684,14 +32698,7 @@ async function loadKeySource(plan, { family, env = process.env, askPassphrase } 
       throw new SkillError("MISSING_KEY", `${name} is not set.`);
     }
     if (family === "evm") {
-      const key = String(raw).trim();
-      if (!/^0x[0-9a-fA-F]{64}$/.test(key)) {
-        throw new SkillError(
-          "BAD_KEY_FORMAT",
-          `${EVM_KEY_ENV} must be a 0x-prefixed 32-byte hex private key.`
-        );
-      }
-      return { privateKey: key, label: plan.label, kind: plan.kind };
+      return { privateKey: normalizeEvmPrivateKey(raw), label: plan.label, kind: plan.kind };
     }
     return { secretKey: decodeSolanaEnvKey(raw), label: plan.label, kind: plan.kind };
   }

@@ -39,7 +39,7 @@ Key files and .env must be chmod 600 and untracked by git.
 
 .env keys (only ROZO_CHECKOUT_* are read; real env wins; chmod 600; gitignore):
   ROZO_CHECKOUT_SOL_KEY               base58 string OR JSON byte array
-  ROZO_CHECKOUT_EVM_KEY               0x + 64 hex
+  ROZO_CHECKOUT_EVM_KEY               64 hex chars, 0x prefix optional
   ROZO_CHECKOUT_EVM_KEYSTORE          path to an encrypted V3 keystore
   ROZO_CHECKOUT_KEYSTORE_PASSPHRASE   unattended runs only; else prompted
   ROZO_CHECKOUT_RPC_<chainId>         e.g. ROZO_CHECKOUT_RPC_8453 (Base),
@@ -49,8 +49,8 @@ Where the material comes from:
 - Solana: `solana-keygen new` -> ~/.config/solana/id.json, found automatically
   (preferred). Phantom exports base58; Solflare exports base58 (current) or a
   JSON byte array (older). Both accepted.
-- EVM: MetaMask/Rabby export 64 hex chars WITHOUT a 0x prefix — you must add
-  "0x" or the key is rejected. For an encrypted keystore, Foundry's
+- EVM: MetaMask/Rabby export 64 hex chars with no 0x prefix; paste as-is, the
+  prefix is optional. For an encrypted keystore, Foundry's
   `cast wallet import <name> --interactive` writes a V3 keystore to
   ~/.foundry/keystores/<name>; `geth account import` also writes one. Browser
   wallets do not export keystores, only raw keys.

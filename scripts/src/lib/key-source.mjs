@@ -101,6 +101,33 @@ export function parseSolanaKeypairJson(text) {
   return Uint8Array.from(arr);
 }
 
+/**
+ * Normalise an EVM private key to the 0x-prefixed form viem expects.
+ *
+ * MetaMask and Rabby — the two most common wallets — export 64 hex characters
+ * with NO 0x prefix, so requiring the prefix guaranteed a first-run failure for
+ * most users. The prefix is optional here; everything else stays strict.
+ *
+ * Accepts exactly 64 hex characters, with or without a leading 0x/0X.
+ * Rejects anything else. The value never appears in an error message.
+ */
+export function normalizeEvmPrivateKey(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) {
+    throw new SkillError('MISSING_KEY', 'No EVM private key supplied.');
+  }
+  const body = /^0[xX]/.test(s) ? s.slice(2) : s;
+  if (!/^[0-9a-fA-F]{64}$/.test(body)) {
+    // Length is safe to report; the characters are not.
+    throw new SkillError(
+      'BAD_KEY_FORMAT',
+      `An EVM private key must be 64 hex characters, with or without a 0x prefix ` +
+        `(got ${body.length} characters after any prefix). Value withheld.`,
+    );
+  }
+  return `0x${body.toLowerCase()}`;
+}
+
 /** Decode the value of ROZO_CHECKOUT_SOL_KEY: base58, or a JSON byte array. */
 export function decodeSolanaEnvKey(raw) {
   const s = String(raw ?? '').trim();
@@ -329,14 +356,8 @@ export async function loadKeySource(plan, { family, env = process.env, askPassph
       throw new SkillError('MISSING_KEY', `${name} is not set.`);
     }
     if (family === 'evm') {
-      const key = String(raw).trim();
-      if (!/^0x[0-9a-fA-F]{64}$/.test(key)) {
-        throw new SkillError(
-          'BAD_KEY_FORMAT',
-          `${EVM_KEY_ENV} must be a 0x-prefixed 32-byte hex private key.`,
-        );
-      }
-      return { privateKey: key, label: plan.label, kind: plan.kind };
+      // Accepts the bare 64-hex form that browser wallets export.
+      return { privateKey: normalizeEvmPrivateKey(raw), label: plan.label, kind: plan.kind };
     }
     return { secretKey: decodeSolanaEnvKey(raw), label: plan.label, kind: plan.kind };
   }

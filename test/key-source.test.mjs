@@ -19,6 +19,7 @@ import { keccak256 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
 import {
+  normalizeEvmPrivateKey,
   parseSolanaKeypairJson,
   decodeSolanaEnvKey,
   decryptKeystoreV3,
@@ -150,6 +151,83 @@ test('the env key still accepts base58 and a byte array', () => {
   assert.equal(decodeSolanaEnvKey('1'.repeat(32)).length, 32);
   assert.throws(() => decodeSolanaEnvKey(''), (e) => e.code === 'MISSING_KEY');
   assert.throws(() => decodeSolanaEnvKey('!!!not base58!!!'), (e) => e.code === 'BAD_KEY_FORMAT');
+});
+
+// ---------------------------------------------------------------------------
+// EVM private keys
+// ---------------------------------------------------------------------------
+
+test('a bare 64-hex key is accepted and normalised', () => {
+  // This is exactly what MetaMask and Rabby put on the clipboard: 64 hex
+  // characters, no prefix. Requiring the prefix made the two most common
+  // wallets fail on first use.
+  const bare = '11'.repeat(32);
+  assert.equal(normalizeEvmPrivateKey(bare), `0x${bare}`);
+  assert.equal(normalizeEvmPrivateKey(`  ${bare}  `), `0x${bare}`, 'surrounding space is trimmed');
+});
+
+test('a 0x-prefixed key is still accepted', () => {
+  const bare = 'ab'.repeat(32);
+  assert.equal(normalizeEvmPrivateKey(`0x${bare}`), `0x${bare}`);
+  assert.equal(normalizeEvmPrivateKey(`0X${bare.toUpperCase()}`), `0x${bare}`, 'case is normalised');
+});
+
+test('both forms derive the same address', () => {
+  const bare = '4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318';
+  const withPrefix = `0x${bare}`;
+  const a = privateKeyToAccount(normalizeEvmPrivateKey(bare)).address;
+  const b = privateKeyToAccount(normalizeEvmPrivateKey(withPrefix)).address;
+  const c = privateKeyToAccount(normalizeEvmPrivateKey(bare.toUpperCase())).address;
+  assert.equal(a, b, 'prefix must not change the derived address');
+  assert.equal(a, c, 'hex case must not change the derived address');
+});
+
+test('wrong-length and non-hex keys are refused, and never echoed', () => {
+  const bare = '11'.repeat(32);
+  const bad = [
+    bare.slice(0, 63), // 63
+    bare + 'a', // 65
+    `0x${bare.slice(0, 63)}`,
+    `0x${bare}a`,
+    'z'.repeat(64), // right length, not hex
+    `0x${'z'.repeat(64)}`,
+    bare.slice(0, 62) + 'gg', // one non-hex pair
+    '0x', // prefix only
+    '', // empty
+    '   ',
+    null,
+    undefined,
+  ];
+  for (const v of bad) {
+    const err = (() => {
+      try {
+        normalizeEvmPrivateKey(v);
+      } catch (e) {
+        return e;
+      }
+    })();
+    assert.ok(err, `${JSON.stringify(v)} must be refused`);
+    assert.ok(
+      ['BAD_KEY_FORMAT', 'MISSING_KEY'].includes(err.code),
+      `${JSON.stringify(v)} -> ${err.code}`,
+    );
+    // The rejected value must never appear in the message.
+    if (typeof v === 'string' && v.trim().length > 8) {
+      assert.ok(!err.message.includes(v.trim()), 'the value must not be echoed');
+      assert.ok(!err.message.includes(v.replace(/^0[xX]/, '')), 'the body must not be echoed');
+    }
+  }
+});
+
+test('the env key path accepts the bare form end to end', async () => {
+  const bare = 'cd'.repeat(32);
+  const env = { [EVM_KEY_ENV]: bare };
+  const loaded = await loadKeySource(planKeySource({ family: 'evm', env }), {
+    family: 'evm',
+    env,
+  });
+  assert.equal(loaded.privateKey, `0x${bare}`);
+  assert.equal(loaded.kind, 'env');
 });
 
 // ---------------------------------------------------------------------------

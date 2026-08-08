@@ -83,7 +83,7 @@ it, and the real environment wins over the file.
 |---|---|---|
 | `ROZO_CHECKOUT_EVM_KEYSTORE` | `send-evm.js` | **Mode B only.** Path to an encrypted V3 JSON keystore. Preferred over a raw key. |
 | `ROZO_CHECKOUT_KEYSTORE_PASSPHRASE` | `send-evm.js` | **Mode B only.** Keystore passphrase for unattended runs. On a terminal it is prompted instead. |
-| `ROZO_CHECKOUT_EVM_KEY` | `send-evm.js` | **Mode B only.** Raw 0x-prefixed 32-byte hex private key. For unattended automation. |
+| `ROZO_CHECKOUT_EVM_KEY` | `send-evm.js` | **Mode B only.** Raw 32-byte hex private key; the `0x` prefix is optional. For unattended automation. |
 | `ROZO_CHECKOUT_SOL_KEY` | `send-sol.js` | **Mode B only.** Raw base58 secret key or JSON byte array. For unattended automation; `~/.config/solana/id.json` is used first when present. |
 | `ROZO_CHECKOUT_RPC_<chainId>` | send scripts | optional RPC override, e.g. `ROZO_CHECKOUT_RPC_8453` |
 | `ROZO_CHECKOUT_STATE_DIR` | all | optional; defaults to `$HOME/.rozo-checkout/state` |

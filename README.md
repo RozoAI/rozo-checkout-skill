@@ -84,7 +84,7 @@ A `.env` in the directory you run from, with every variable this tool reads:
 # do NOT have ~/.config/solana/id.json, which is picked up automatically.
 ROZO_CHECKOUT_SOL_KEY=REPLACE_ME_base58_secret_key
 
-# EVM raw private key: 0x followed by 64 hex characters. The least safe
+# EVM raw private key: 64 hex characters, 0x prefix optional. The least safe
 # option — prefer the keystore below.
 ROZO_CHECKOUT_EVM_KEY=0x0000000000000000000000000000000000000000000000000000000000000000
 
@@ -118,9 +118,8 @@ echo '.env' >> .gitignore
 
 **EVM**
 
-- **MetaMask** and **Rabby** → Export private key gives **64 hex characters with
-  no `0x` prefix**. Add the prefix yourself:
-  `ROZO_CHECKOUT_EVM_KEY=0x<the 64 characters>`. Without it the key is rejected.
+- **MetaMask** and **Rabby** → Export private key gives 64 hex characters.
+  Paste it into `ROZO_CHECKOUT_EVM_KEY` as-is; the `0x` prefix is optional.
 - **Encrypted keystore (safer).** Browser wallets export raw keys, not
   keystores. To turn one into an encrypted keystore, use Foundry:
   `cast wallet import my-hot-wallet --interactive` prompts for the key and
