@@ -190,3 +190,17 @@ test('an unreadable backend is `unknown`, never `awaiting_deposit`', () => {
   assert.equal(weird.state, 'unknown');
   assert.equal(weird.unknown, true);
 });
+
+test('the Stellar memo type is TEXT, and is stated rather than left implicit', async () => {
+  const { STELLAR_MEMO_TYPE } = await import('../scripts/src/lib/amounts.mjs');
+  // Verified against rozo-intents-api: the settle path writes memo_type 'text',
+  // validation is isValidMemoText (28-byte limit), per-intent memos are `rz` +
+  // Crockford base32 which Memo.id() cannot represent, and monitor-stellar
+  // matches by string equality. A numeric-looking memo is still TEXT.
+  assert.equal(STELLAR_MEMO_TYPE, 'MEMO_TEXT');
+
+  // The value that caused the confusion in the first real payment.
+  const numericLooking = '65371582';
+  assert.match(numericLooking, /^\d+$/, 'it really does look like an id');
+  assert.equal(STELLAR_MEMO_TYPE, 'MEMO_TEXT', 'but it must be sent as text');
+});

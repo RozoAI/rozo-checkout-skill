@@ -141,6 +141,7 @@ node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT --confi
 ```
 
 このブロックが示すフィールドを、そのとおりに送金してください。Lightning の場合、
+Stellar の memo は数字に見えても**常に `MEMO_TEXT`** です — `MEMO_ID` として送ると一致しません。`deposit.expiresIn` に残りの有効時間が出ます。
 `deposit.lnInvoice` にスキャン用の BOLT11 文字列が入り、`deposit.amount` は
 satoshi 単位になります。
 
@@ -163,8 +164,8 @@ satoshi 単位になります。
 
 ### 任意の方法: スクリプトに支払わせる（モード B）
 
-このマシンに署名させたい場合のみで、対象は EVM チェーンと Solana だけです。鍵が
-必要なのはこの部分だけです。
+このマシンに署名させたい場合のみで、対象は **EVM チェーンと Solana だけ**です。Stellar と
+Lightning に `--send` はなく、自分のウォレットから支払います。鍵が必要なのはこの部分だけです。
 
 **Solana — すでにある鍵ペアをそのまま使います。** `solana-keygen` を一度でも実行して
 いれば `~/.config/solana/id.json` が既に存在し、自動的に使われます:

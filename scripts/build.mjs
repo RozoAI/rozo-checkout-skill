@@ -38,10 +38,19 @@ await build({
   format: 'esm',
   sourcemap: false,
   legalComments: 'none',
+  // CommonJS dependencies pulled in transitively expect the CJS module scope.
+  // `require` alone is not enough: the `bindings` package (reached from the
+  // Solana native-binding path) reads `__filename` at module scope, and without
+  // it every bundle throws "__filename is not defined" the moment that code is
+  // touched. Shim all three for every bundle, not just the CLI.
   banner: {
     js: [
       "import { createRequire as __rozoCreateRequire } from 'node:module';",
+      "import { fileURLToPath as __rozoFileURLToPath } from 'node:url';",
+      "import { dirname as __rozoDirname } from 'node:path';",
       'const require = __rozoCreateRequire(import.meta.url);',
+      'const __filename = __rozoFileURLToPath(import.meta.url);',
+      'const __dirname = __rozoDirname(__filename);',
     ].join('\n'),
   },
   logLevel: 'info',

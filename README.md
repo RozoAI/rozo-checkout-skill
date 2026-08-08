@@ -32,7 +32,7 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 | Polygon | `usdt-polygon` `usdc-polygon` | `137` | 6 decimals |
 | Base | `usdc-base` | `8453` | 6 decimals |
 | Solana | `usdt-solana` `usdc-solana` | `900` | SPL; native SOL not supported |
-| Stellar | `usdc-stellar` | `1500` | memo required — shown in the deposit block |
+| Stellar | `usdc-stellar` | `1500` | `MEMO_TEXT` memo required — shown in the deposit block |
 | Bitcoin Lightning | `btc-lightning` | `lightning` | BOLT11; amounts in satoshis |
 
 Native gas coins (SOL, BNB, ETH, MATIC) and on-chain BTC are not accepted.
@@ -169,7 +169,8 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
 Wallet: any wallet, no key. `--send` signs locally using your Solana CLI
-keypair or an encrypted keystore.
+keypair or an encrypted keystore, and supports EVM chains and Solana only —
+Stellar and Lightning are Mode A only.
 </details>
 
 <details>
@@ -183,7 +184,8 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
 Wallet: any wallet, no key. `--send` signs locally using your Solana CLI
-keypair or an encrypted keystore.
+keypair or an encrypted keystore, and supports EVM chains and Solana only —
+Stellar and Lightning are Mode A only.
 </details>
 
 <details>
@@ -197,7 +199,8 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
 Wallet: any wallet, no key. `--send` signs locally using your Solana CLI
-keypair or an encrypted keystore.
+keypair or an encrypted keystore, and supports EVM chains and Solana only —
+Stellar and Lightning are Mode A only.
 </details>
 
 <details>
@@ -211,7 +214,8 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
 Wallet: any wallet, no key. `--send` signs locally using your Solana CLI
-keypair or an encrypted keystore.
+keypair or an encrypted keystore, and supports EVM chains and Solana only —
+Stellar and Lightning are Mode A only.
 </details>
 
 <details>
@@ -226,7 +230,8 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
 Wallet: any wallet, no key. `--send` signs locally using your Solana CLI
-keypair or an encrypted keystore.
+keypair or an encrypted keystore, and supports EVM chains and Solana only —
+Stellar and Lightning are Mode A only.
 </details>
 
 <details>
@@ -240,7 +245,8 @@ openclaw agent exec "Pay this OpenRouter link with USDT on Solana by running: np
 ```
 
 Wallet: any wallet, no key. `--send` signs locally using your Solana CLI
-keypair or an encrypted keystore.
+keypair or an encrypted keystore, and supports EVM chains and Solana only —
+Stellar and Lightning are Mode A only.
 </details>
 
 <details>
@@ -255,7 +261,8 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
 Wallet: any wallet, no key. `--send` signs locally using your Solana CLI
-keypair or an encrypted keystore.
+keypair or an encrypted keystore, and supports EVM chains and Solana only —
+Stellar and Lightning are Mode A only.
 </details>
 
 <details>
@@ -304,7 +311,8 @@ If the agent has no shell but can make HTTP requests, it can drive the four
 public endpoints directly — see [how it works](docs/how-it-works.md).
 
 Wallet: any wallet, no key. `--send` signs locally using your Solana CLI
-keypair or an encrypted keystore.
+keypair or an encrypted keystore, and supports EVM chains and Solana only —
+Stellar and Lightning are Mode A only.
 </details>
 
 ## Three rules worth knowing
@@ -313,6 +321,10 @@ keypair or an encrypted keystore.
   cached response or a screenshot.
 - **Send the exact amount shown.** It is normally larger than the invoice — it
   includes the bridge and network fees.
+- **Stellar deposits carry a memo, and it is `MEMO_TEXT`** — even when it looks
+  like a number (`65371582` is text, not an id). Sending it as `MEMO_ID`
+  produces a different memo and the payment will not be matched. The deposit
+  block states the type as `receiverMemoType`.
 - **Never pay a funded order twice.** If a payment has already been detected,
   stop and get a human to reconcile it; a second payment to a one-time address
   is not guaranteed to be credited.
@@ -331,6 +343,15 @@ The full list of what this refuses to do, and why, is in
 
 ## Changelog
 
+- **0.1.3** — fixes found by the first real payment. The built bundles no
+  longer crash with `__filename is not defined` on Node 22+ (the esbuild banner
+  now shims `__filename`/`__dirname` as well as `require`, and every bundle is
+  now executed by the test suite). Stellar deposits state their memo type
+  (`MEMO_TEXT`, even when the memo looks numeric). Orders show remaining
+  validity as a duration ("expires in 47m") in the deposit block and in
+  `status`, with the exact command to make a fresh one. Reusing an existing
+  unpaid order, and asking for a coin that differs from it, are both explained
+  instead of reading as errors.
 - **0.1.2** — Mode B no longer needs a raw private key in an environment
   variable. On Solana it uses the `~/.config/solana/id.json` that
   `solana-keygen` already wrote; on EVM an encrypted V3 keystore whose

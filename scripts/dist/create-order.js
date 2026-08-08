@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import { createRequire as __rozoCreateRequire } from 'node:module';
+import { fileURLToPath as __rozoFileURLToPath } from 'node:url';
+import { dirname as __rozoDirname } from 'node:path';
 const require = __rozoCreateRequire(import.meta.url);
+const __filename = __rozoFileURLToPath(import.meta.url);
+const __dirname = __rozoDirname(__filename);
 
 // scripts/src/lib/output.mjs
 var EXIT_OK = 0;
@@ -396,6 +400,7 @@ function formatAmount(source) {
 function chainName(chainId) {
   return CHAIN_NAMES[String(chainId)] || CHAIN_NAMES[chainId] || `chain ${chainId}`;
 }
+var STELLAR_MEMO_TYPE = "MEMO_TEXT";
 function chainFamily(chainId) {
   return CHAIN_FAMILY[String(chainId)] || CHAIN_FAMILY[chainId] || null;
 }
@@ -418,6 +423,16 @@ var MARGINS_MS = {
 };
 var BOLT11_MIN_VALIDITY_MS = 10 * MINUTE;
 var DEFAULT_MARGIN_MS = 10 * MINUTE;
+function formatRemaining(ms) {
+  if (!Number.isFinite(ms)) return "unknown";
+  if (ms <= 0) return "expired";
+  const totalMinutes = Math.floor(ms / 6e4);
+  if (totalMinutes < 1) return `${Math.floor(ms / 1e3)}s`;
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
 function marginFor(chainId) {
   const key = String(chainId);
   return MARGINS_MS[key] ?? MARGINS_MS[chainId] ?? DEFAULT_MARGIN_MS;
@@ -1135,6 +1150,33 @@ async function main(argv) {
   const rozoPaymentId = assertRozoPaymentId(created.rozoPaymentId);
   const verify = verifyCreateAgainstQuote({ snapshot, created, requested });
   if (!verify.ok) {
+    const onlySourceDrift = verify.drift.length > 0 && verify.drift.every((d) => d.field.startsWith("source."));
+    if (created.reused && onlySourceDrift) {
+      const existing = created.source || {};
+      const remainingMs = created.expiresAt ? Date.parse(created.expiresAt) - Date.now() : NaN;
+      emit(
+        {
+          success: false,
+          step: "reuse-source-mismatch",
+          error: {
+            code: "REUSED_SOURCE_MISMATCH",
+            message: `This link already has an unpaid order, created for ${existing.tokenSymbol ?? "?"} on chain ${existing.chainId ?? "?"}. You asked for ${tokenSymbol} on chain ${chainId}. Only one order exists per link at a time, so nothing new was created.`
+          },
+          linkId: created.linkId ?? parsedLinkId,
+          rozoPaymentId,
+          paymentLink: created.paymentLink ?? null,
+          existingOrder: {
+            rozoPaymentId,
+            chainId: existing.chainId ?? null,
+            tokenSymbol: existing.tokenSymbol ?? null,
+            expiresAt: created.expiresAt ?? null,
+            expiresIn: Number.isFinite(remainingMs) ? formatRemaining(remainingMs) : null
+          },
+          guidance: `Either pay the existing order with ${existing.tokenSymbol ?? "its own coin"} (re-run with --chain ${existing.chainId} --token ${existing.tokenSymbol}), or wait ${Number.isFinite(remainingMs) ? formatRemaining(remainingMs) : "for it to expire"} for it to expire and then create a new one. Unpaid orders cost nothing.`
+        },
+        EXIT_ERROR
+      );
+    }
     emit(
       {
         success: false,
@@ -1256,7 +1298,8 @@ async function main(argv) {
     step: "create-order",
     confirmed,
     reused: Boolean(created.reused),
-    reusedNote: created.reused ? "An existing unfunded order for this link was reused; it passed the funded-check above." : null,
+    reusedNote: created.reused ? `An existing unpaid order for this link was reused (${rozoPaymentId}), valid for another ${formatRemaining(expiry.msRemaining)}. Nothing new was created.` : null,
+    orderCost: "Creating an order moves no money. An order you never fund simply expires and costs nothing.",
     linkId: created.linkId ?? parsedLinkId,
     rozoPaymentId,
     paymentLink: created.paymentLink ?? null,
@@ -1274,12 +1317,16 @@ async function main(argv) {
       // Lightning has no deposit address: the BOLT11 IS the instruction.
       receiverAddress: lightning ? null : source.receiverAddress,
       receiverMemo: source.receiverMemo ?? null,
+      // Stellar memos are TEXT even when they look numeric. Sending one as
+      // MEMO_ID produces a different memo and the payment will not match.
+      receiverMemoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
       amount: source.amount,
       amountUnit: source.amountUnit ?? null,
       isSats: isSatsUnit(source.amountUnit),
       lnInvoice: bolt11 || null,
       payTo: depositInfo.payTo,
-      expiresAt: payment?.expiresAt ?? null
+      expiresAt: payment?.expiresAt ?? null,
+      expiresIn: formatRemaining(expiry.msRemaining)
     } : null,
     depositWithheld: !confirmed,
     // Safe for prose / chat.
@@ -1291,12 +1338,16 @@ async function main(argv) {
       payToMasked: maskAddress(depositInfo.payTo),
       receiverMemoMasked: maskMemo(source.receiverMemo),
       hasMemo: Boolean(source.receiverMemo),
+      memoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
       memoRequirement
     },
     expiry: {
       intentExpiresAt: payment?.expiresAt ?? null,
       coinbaseExpiry: snapshot?.coinbase?.preApprovalExpiry ?? null,
       effectiveDeadlineIso: new Date(expiry.effectiveDeadlineMs).toISOString(),
+      // A duration, not just a timestamp: this is what a payer actually needs.
+      expiresIn: formatRemaining(expiry.msRemaining),
+      msRemaining: expiry.msRemaining,
       marginMinutes: Math.round(expiry.marginMs / 6e4),
       minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4)
     },

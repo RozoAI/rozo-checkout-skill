@@ -159,6 +159,7 @@ exigen los scripts de envío.
 ```
 
 Enviar exactamente los campos que entrega este bloque. Para Lightning,
+En Stellar el memo es **`MEMO_TEXT`** aunque parezca numérico: enviarlo como `MEMO_ID` no coincidirá. `deposit.expiresIn` indica cuánto sigue siendo válida la orden.
 `deposit.lnInvoice` contiene la cadena BOLT11 que hay que escanear, y
 `deposit.amount` está en satoshis.
 
@@ -182,8 +183,9 @@ Eso es todo el Modo A. Continuar en el paso 5.
 
 ### La forma opcional: dejar que el script pague (Modo B)
 
-Solo si se quiere que esta máquina firme, y únicamente en cadenas EVM y Solana.
-Esta es la única parte que necesita una clave.
+Solo si se quiere que esta máquina firme, y únicamente en **cadenas EVM y
+Solana**: no hay `--send` para Stellar ni Lightning, que se pagan desde la
+propia billetera. Esta es la única parte que necesita una clave.
 
 **Solana: usar el par de claves que ya se tiene.** Si alguna vez se ejecutó
 `solana-keygen`, `~/.config/solana/id.json` ya existe y se usa automáticamente:

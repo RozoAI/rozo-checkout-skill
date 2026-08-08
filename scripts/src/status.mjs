@@ -22,6 +22,7 @@ import { isRozoPaymentId, maskAddress } from './lib/ids.mjs';
 import { invoiceStatus, getPayment } from './lib/api.mjs';
 import { chainName, formatAmount } from './lib/amounts.mjs';
 import { classifyStatus } from './lib/guards.mjs';
+import { formatRemaining } from './lib/expiry.mjs';
 import { findByLinkId } from './lib/state.mjs';
 
 const POLL_INTERVAL_MS = 10_000;
@@ -98,6 +99,16 @@ async function snapshot({ rozoPaymentId, linkId }) {
       senderAddressMasked: source.senderAddress ? maskAddress(source.senderAddress) : null,
       chain: source.chainId ? chainName(source.chainId) : null,
     },
+    expiry: (() => {
+      const iso = payment?.expiresAt ?? status?.rozoPayment?.expiresAt ?? null;
+      if (!iso) return { expiresAt: null, expiresIn: null, msRemaining: null };
+      const ms = Date.parse(iso) - Date.now();
+      return {
+        expiresAt: iso,
+        expiresIn: formatRemaining(ms),
+        msRemaining: Number.isFinite(ms) ? ms : null,
+      };
+    })(),
     payout: {
       txHash: payment?.destination?.txHash ?? status?.rozoPayment?.destination?.txHash ?? null,
       confirmedAt:
@@ -141,7 +152,9 @@ async function main(argv) {
         ? 'Only the fulfilment view was readable; the pay-in view is unavailable, so the ' +
           'money-detected rule cannot be enforced. Pass --rozo-payment-id for a complete answer.'
         : result.state === 'expired_unfunded'
-          ? 'Nothing was funded. It is safe to start over with a fresh link.'
+          ? 'Nothing was funded, so nothing was lost. Start a fresh order with: ' +
+            'rozo-checkout pay <coinbase-link> --with <coin>  (or create-order.js ' +
+            '--url <link> --chain <id> --token <SYMBOL>)'
           : result.terminal
             ? 'Done.'
             : 'Still in flight. Poll again in ~10s.';

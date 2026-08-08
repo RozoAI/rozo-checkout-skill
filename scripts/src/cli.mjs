@@ -287,6 +287,9 @@ async function cmdStatus(opts) {
   out();
   out(`  State   ${stateLabel(payload.state)}`);
   if (payload.detail) out(`  ${dim(payload.detail)}`);
+  if (payload.expiry?.expiresIn && !payload.terminal) {
+    out(`  Expires in ${payload.expiry.expiresIn}`);
+  }
   if (payload.payin?.txHash) out(`  Pay-in  ${payload.payin.txHash}`);
   if (payload.guidance) out(`  ${payload.escalate ? red(payload.guidance) : dim(payload.guidance)}`);
   printMoneyWarning(payload);
@@ -397,9 +400,14 @@ async function cmdPay(opts) {
     out(`  Invoice   ${bold(`${p.invoice?.amount} ${p.invoice?.currency ?? 'USD'}`)}`);
     out(`  You send  ${bold(p.display?.amount)} on ${bold(p.display?.chain)}`);
     out(`  To        ${p.display?.payToMasked} ${dim('(full address shown after you confirm)')}`);
-    if (p.display?.hasMemo) out(`  Memo      ${p.display.receiverMemoMasked}`);
-    out(`  Expires   ${p.expiry?.effectiveDeadlineIso} ${dim(`(${p.expiry?.minutesOfSlack} min of slack)`)}`);
-    if (p.reused) out(`  ${dim('Reused an existing unfunded order for this link.')}`);
+    if (p.display?.hasMemo) {
+      out(`  Memo      ${p.display.receiverMemoMasked} ${dim(`(${p.display.memoType})`)}`);
+    }
+    out(`  Expires   in ${bold(p.expiry?.expiresIn ?? '?')} ${dim(`(${p.expiry?.effectiveDeadlineIso})`)}`);
+    if (p.reused) {
+      out(`  ${dim(`Reusing the existing unpaid order ${p.rozoPaymentId} — nothing new was created.`)}`);
+    }
+    out(`  ${dim('An order you never fund simply expires and costs nothing.')}`);
     out();
     out(dim(`  The amount you send includes bridge and network fees, so it is`));
     out(dim(`  normally larger than the invoice.`));
@@ -546,7 +554,15 @@ function printDeposit(deposit, opts) {
     out(`    Amount   ${bold(`${deposit.amount} ${deposit.tokenSymbol}`)}`);
     out(`    Chain    ${bold(deposit.chain)}`);
     out(`    Address  ${bold(deposit.receiverAddress)}`);
-    if (deposit.receiverMemo) out(`    Memo     ${bold(deposit.receiverMemo)} ${red('(required)')}`);
+    if (deposit.receiverMemo) {
+      // Naming the type matters: a numeric-looking memo sent as MEMO_ID does
+      // not match, and the payment is lost.
+      out(
+        `    Memo     ${bold(deposit.receiverMemo)}  ` +
+          `${red(`(required, ${deposit.receiverMemoType})`)}`,
+      );
+    }
+    if (deposit.expiresIn) out(`    Expires  in ${bold(deposit.expiresIn)}`);
   }
   out();
   const unit = isSatsUnit(deposit.amountUnit) ? 'sats' : deposit.tokenSymbol;

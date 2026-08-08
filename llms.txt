@@ -54,6 +54,8 @@ Where the material comes from:
   `cast wallet import <name> --interactive` writes a V3 keystore to
   ~/.foundry/keystores/<name>; `geth account import` also writes one. Browser
   wallets do not export keystores, only raw keys.
+- --send supports EVM chains and Solana ONLY. Stellar and Lightning are paid
+  from the user's own wallet (Mode A); there is no local signing for them.
 - Hardware wallets, WalletConnect-only wallets and exchange accounts CANNOT be
   used with --send. Those users take the default keyless path, which works with
   any wallet.
@@ -108,7 +110,11 @@ private key (EVM and Solana only); every other path is keyless.
    Pay EXACTLY source.amount of the requested token on the requested chain to
    source.receiverAddress, including every other field the block carries (Stellar
    routes on a shared hub address plus source.receiverMemo, so omitting the memo
-   loses the payment).
+   loses the payment). The Stellar memo is ALWAYS MEMO_TEXT, even when it is all
+   digits (e.g. 65371582) — sending it as MEMO_ID produces a different memo and
+   the payment will not match. The deposit block reports this as
+   receiverMemoType. Orders expire: deposit.expiresIn / status expiry.expiresIn
+   give the remaining validity as a duration.
    For Lightning, pay the BOLT11 in source.lnInvoice (receiverAddress is empty).
 
 4) Poll until settled:

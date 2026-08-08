@@ -200,6 +200,22 @@ export function chainName(chainId) {
   return CHAIN_NAMES[String(chainId)] || CHAIN_NAMES[chainId] || `chain ${chainId}`;
 }
 
+/**
+ * The Stellar memo type this backend uses, everywhere, for every order.
+ *
+ * Verified in rozo-intents-api rather than inferred: the settle path writes
+ * `memo_type: 'text'` (shared/stellar-direct-settle.ts), the payment API
+ * records `memo_type: verification.memo ? 'text' : 'none'`, validation is
+ * `isValidMemoText` bounded by a 28-byte MEMO_TEXT limit, per-intent memos are
+ * generated as "a STRONG ... Stellar MEMO_TEXT" of the form `rz` + Crockford
+ * base32 — which Memo.id() would reject outright — and monitor-stellar matches
+ * by plain string equality on source_receiver_memo.
+ *
+ * A memo that looks numeric (e.g. 65371582) is still TEXT. Sending it as
+ * MEMO_ID produces a different memo hash and the payment will not match.
+ */
+export const STELLAR_MEMO_TYPE = 'MEMO_TEXT';
+
 /** Family ("evm" | "solana" | "stellar" | "lightning") for a chainId. */
 export function chainFamily(chainId) {
   return CHAIN_FAMILY[String(chainId)] || CHAIN_FAMILY[chainId] || null;

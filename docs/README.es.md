@@ -34,7 +34,7 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 | Polygon | `usdt-polygon` `usdc-polygon` | `137` | 6 decimales |
 | Base | `usdc-base` | `8453` | 6 decimales |
 | Solana | `usdt-solana` `usdc-solana` | `900` | SPL; SOL nativo no admitido |
-| Stellar | `usdc-stellar` | `1500` | memo obligatorio — se muestra en el bloque de depósito |
+| Stellar | `usdc-stellar` | `1500` | memo `MEMO_TEXT` obligatorio — se muestra en el bloque de depósito |
 | Bitcoin Lightning | `btc-lightning` | `lightning` | BOLT11; importes en satoshis |
 
 Las monedas de gas nativas (SOL, BNB, ETH, MATIC) y el BTC on-chain no se aceptan.
@@ -103,7 +103,7 @@ Para pagar un enlace de pago de OpenRouter / Coinbase, ejecuta:
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-Billetera: cualquier billetera, **sin clave**. Solo `--send` la necesita: firma localmente con el par de claves de la CLI de Solana o un keystore cifrado.
+Billetera: cualquier billetera, **sin clave**. Solo `--send` la necesita: firma localmente con el par de claves de la CLI de Solana o un keystore cifrado, y solo admite cadenas EVM y Solana (Stellar y Lightning son solo Modo A).
 </details>
 
 <details>
@@ -329,6 +329,14 @@ La lista completa de lo que esta herramienta se niega a hacer, y por qué, está
 
 ## Registro de cambios
 
+- **0.1.3** — Correcciones surgidas del primer pago real. Los bundles ya no fallan
+  con `__filename is not defined` en Node 22+ (el banner de esbuild ahora define
+  `__filename`/`__dirname` además de `require`, y las pruebas ejecutan cada bundle
+  de verdad). Los depósitos de Stellar indican el tipo de memo (`MEMO_TEXT`, aunque
+  el memo parezca numérico). Las órdenes muestran la validez restante como duración
+  ("expires in 47m") en el bloque de depósito y en `status`, con el comando exacto
+  para crear una nueva. Reutilizar una orden impaga existente, y pedir una moneda
+  distinta a la suya, ahora se explican en lugar de parecer errores.
 - **0.1.2** — El Modo B ya no necesita una clave privada en bruto en una variable
   de entorno. En Solana usa el `~/.config/solana/id.json` que `solana-keygen` ya
   creó; en EVM un keystore V3 cifrado cuya frase de contraseña se solicita.

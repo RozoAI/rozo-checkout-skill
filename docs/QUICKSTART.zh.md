@@ -129,7 +129,7 @@ node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT --confi
 }
 ```
 
-严格按这个信息块给出的字段来发送。对于 Lightning，`deposit.lnInvoice` 里是供扫码的
+严格按这个信息块给出的字段来发送。Stellar 上的 memo 即使看起来是纯数字，也**始终是 `MEMO_TEXT`** —— 按 `MEMO_ID` 发送不会被匹配上。`deposit.expiresIn` 会告诉你订单还有多久过期。对于 Lightning，`deposit.lnInvoice` 里是供扫码的
 BOLT11 字符串，`deposit.amount` 的单位是聪 (satoshis)。
 
 ## 4. 付款
@@ -150,8 +150,8 @@ BOLT11 字符串，`deposit.amount` 的单位是聪 (satoshis)。
 
 ### 可选的方式：让脚本替你付（模式 B）
 
-只有当你想让这台机器替你签名时才需要，而且只支持 EVM 链和 Solana。这是整个流程里
-唯一需要私钥的部分。
+只有当你想让这台机器替你签名时才需要，而且**只支持 EVM 链和 Solana** —— Stellar 和
+闪电网络没有 `--send`，只能用你自己的钱包付。这是整个流程里唯一需要私钥的部分。
 
 **Solana —— 直接用你已有的密钥对。** 只要你跑过 `solana-keygen`，
 `~/.config/solana/id.json` 就已经存在，脚本会自动使用它：

@@ -147,3 +147,19 @@ test('Lightning needs at least 10 minutes of BOLT11 validity on top of the margi
   assert.equal(unparsable.ok, false);
   assert.equal(unparsable.code, 'EXPIRY_UNPARSABLE');
 });
+
+test('formatRemaining renders a duration a payer can act on', async () => {
+  const { formatRemaining } = await import('../scripts/src/lib/expiry.mjs');
+  assert.equal(formatRemaining(47 * MINUTE), '47m');
+  assert.equal(formatRemaining(MINUTE), '1m');
+  assert.equal(formatRemaining(45 * 1000), '45s');
+  assert.equal(formatRemaining(59 * 1000), '59s');
+  assert.equal(formatRemaining(60 * MINUTE), '1h');
+  assert.equal(formatRemaining(75 * MINUTE), '1h 15m');
+  assert.equal(formatRemaining(2 * 60 * MINUTE), '2h');
+  // Already gone, or unknowable.
+  assert.equal(formatRemaining(0), 'expired');
+  assert.equal(formatRemaining(-1), 'expired');
+  assert.equal(formatRemaining(NaN), 'unknown');
+  assert.equal(formatRemaining(undefined), 'unknown');
+});

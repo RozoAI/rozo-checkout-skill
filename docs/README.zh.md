@@ -30,7 +30,7 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 | Polygon | `usdt-polygon` `usdc-polygon` | `137` | 6 位小数 |
 | Base | `usdc-base` | `8453` | 6 位小数 |
 | Solana | `usdt-solana` `usdc-solana` | `900` | SPL；不支持原生 SOL |
-| Stellar | `usdc-stellar` | `1500` | 必须带 memo —— 会在充值信息块里给出 |
+| Stellar | `usdc-stellar` | `1500` | 必须带 `MEMO_TEXT` memo —— 会在充值信息块里给出 |
 | Bitcoin Lightning | `btc-lightning` | `lightning` | BOLT11；金额单位为聪 |
 
 原生 gas 币（SOL、BNB、ETH、MATIC）以及链上 BTC 均不接受。
@@ -82,7 +82,7 @@ Codex 会读取项目根目录的 `AGENTS.md`。加一条常驻指令，它就�
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-钱包：任意钱包，**无需私钥**。只有 `--send` 需要，它用你的 Solana CLI 密钥对或加密 keystore 在本地签名。
+钱包：任意钱包，**无需私钥**。只有 `--send` 需要，它用你的 Solana CLI 密钥对或加密 keystore 在本地签名；仅支持 EVM 链和 Solana —— Stellar 与闪电网络只能用模式 A。
 </details>
 
 <details>
@@ -292,6 +292,12 @@ echo '.env' >> .gitignore
 
 ## 更新日志
 
+- **0.1.3** —— 第一笔真实付款暴露出来的问题修复。构建产物在 Node 22+ 上不再因
+  `__filename is not defined` 崩溃（esbuild banner 现在同时注入 `__filename`/`__dirname`
+  和 `require`，并且测试会真正执行每一个构建产物）。Stellar 充值现在会明确标出 memo
+  类型（`MEMO_TEXT`，即使 memo 看起来是纯数字）。订单在充值信息块和 `status` 里都会以
+  时长显示剩余有效期（"expires in 47m"），过期时给出重新下单的完整命令。复用已有的未付
+  订单、以及所选币种与已有订单不一致这两种情况，现在都会被解释清楚，而不是看起来像报错。
 - **0.1.2** —— 模式 B 不再需要把原始私钥放进环境变量。Solana 直接用 `solana-keygen`
   已经写好的 `~/.config/solana/id.json`；EVM 用加密的 V3 keystore，口令交互式提示输入。
   `--keyfile` 可以显式指定其中任一种，相关设置也可以放进已 gitignore 的 `.env`。

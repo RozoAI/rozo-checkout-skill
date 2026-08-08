@@ -33,7 +33,7 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 | Polygon | `usdt-polygon` `usdc-polygon` | `137` | 小数点以下 6 桁 |
 | Base | `usdc-base` | `8453` | 小数点以下 6 桁 |
 | Solana | `usdt-solana` `usdc-solana` | `900` | SPL。ネイティブの SOL は非対応 |
-| Stellar | `usdc-stellar` | `1500` | メモが必須 — 入金ブロックに表示されます |
+| Stellar | `usdc-stellar` | `1500` | `MEMO_TEXT` のメモが必須 — 入金ブロックに表示されます |
 | Bitcoin Lightning | `btc-lightning` | `lightning` | BOLT11。金額は satoshi 単位 |
 
 ネイティブのガス通貨（SOL、BNB、ETH、MATIC）およびオンチェーンの BTC は受け付けません。
@@ -89,7 +89,7 @@ OpenRouter / Coinbase の決済リンクを支払うには、次を実行して�
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-ウォレット: どのウォレットでも構いません。**鍵は不要です。** Solana CLI の鍵ペアまたは暗号化された keystore を使う `--send` の場合だけ
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** Solana CLI の鍵ペアまたは暗号化された keystore を使う `--send`（EVM チェーンと Solana のみ、Stellar と Lightning はモード A 専用）の場合だけ
 環境変数の鍵が必要です。
 </details>
 
@@ -320,6 +320,13 @@ WalletConnect 専用のモバイルウォレット、取引所アカウント。
 
 ## 変更履歴
 
+- **0.1.3** — 最初の実際の支払いで見つかった不具合の修正。ビルド済みバンドルが Node 22 以降で
+  `__filename is not defined` により停止しなくなりました（esbuild の banner が `require` に加えて
+  `__filename`/`__dirname` も定義し、テストが各バンドルを実際に実行するようになりました）。Stellar の
+  入金では memo の種類（`MEMO_TEXT`。memo が数字に見える場合も同様）を明示します。注文の残り有効時間を
+  入金ブロックと `status` の両方で継続時間として表示し（"expires in 47m"）、期限切れ時には新しい注文を
+  作るコマンドをそのまま示します。既存の未払い注文の再利用と、それと異なる通貨を指定した場合の双方を、
+  エラーではなく説明として提示します。
 - **0.1.2** — モード B で環境変数に生の秘密鍵を置く必要がなくなりました。Solana では
   `solana-keygen` が既に作成した `~/.config/solana/id.json` を、EVM では暗号化された
   V3 keystore（パスフレーズは対話的に入力）を使います。`--keyfile` でどちらも明示でき、

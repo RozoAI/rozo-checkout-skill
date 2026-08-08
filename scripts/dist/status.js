@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import { createRequire as __rozoCreateRequire } from 'node:module';
+import { fileURLToPath as __rozoFileURLToPath } from 'node:url';
+import { dirname as __rozoDirname } from 'node:path';
 const require = __rozoCreateRequire(import.meta.url);
+const __filename = __rozoFileURLToPath(import.meta.url);
+const __dirname = __rozoDirname(__filename);
 
 // scripts/src/lib/output.mjs
 var EXIT_OK = 0;
@@ -428,6 +432,30 @@ function classifyStatus({ payment, routerState, coinbase, now = Date.now(), view
   );
 }
 
+// scripts/src/lib/expiry.mjs
+var MINUTE = 6e4;
+var MARGINS_MS = {
+  1: 10 * MINUTE,
+  56: 10 * MINUTE,
+  137: 10 * MINUTE,
+  8453: 10 * MINUTE,
+  900: 5 * MINUTE,
+  1500: 10 * MINUTE,
+  lightning: 10 * MINUTE
+};
+var BOLT11_MIN_VALIDITY_MS = 10 * MINUTE;
+var DEFAULT_MARGIN_MS = 10 * MINUTE;
+function formatRemaining(ms) {
+  if (!Number.isFinite(ms)) return "unknown";
+  if (ms <= 0) return "expired";
+  const totalMinutes = Math.floor(ms / 6e4);
+  if (totalMinutes < 1) return `${Math.floor(ms / 1e3)}s`;
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
 // scripts/src/lib/state.mjs
 import fs from "node:fs";
 import path from "node:path";
@@ -519,6 +547,16 @@ async function snapshot({ rozoPaymentId, linkId }) {
       senderAddressMasked: source.senderAddress ? maskAddress(source.senderAddress) : null,
       chain: source.chainId ? chainName(source.chainId) : null
     },
+    expiry: (() => {
+      const iso = payment?.expiresAt ?? status?.rozoPayment?.expiresAt ?? null;
+      if (!iso) return { expiresAt: null, expiresIn: null, msRemaining: null };
+      const ms = Date.parse(iso) - Date.now();
+      return {
+        expiresAt: iso,
+        expiresIn: formatRemaining(ms),
+        msRemaining: Number.isFinite(ms) ? ms : null
+      };
+    })(),
     payout: {
       txHash: payment?.destination?.txHash ?? status?.rozoPayment?.destination?.txHash ?? null,
       confirmedAt: payment?.destination?.confirmedAt ?? status?.rozoPayment?.destination?.confirmedAt ?? null
@@ -544,7 +582,7 @@ async function main(argv) {
     if (next.state !== result.state) history.push({ at: (/* @__PURE__ */ new Date()).toISOString(), state: next.state });
     result = next;
   }
-  const guidance = result.escalate ? "MONEY DETECTED and the order is not on a healthy path. Do NOT pay again and do NOT create a new order for this link. Preserve linkId, rozoPaymentId and every tx hash, then escalate to the operator for manual reconciliation." : result.unknown ? "The order state could not be established. This is NOT evidence that nothing was paid \u2014 do not create a new order and do not send again on the strength of it. Retry, or pass --rozo-payment-id so the authoritative pay-in view can be read." : !result.authoritativeView ? "Only the fulfilment view was readable; the pay-in view is unavailable, so the money-detected rule cannot be enforced. Pass --rozo-payment-id for a complete answer." : result.state === "expired_unfunded" ? "Nothing was funded. It is safe to start over with a fresh link." : result.terminal ? "Done." : "Still in flight. Poll again in ~10s.";
+  const guidance = result.escalate ? "MONEY DETECTED and the order is not on a healthy path. Do NOT pay again and do NOT create a new order for this link. Preserve linkId, rozoPaymentId and every tx hash, then escalate to the operator for manual reconciliation." : result.unknown ? "The order state could not be established. This is NOT evidence that nothing was paid \u2014 do not create a new order and do not send again on the strength of it. Retry, or pass --rozo-payment-id so the authoritative pay-in view can be read." : !result.authoritativeView ? "Only the fulfilment view was readable; the pay-in view is unavailable, so the money-detected rule cannot be enforced. Pass --rozo-payment-id for a complete answer." : result.state === "expired_unfunded" ? "Nothing was funded, so nothing was lost. Start a fresh order with: rozo-checkout pay <coinbase-link> --with <coin>  (or create-order.js --url <link> --chain <id> --token <SYMBOL>)" : result.terminal ? "Done." : "Still in flight. Poll again in ~10s.";
   const unresolved = watch && !result.terminal && !result.escalate && !result.unknown;
   const failed = result.escalate || result.unknown || !result.authoritativeView;
   emit(

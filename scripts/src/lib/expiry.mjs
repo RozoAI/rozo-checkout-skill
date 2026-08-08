@@ -32,6 +32,24 @@ export const BOLT11_MIN_VALIDITY_MS = 10 * MINUTE;
 
 export const DEFAULT_MARGIN_MS = 10 * MINUTE;
 
+/**
+ * Human duration for a remaining window: "47m", "1h 12m", "45s".
+ *
+ * An ISO timestamp alone forces the reader to do date arithmetic under time
+ * pressure. A real payment nearly missed its window because the deposit block
+ * only showed the deadline, not how long was left.
+ */
+export function formatRemaining(ms) {
+  if (!Number.isFinite(ms)) return 'unknown';
+  if (ms <= 0) return 'expired';
+  const totalMinutes = Math.floor(ms / 60000);
+  if (totalMinutes < 1) return `${Math.floor(ms / 1000)}s`;
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
 export function marginFor(chainId) {
   const key = String(chainId);
   return MARGINS_MS[key] ?? MARGINS_MS[chainId] ?? DEFAULT_MARGIN_MS;

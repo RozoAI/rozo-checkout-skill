@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import { createRequire as __rozoCreateRequire } from 'node:module';
+import { fileURLToPath as __rozoFileURLToPath } from 'node:url';
+import { dirname as __rozoDirname } from 'node:path';
 const require = __rozoCreateRequire(import.meta.url);
+const __filename = __rozoFileURLToPath(import.meta.url);
+const __dirname = __rozoDirname(__filename);
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __esm = (fn, res) => function __init() {

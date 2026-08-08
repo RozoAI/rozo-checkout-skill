@@ -203,7 +203,8 @@ scan or paste, and `deposit.amount` is in **satoshis** (`deposit.isSats` is
 true) — never call it "X BTC".
 
 **Mode B (`--send`, optional) — this machine pays from a hot wallet.** Only
-when the user has asked for it. Only EVM chains and Solana. Only after the
+when the user has asked for it. Only EVM chains and Solana — there is no
+`--send` for Stellar or Lightning; those are Mode A only. Only after the
 confirmation above. This is the only path that needs a key. On Solana it uses
 the `~/.config/solana/id.json` that `solana-keygen` already wrote; on EVM an
 encrypted V3 keystore whose passphrase is prompted (never a flag). Either can

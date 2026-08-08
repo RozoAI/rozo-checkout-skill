@@ -151,7 +151,10 @@ scripts require.
 }
 ```
 
-Send exactly the fields this block gives you. For Lightning,
+Send exactly the fields this block gives you. On Stellar the memo is
+**`MEMO_TEXT`** even when it looks numeric — sending it as `MEMO_ID` will not
+match. `deposit.expiresIn` tells you how long the order stays valid. For
+Lightning,
 `deposit.lnInvoice` holds the BOLT11 string to scan, and `deposit.amount` is
 in satoshis.
 
@@ -174,8 +177,9 @@ That is the whole of Mode A. Skip to step 5.
 
 ### The optional way: let the script pay (Mode B)
 
-Only if you want this machine to sign for you, and only on EVM chains and
-Solana. This is the only part that needs a key.
+Only if you want this machine to sign for you, and only on **EVM chains and
+Solana** — there is no `--send` for Stellar or Lightning, which are paid from
+your own wallet. This is the only part that needs a key.
 
 **Solana — use the keypair you already have.** If you have ever run
 `solana-keygen`, `~/.config/solana/id.json` already exists and is used
