@@ -1,5 +1,7 @@
 # rozo-checkout
 
+**English** | [简体中文](README.zh.md) | [日本語](README.ja.md) | [Español](README.es.md)
+
 Pay an **OpenRouter Coinbase Payment Link** with a coin that link cannot take
 directly — BTC over Lightning, or USDT/USDC on Solana, BNB Chain, Ethereum,
 Polygon, Base or Stellar.
@@ -159,8 +161,14 @@ npm run check   # build + test
 Tests make **no network calls**; every backend response is a fixture in
 `test/fixtures/`. They cover the atomic-amount conversion (6/18 decimals and
 Lightning satoshis), the expiry-margin arithmetic, compromised-address
-normalization and fail-closed behaviour, the order reuse decision, and the
-post-create verification comparator.
+normalization and fail-closed behaviour, the order reuse decision, the
+post-create verification comparator, and the deposit-completeness rules.
+
+Two groups spawn real child processes rather than calling functions, because
+they test things a single-process test cannot: the concurrency suite races
+several processes to claim one order (exactly one may win) and to exhaust the
+session cap, and the entry-point suite runs the built send scripts to prove
+they refuse without `--send`, without a confirmation, and after a prior claim.
 
 ## Safety design
 
@@ -203,14 +211,17 @@ The interesting part of this repo is what it refuses to do.
   not as payable.
 - **Compromised-address list, fail closed.** `scripts/src/lib/blacklist.json`
   carries a vendored list with a provenance header and a sha256 over the
-  addresses. Both the deposit address and the sending wallet are checked. If
-  the file is missing, malformed, empty, or its digest does not match, every
-  send is refused rather than proceeding unchecked.
+  addresses. The digest proves only that this vendored copy has not been edited
+  since its sync date; it is not a signature by the upstream source. Both the
+  deposit address and the sending wallet are checked. If the file is missing,
+  malformed, empty, or its digest does not match, every send is refused rather
+  than proceeding unchecked.
 - **Send-once, across processes.** Order state lives in
   `$HOME/.rozo-checkout/state/<uuid>.json`, written atomically (temp file,
-  fsync, rename). The claim and the spend caps are taken together under an
-  exclusive lockfile, so two concurrent invocations cannot both decide they are
-  first. A send is claimed *before* broadcasting, so an ambiguous RPC error can
+  fsync, rename). Every read-modify-write of a state file — the claim, the
+  spend caps, the order record and the confirmation — runs inside one exclusive
+  lockfile, so two concurrent invocations can neither both decide they are
+  first, nor overwrite each other's send record. A send is claimed *before* broadcasting, so an ambiguous RPC error can
   never become a second transfer. Transactions are signed before broadcast so
   the hash is known in advance; on an ambiguous result the scripts look that
   exact transaction up instead of rebroadcasting.
