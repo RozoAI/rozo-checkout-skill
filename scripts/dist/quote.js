@@ -13,6 +13,17 @@ function redact(text) {
   s = s.replace(/\b[0-9a-fA-F]{64}\b/g, "<redacted>");
   s = s.replace(/\b[1-9A-HJ-NP-Za-km-z]{80,90}\b/g, "<redacted>");
   s = s.replace(/\[(?:\s*\d{1,3}\s*,){40,}\s*\d{1,3}\s*\]/g, "[<redacted>]");
+  s = s.replace(/\b([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^\s"'<>]+)/g, (_m, scheme, rest) => {
+    const withoutUserinfo = rest.includes("@") ? rest.slice(rest.indexOf("@") + 1) : rest;
+    const host = withoutUserinfo.split(/[/?#]/)[0];
+    const hadMore = withoutUserinfo.length > host.length;
+    return `${scheme}://${host}${hadMore ? "/<redacted>" : ""}`;
+  });
+  s = s.replace(/\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}/gi, "$1 <redacted>");
+  s = s.replace(
+    /\b(api[-_]?key|apikey|access[-_]?token|auth[-_]?token|secret|token|password|passwd|pwd)\b(\s*[:=]\s*)("?)[A-Za-z0-9._~+/=-]{6,}\3/gi,
+    "$1$2<redacted>"
+  );
   return s;
 }
 function redactDeep(value) {
@@ -84,7 +95,7 @@ var IdError = class extends Error {
   }
 };
 var PL_RE = /(pl_[0-9a-zA-Z]+)/;
-var SESSION_RE = /(paymentSession_[0-9a-zA-Z]+)/;
+var SESSION_RE = /(paymentSession_[A-Za-z0-9_-]+)/;
 function extractLinkId(urlOrId) {
   if (typeof urlOrId !== "string" || !urlOrId.trim()) {
     throw new IdError("BAD_LINK", "A Coinbase payment link URL or id is required.");
@@ -252,6 +263,17 @@ function parseDeadline(value) {
   return Number.isFinite(t) ? t : null;
 }
 
+// scripts/src/lib/guards.mjs
+function normalizeDecimal(v) {
+  if (v === null || v === void 0) return null;
+  const s = String(v).trim();
+  if (!/^\d+(\.\d+)?$/.test(s)) return s;
+  const [w, f = ""] = s.split(".");
+  const frac = f.replace(/0+$/, "");
+  const whole = w.replace(/^0+(?=\d)/, "");
+  return frac ? `${whole}.${frac}` : whole;
+}
+
 // scripts/src/quote.mjs
 function derivePayable(snapshot, now) {
   const cb = snapshot.coinbase;
@@ -347,7 +369,7 @@ async function main() {
     payload.error = { code: payability.code, message: payability.reason };
     emit(payload, EXIT_ERROR);
   }
-  if (snapshot.callerPays && snapshot.original && snapshot.callerPays !== snapshot.original) {
+  if (snapshot.callerPays && snapshot.original && normalizeDecimal(snapshot.callerPays) !== normalizeDecimal(snapshot.original)) {
     payload.warnings = [
       `callerPays (${snapshot.callerPays}) differs from the invoice amount (${snapshot.original}). This flow is supposed to charge the full invoice \u2014 do not proceed until that is explained.`
     ];

@@ -14,6 +14,17 @@ function redact(text) {
   s = s.replace(/\b[0-9a-fA-F]{64}\b/g, "<redacted>");
   s = s.replace(/\b[1-9A-HJ-NP-Za-km-z]{80,90}\b/g, "<redacted>");
   s = s.replace(/\[(?:\s*\d{1,3}\s*,){40,}\s*\d{1,3}\s*\]/g, "[<redacted>]");
+  s = s.replace(/\b([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^\s"'<>]+)/g, (_m, scheme, rest) => {
+    const withoutUserinfo = rest.includes("@") ? rest.slice(rest.indexOf("@") + 1) : rest;
+    const host = withoutUserinfo.split(/[/?#]/)[0];
+    const hadMore = withoutUserinfo.length > host.length;
+    return `${scheme}://${host}${hadMore ? "/<redacted>" : ""}`;
+  });
+  s = s.replace(/\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}/gi, "$1 <redacted>");
+  s = s.replace(
+    /\b(api[-_]?key|apikey|access[-_]?token|auth[-_]?token|secret|token|password|passwd|pwd)\b(\s*[:=]\s*)("?)[A-Za-z0-9._~+/=-]{6,}\3/gi,
+    "$1$2<redacted>"
+  );
   return s;
 }
 function redactDeep(value) {
@@ -287,27 +298,51 @@ function chainName(chainId) {
 }
 
 // scripts/src/lib/guards.mjs
-function classifyStatus({ payment, routerState, coinbase, now = Date.now() }) {
+function receiptSignal(source) {
+  const raw = source?.amountReceived;
+  if (raw === null || raw === void 0 || raw === "") {
+    return { money: false, receipt: null, unparsable: false };
+  }
+  try {
+    const receipt = comparePayment(source);
+    return { money: receipt.state !== "none", receipt, unparsable: false };
+  } catch {
+    return { money: true, receipt: null, unparsable: true };
+  }
+}
+function classifyStatus({ payment, routerState, coinbase, now = Date.now(), viewsFailed = false }) {
   const source = payment?.source || {};
   const hasTx = Boolean(source.txHash);
   const confirmed = Boolean(source.confirmedAt);
-  let receipt = null;
-  try {
-    receipt = comparePayment(source);
-  } catch {
-    receipt = null;
-  }
-  const moneyDetected = hasTx || confirmed || receipt && receipt.state !== "none";
+  const signal = receiptSignal(source);
+  const receipt = signal.receipt;
+  const moneyDetected = hasTx || confirmed || signal.money;
   const routerStatus = routerState?.status ?? null;
   const mk = (state, detail, opts = {}) => ({
     state,
     moneyDetected: Boolean(moneyDetected),
     terminal: Boolean(opts.terminal),
     escalate: Boolean(opts.escalate),
+    unknown: Boolean(opts.unknown),
     detail,
     receipt,
+    receiptUnparsable: signal.unparsable,
     routerStatus
   });
+  if (viewsFailed || !payment?.status && !routerStatus && !coinbase) {
+    return mk(
+      "unknown",
+      "Could not read the order state from the backend. This is NOT evidence that nothing has been paid \u2014 do not act on it.",
+      { unknown: true }
+    );
+  }
+  if (signal.unparsable) {
+    return mk(
+      "stuck_after_payment",
+      "The order reports an amountReceived that cannot be read. Treating it as funded until a human confirms otherwise.",
+      { escalate: true }
+    );
+  }
   if (routerStatus === "paid" || coinbase?.settled === true) {
     return mk("settled", "Coinbase invoice settled by the funder wallet.", { terminal: true });
   }
@@ -356,7 +391,10 @@ function classifyStatus({ payment, routerState, coinbase, now = Date.now() }) {
         routerStatus === "paying" ? "Funder is paying the Coinbase invoice." : "Payout landed; waiting on Coinbase settlement."
       );
     case "payment_completed":
-      return mk("settled", "Rozo payment completed.", { terminal: true });
+      return mk(
+        "paying_coinbase",
+        "The bridge leg completed, but Coinbase settlement is not yet confirmed. Keep polling."
+      );
     case "payment_expired":
       return moneyDetected ? mk("stuck_after_payment", "Order expired AFTER funds arrived \u2014 escalate immediately.", {
         escalate: true
@@ -372,10 +410,37 @@ function classifyStatus({ payment, routerState, coinbase, now = Date.now() }) {
   if (routerStatus === "payin_seen") return mk("payin_confirmed", "Router saw the pay-in.");
   if (routerStatus === "paying") return mk("paying_coinbase", "Funder is paying Coinbase.");
   return mk(
-    moneyDetected ? "stuck_after_payment" : "awaiting_deposit",
-    `Unrecognized backend status "${payment?.status ?? "unknown"}".`,
-    { escalate: Boolean(moneyDetected) }
+    moneyDetected ? "stuck_after_payment" : "unknown",
+    `Unrecognized backend status "${payment?.status ?? "unknown"}"; not assuming anything about it.`,
+    { escalate: Boolean(moneyDetected), unknown: !moneyDetected }
   );
+}
+
+// scripts/src/lib/state.mjs
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+function stateRoot() {
+  return process.env.ROZO_CHECKOUT_STATE_DIR || path.join(os.homedir(), ".rozo-checkout", "state");
+}
+function findByLinkId(linkId) {
+  const dir = stateRoot();
+  let files = [];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
+  } catch {
+    return null;
+  }
+  let best = null;
+  for (const f of files) {
+    try {
+      const s = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+      if (s?.linkId !== linkId) continue;
+      if (!best || String(s.createdAt) > String(best.createdAt)) best = s;
+    } catch {
+    }
+  }
+  return best;
 }
 
 // scripts/src/status.mjs
@@ -389,7 +454,15 @@ async function snapshot({ rozoPaymentId, linkId }) {
   } catch (err) {
     statusError = { code: err.code, message: err.message };
   }
-  const id = rozoPaymentId || status?.rozo_payment_id || null;
+  let id = rozoPaymentId || status?.rozo_payment_id || null;
+  let idSource = rozoPaymentId ? "argument" : status?.rozo_payment_id ? "invoice-status" : null;
+  if (!id && linkId) {
+    const local = findByLinkId(linkId);
+    if (local) {
+      id = local.rozoPaymentId;
+      idSource = "local state";
+    }
+  }
   let payment = null;
   let paymentError = null;
   if (id && isRozoPaymentId(id)) {
@@ -399,16 +472,22 @@ async function snapshot({ rozoPaymentId, linkId }) {
       paymentError = { code: err.code, message: err.message };
     }
   }
+  const viewsFailed = Boolean(statusError) && !payment;
   const verdict = classifyStatus({
     payment: payment || status?.rozoPayment || {},
     routerState: status?.routerState,
-    coinbase: status?.coinbase
+    coinbase: status?.coinbase,
+    viewsFailed
   });
   const source = payment?.source || status?.rozoPayment?.source || {};
   return {
     rozoPaymentId: id,
+    rozoPaymentIdSource: idSource,
+    // Without the authoritative payment object we are reading a partial view.
+    authoritativeView: Boolean(payment),
     linkId: linkId || status?.pl_id || null,
     state: verdict.state,
+    unknown: verdict.unknown,
     moneyDetected: verdict.moneyDetected,
     terminal: verdict.terminal,
     escalate: verdict.escalate,
@@ -447,24 +526,25 @@ async function main() {
   const deadline = Date.now() + timeoutMs;
   let result = await snapshot({ rozoPaymentId, linkId });
   const history = [{ at: (/* @__PURE__ */ new Date()).toISOString(), state: result.state }];
-  while (watch && !result.terminal && !result.escalate && Date.now() < deadline) {
+  while (watch && !result.terminal && !result.escalate && !result.unknown && Date.now() < deadline) {
     await sleep(POLL_INTERVAL_MS);
     const next = await snapshot({ rozoPaymentId: result.rozoPaymentId || rozoPaymentId, linkId });
     if (next.state !== result.state) history.push({ at: (/* @__PURE__ */ new Date()).toISOString(), state: next.state });
     result = next;
   }
-  const guidance = result.escalate ? "MONEY DETECTED and the order is not on a healthy path. Do NOT pay again and do NOT create a new order for this link. Preserve linkId, rozoPaymentId and every tx hash, then escalate to the operator for manual reconciliation." : result.state === "expired_unfunded" ? "Nothing was funded. It is safe to start over with a fresh link." : result.terminal ? "Done." : "Still in flight. Poll again in ~10s.";
-  const unresolved = watch && !result.terminal && !result.escalate;
+  const guidance = result.escalate ? "MONEY DETECTED and the order is not on a healthy path. Do NOT pay again and do NOT create a new order for this link. Preserve linkId, rozoPaymentId and every tx hash, then escalate to the operator for manual reconciliation." : result.unknown ? "The order state could not be established. This is NOT evidence that nothing was paid \u2014 do not create a new order and do not send again on the strength of it. Retry, or pass --rozo-payment-id so the authoritative pay-in view can be read." : !result.authoritativeView ? "Only the fulfilment view was readable; the pay-in view is unavailable, so the money-detected rule cannot be enforced. Pass --rozo-payment-id for a complete answer." : result.state === "expired_unfunded" ? "Nothing was funded. It is safe to start over with a fresh link." : result.terminal ? "Done." : "Still in flight. Poll again in ~10s.";
+  const unresolved = watch && !result.terminal && !result.escalate && !result.unknown;
+  const failed = result.escalate || result.unknown || !result.authoritativeView;
   emit(
     {
-      success: !result.escalate,
+      success: !failed,
       step: "status",
       ...result,
       history,
       guidance,
       timedOut: unresolved
     },
-    unresolved ? EXIT_UNCONFIRMED : 0
+    failed ? EXIT_ERROR : unresolved ? EXIT_UNCONFIRMED : 0
   );
 }
 main().catch((err) => fail(err));

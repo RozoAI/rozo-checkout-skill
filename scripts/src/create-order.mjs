@@ -3,6 +3,15 @@
  * create-order.js — steps 4-6 of the flow.
  *
  *   node scripts/dist/create-order.js --url "<coinbase link>" --chain 900 --token USDT
+ *   node scripts/dist/create-order.js --url "<coinbase link>" --chain 900 --token USDT --confirm
+ *
+ * TWO-PHASE BY DESIGN (PLAN §3 step 6b). Without `--confirm` the full deposit
+ * address, memo and BOLT11 are WITHHELD: the caller gets the masked summary
+ * needed to ask the user for a binding yes, and nothing that could be paid by
+ * accident. Re-running with `--confirm` (which reuses the same order) releases
+ * the full `deposit` block and writes a confirmation record. That record is
+ * what the send scripts require, and it is bound to a digest of the exact
+ * deposit instructions that were shown, so it cannot authorise anything else.
  *
  * What it does, in order, aborting on the first failure:
  *   1. fresh quote (the receipt lives ~60s, so we never carry one over)
@@ -42,9 +51,14 @@ import {
   isSatsUnit,
 } from './lib/amounts.mjs';
 import { checkExpiry } from './lib/expiry.mjs';
-import { reuseGuard, verifyCreateAgainstQuote, checkPayable } from './lib/guards.mjs';
+import {
+  reuseGuard,
+  verifyCreateAgainstQuote,
+  checkPayable,
+  normalizeMerchant,
+} from './lib/guards.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
-import { createOrderRecord } from './lib/state.mjs';
+import { createOrderRecord, recordConfirmation } from './lib/state.mjs';
 
 function confirmTier(usdAmount) {
   const usd = Number(usdAmount);
@@ -71,6 +85,7 @@ async function main() {
     );
   }
   const requested = { chainId, tokenSymbol };
+  const confirmed = Boolean(args.confirm);
 
   // Fail closed on the blacklist before doing anything else, so a broken
   // vendored list can never be discovered only after an address is on screen.
@@ -237,10 +252,29 @@ async function main() {
   });
 
   const usd = created.original ?? snapshot.original;
+  const family = chainFamily(source.chainId);
+  const tier = confirmTier(usd);
+
+  // `guard.deposit` was produced by validateDepositInstructions: the amount is
+  // parsable and positive, Lightning has a BOLT11, Stellar has its memo.
+  const depositInfo = guard.deposit;
+
+  if (confirmed) {
+    recordConfirmation(rozoPaymentId, { source, invoiceAmount: usd, tier });
+  }
+
+  const memoRequirement = lightning
+    ? 'Lightning invoices carry their own routing data; there is no separate memo.'
+    : source.receiverMemo
+      ? 'This deposit REQUIRES the memo/tag below. Sending without it will very likely lose the funds.'
+      : family === 'stellar'
+        ? 'A Stellar deposit always requires a memo.'
+        : 'This deposit does not use a memo. Leave the memo field empty.';
 
   emit({
     success: true,
     step: 'create-order',
+    confirmed,
     reused: Boolean(created.reused),
     reusedNote: created.reused
       ? 'An existing unfunded order for this link was reused; it passed the funded-check above.'
@@ -248,35 +282,42 @@ async function main() {
     linkId: created.linkId ?? parsedLinkId,
     rozoPaymentId,
     paymentLink: created.paymentLink ?? null,
-    merchant: created.merchant ?? snapshot.merchant,
+    merchant: normalizeMerchant(created.merchant ?? snapshot.merchant),
     invoice: { amount: usd, currency: snapshot?.fiat?.currency ?? 'USD' },
     callerPays: created.callerPays ?? snapshot.callerPays,
     discount: created.discount ?? '0',
 
-    // Machine-readable, copy-pastable. This is the ONLY place the full address
-    // and memo appear.
-    deposit: {
-      chainId: source.chainId,
-      chain: chainName(source.chainId),
-      tokenSymbol: source.tokenSymbol,
-      tokenAddress: source.tokenAddress ?? null,
-      receiverAddress: source.receiverAddress,
-      receiverMemo: source.receiverMemo ?? null,
-      amount: source.amount,
-      amountUnit: source.amountUnit ?? null,
-      isSats: isSatsUnit(source.amountUnit),
-      lnInvoice: bolt11,
-      expiresAt: payment?.expiresAt ?? null,
-    },
+    // Machine-readable, copy-pastable — and WITHHELD until --confirm. This is
+    // the only place the full address, memo and BOLT11 ever appear.
+    deposit: confirmed
+      ? {
+          chainId: source.chainId,
+          chain: chainName(source.chainId),
+          tokenSymbol: source.tokenSymbol,
+          tokenAddress: source.tokenAddress || null,
+          // Lightning has no deposit address: the BOLT11 IS the instruction.
+          receiverAddress: lightning ? null : source.receiverAddress,
+          receiverMemo: source.receiverMemo ?? null,
+          amount: source.amount,
+          amountUnit: source.amountUnit ?? null,
+          isSats: isSatsUnit(source.amountUnit),
+          lnInvoice: bolt11 || null,
+          payTo: depositInfo.payTo,
+          expiresAt: payment?.expiresAt ?? null,
+        }
+      : null,
+    depositWithheld: !confirmed,
 
     // Safe for prose / chat.
     display: {
       chain: chainName(source.chainId),
       token: source.tokenSymbol,
       amount: formatAmount(source),
-      receiverAddressMasked: maskAddress(source.receiverAddress),
+      isSats: isSatsUnit(source.amountUnit),
+      payToMasked: maskAddress(depositInfo.payTo),
       receiverMemoMasked: maskMemo(source.receiverMemo),
       hasMemo: Boolean(source.receiverMemo),
+      memoRequirement,
     },
 
     expiry: {
@@ -288,16 +329,18 @@ async function main() {
     },
 
     confirmation: {
-      required: confirmTier(usd),
-      note:
-        'This is the binding confirmation point. Present chain, token, exact amount, masked ' +
-        'address, memo presence, both expiries and the reused flag, then ask.',
+      required: tier,
+      satisfied: confirmed,
+      note: confirmed
+        ? 'Confirmation recorded. The send scripts will verify it against the live deposit data.'
+        : 'BINDING CONFIRMATION POINT. Present chain, token, exact amount, the masked address, ' +
+          'the memo requirement, both expiries and the reused flag, and get an explicit yes. ' +
+          'Then re-run this command with --confirm to release the full deposit details.',
       warnings: [
         'Wrong token, wrong network, or wrong amount is usually unrecoverable.',
-        source.receiverMemo
-          ? 'This deposit REQUIRES the memo/tag. Sending without it can lose the funds.'
-          : 'No memo is required for this deposit.',
+        memoRequirement,
         'Send exactly once. A second send to the same one-time address is not guaranteed to be credited.',
+        'The deposit amount can exceed the invoice: it includes the bridge and network fees.',
       ],
     },
 
@@ -307,15 +350,19 @@ async function main() {
       digest: blacklist.provenance.addressesSha256,
     },
 
-    nextStep: {
-      modeA: 'Pay the deposit from any wallet, then poll: status.js --rozo-payment-id <id>',
-      modeB:
-        chainFamily(source.chainId) === 'evm'
-          ? 'send-evm.js --rozo-payment-id <id>  (requires ROZO_CHECKOUT_EVM_KEY)'
-          : chainFamily(source.chainId) === 'solana'
-            ? 'send-sol.js --rozo-payment-id <id>  (requires ROZO_CHECKOUT_SOL_KEY)'
-            : 'not available for this chain — pay from a wallet (Mode A)',
-    },
+    nextStep: confirmed
+      ? {
+          modeA: 'Give the user the `deposit` block, then poll: status.js --rozo-payment-id <id>',
+          modeB:
+            family === 'evm'
+              ? `send-evm.js --rozo-payment-id ${rozoPaymentId} --send  (requires ROZO_CHECKOUT_EVM_KEY)`
+              : family === 'solana'
+                ? `send-sol.js --rozo-payment-id ${rozoPaymentId} --send  (requires ROZO_CHECKOUT_SOL_KEY)`
+                : 'not available for this chain — pay from a wallet (Mode A)',
+        }
+      : {
+          confirm: 'Re-run this exact command with --confirm once the user has said yes.',
+        },
   });
 }
 

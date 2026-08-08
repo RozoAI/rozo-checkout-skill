@@ -16,6 +16,7 @@ import { extractLinkId } from './lib/ids.mjs';
 import { quoteInvoice, snapshotFromQuote } from './lib/api.mjs';
 import { SUPPORTED_SOURCES, isSupportedSource, chainName } from './lib/amounts.mjs';
 import { parseDeadline } from './lib/expiry.mjs';
+import { normalizeDecimal } from './lib/guards.mjs';
 
 function derivePayable(snapshot, now) {
   const cb = snapshot.coinbase;
@@ -124,7 +125,12 @@ async function main() {
     emit(payload, EXIT_ERROR);
   }
 
-  if (snapshot.callerPays && snapshot.original && snapshot.callerPays !== snapshot.original) {
+  // Compare as money, not as text: "5.00" and "5.000000" are the same amount.
+  if (
+    snapshot.callerPays &&
+    snapshot.original &&
+    normalizeDecimal(snapshot.callerPays) !== normalizeDecimal(snapshot.original)
+  ) {
     payload.warnings = [
       `callerPays (${snapshot.callerPays}) differs from the invoice amount (${snapshot.original}). ` +
         'This flow is supposed to charge the full invoice — do not proceed until that is explained.',

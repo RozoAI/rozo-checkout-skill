@@ -3,11 +3,14 @@
  * send-sol.js — Mode B, Solana only (USDC / USDT SPL transfers).
  *
  *   ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
- *     node scripts/dist/send-sol.js --rozo-payment-id <uuid>
+ *     node scripts/dist/send-sol.js --rozo-payment-id <uuid> --send
  *
- * Same rails as send-evm.js: env-only key, live re-checks before signing,
- * genesis-hash check that the RPC really is mainnet, claim-before-broadcast,
- * and no blind rebroadcast on an ambiguous result.
+ * Same rails as send-evm.js: refuses to run without `--send` and without a
+ * confirmation recorded by `create-order.js --confirm` that still matches the
+ * live deposit data; env-only key; live re-checks before signing; a
+ * genesis-hash check that the RPC really is mainnet; payability re-proved as
+ * the last step before broadcast; claim-before-broadcast; and no blind
+ * rebroadcast on an ambiguous result.
  *
  * A Solana order may carry `source.receiverMemo`. When it does, the memo
  * instruction is included in the same transaction — a deposit that needs a
@@ -26,8 +29,9 @@ import {
 import { assertRozoPaymentId, maskAddress } from './lib/ids.mjs';
 import { chainName, decimalsFor } from './lib/amounts.mjs';
 import { readKey, assertNoTrackedDotEnv, SOL_KEY_ENV } from './lib/keys.mjs';
-import { preflight } from './lib/presend.mjs';
+import { preflight, finalPayabilityCheck } from './lib/presend.mjs';
 import { claimSend, recordSendResult } from './lib/state.mjs';
+import { broadcastOutcome } from './lib/outcomes.mjs';
 
 import {
   Connection,
@@ -107,11 +111,13 @@ async function main() {
     secret.length === 64 ? Keypair.fromSecretKey(secret) : Keypair.fromSeed(secret);
   const sender = keypair.publicKey.toBase58();
 
-  const { source, state, expiry, caps, amountAtomic } = await preflight({
+  const dryRun = Boolean(args['dry-run']);
+  const { source, state, expiry, amountAtomic, payment } = await preflight({
     rozoPaymentId,
     expectFamily: 'solana',
     senderAddress: sender,
-    allowLarge: Boolean(args['yes-large']),
+    send: Boolean(args.send),
+    dryRun,
   });
 
   const rpcUrl =
@@ -203,7 +209,7 @@ async function main() {
     }
   }
 
-  if (args['dry-run']) {
+  if (dryRun) {
     emit({
       success: true,
       step: 'send-sol-dry-run',
@@ -219,20 +225,11 @@ async function main() {
         toIsTokenAccount,
         withMemo: Boolean(source.receiverMemo),
       },
-      caps,
+      confirmedAt: state.confirmation?.confirmedAt ?? null,
       minutesOfSlack: Math.floor(expiry.msOfSlack / 60000),
-      note: 'Nothing was signed or broadcast.',
+      note: 'Nothing was signed or broadcast. Add --send (without --dry-run) to execute.',
     });
   }
-
-  claimSend(rozoPaymentId, {
-    chainId: '900',
-    tokenSymbol: source.tokenSymbol,
-    from: sender,
-    to: source.receiverAddress,
-    amountAtomic: amountAtomic.toString(),
-    memo: source.receiverMemo ?? null,
-  });
 
   const tx = new Transaction();
   tx.add(
@@ -263,8 +260,32 @@ async function main() {
   tx.sign(keypair);
 
   const signature = tx.signatures[0]?.signature
-    ? require_bs58_encode(tx.signatures[0].signature)
+    ? base58Encode(tx.signatures[0].signature)
     : null;
+
+  // Last gate before money moves: the Coinbase link may have been consumed
+  // while the RPC preparation above was running.
+  await finalPayabilityCheck({
+    linkId: state.linkId,
+    chainId: source.chainId,
+    intentExpiresAt: payment?.expiresAt,
+  });
+
+  // Claim (and charge the spend caps) atomically, BEFORE broadcasting. The
+  // signature is already known, so an ambiguous send can be resolved exactly.
+  claimSend(
+    rozoPaymentId,
+    {
+      chainId: '900',
+      tokenSymbol: source.tokenSymbol,
+      from: sender,
+      to: source.receiverAddress,
+      amountAtomic: amountAtomic.toString(),
+      memo: source.receiverMemo ?? null,
+      expectedTxHash: signature,
+    },
+    { allowLarge: Boolean(args['yes-large']) },
+  );
 
   let sent = null;
   try {
@@ -311,15 +332,52 @@ async function main() {
 
   recordSendResult(rozoPaymentId, { status: 'submitted', txHash: sent });
 
+  // Three distinct outcomes, which must not be conflated:
+  //   executionError — the transaction landed and FAILED (value.err)
+  //   confirmed      — the transaction landed and succeeded
+  //   unresolved     — we simply never heard back within the window
   let confirmed = false;
+  let executionError = null;
   try {
     const res = await connection.confirmTransaction(
       { signature: sent, blockhash, lastValidBlockHeight },
       'confirmed',
     );
-    confirmed = !res?.value?.err;
+    if (res?.value?.err) {
+      executionError = res.value.err;
+    } else {
+      confirmed = true;
+    }
   } catch {
     confirmed = false;
+  }
+
+  if (executionError) {
+    const outcome = broadcastOutcome({ executionError });
+    recordSendResult(rozoPaymentId, {
+      status: outcome.recordStatus,
+      txHash: sent,
+      note: redact(JSON.stringify(executionError)),
+    });
+    emit(
+      {
+        success: false,
+        step: 'send-sol',
+        submitted: true,
+        confirmed: false,
+        rozoPaymentId,
+        linkId: state.linkId,
+        txHash: sent,
+        error: {
+          code: broadcastOutcome({ executionError }).code,
+          message: `The transaction landed but failed on chain: ${redact(JSON.stringify(executionError))}`,
+        },
+        guidance:
+          'The transfer failed, so no funds moved — but this order stays locked against a ' +
+          'second automated send. Investigate before retrying anything.',
+      },
+      EXIT_ERROR,
+    );
   }
 
   if (!confirmed) {
@@ -364,7 +422,7 @@ async function main() {
 }
 
 /** base58-encode a signature buffer (no extra dependency). */
-function require_bs58_encode(buf) {
+function base58Encode(buf) {
   let num = 0n;
   for (const b of buf) num = num * 256n + BigInt(b);
   let out = '';

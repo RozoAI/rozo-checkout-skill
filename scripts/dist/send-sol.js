@@ -10505,8 +10505,8 @@ var require_dist = __commonJS({
         constructor(failure, failures) {
           let cached2;
           const { message, explanation, ...rest } = failure;
-          const { path: path4 } = failure;
-          const msg = path4.length === 0 ? message : `At path: ${path4.join(".")} -- ${message}`;
+          const { path: path3 } = failure;
+          const msg = path3.length === 0 ? message : `At path: ${path3.join(".")} -- ${message}`;
           super(explanation ?? msg);
           if (explanation != null)
             this.cause = msg;
@@ -10551,15 +10551,15 @@ var require_dist = __commonJS({
         } else if (typeof result === "string") {
           result = { message: result };
         }
-        const { path: path4, branch } = context;
+        const { path: path3, branch } = context;
         const { type: type2 } = struct6;
         const { refinement, message = `Expected a value of type \`${type2}\`${refinement ? ` with refinement \`${refinement}\`` : ""}, but received: \`${print(value)}\`` } = result;
         return {
           value,
           type: type2,
           refinement,
-          key: path4[path4.length - 1],
-          path: path4,
+          key: path3[path3.length - 1],
+          path: path3,
           branch,
           ...result,
           message
@@ -10577,8 +10577,8 @@ var require_dist = __commonJS({
         }
       }
       function* run(value, struct6, options = {}) {
-        const { path: path4 = [], branch = [value], coerce: coerce2 = false, mask: mask2 = false } = options;
-        const ctx = { path: path4, branch, mask: mask2 };
+        const { path: path3 = [], branch = [value], coerce: coerce2 = false, mask: mask2 = false } = options;
+        const ctx = { path: path3, branch, mask: mask2 };
         if (coerce2) {
           value = struct6.coercer(value, ctx);
         }
@@ -10590,7 +10590,7 @@ var require_dist = __commonJS({
         }
         for (let [k, v, s] of struct6.entries(value, ctx)) {
           const ts = run(v, s, {
-            path: k === void 0 ? path4 : [...path4, k],
+            path: k === void 0 ? path3 : [...path3, k],
             branch: k === void 0 ? branch : [...branch, v],
             coerce: coerce2,
             mask: mask2,
@@ -12520,14 +12520,14 @@ var require_url_state_machine = __commonJS({
       return url.replace(/\u0009|\u000A|\u000D/g, "");
     }
     function shortenPath(url) {
-      const path4 = url.path;
-      if (path4.length === 0) {
+      const path3 = url.path;
+      if (path3.length === 0) {
         return;
       }
-      if (url.scheme === "file" && path4.length === 1 && isNormalizedWindowsDriveLetter(path4[0])) {
+      if (url.scheme === "file" && path3.length === 1 && isNormalizedWindowsDriveLetter(path3[0])) {
         return;
       }
-      path4.pop();
+      path3.pop();
     }
     function includesCredentials(url) {
       return url.username !== "" || url.password !== "";
@@ -14823,7 +14823,7 @@ var require_constants = __commonJS({
 var require_node_gyp_build = __commonJS({
   "node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
     var fs4 = __require("fs");
-    var path4 = __require("path");
+    var path3 = __require("path");
     var os2 = __require("os");
     var runtimeRequire = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
     var vars = process.config && process.config.variables || {};
@@ -14840,21 +14840,21 @@ var require_node_gyp_build = __commonJS({
       return runtimeRequire(load.resolve(dir));
     }
     load.resolve = load.path = function(dir) {
-      dir = path4.resolve(dir || ".");
+      dir = path3.resolve(dir || ".");
       try {
-        var name = runtimeRequire(path4.join(dir, "package.json")).name.toUpperCase().replace(/-/g, "_");
+        var name = runtimeRequire(path3.join(dir, "package.json")).name.toUpperCase().replace(/-/g, "_");
         if (process.env[name + "_PREBUILD"]) dir = process.env[name + "_PREBUILD"];
       } catch (err) {
       }
       if (!prebuildsOnly) {
-        var release = getFirst(path4.join(dir, "build/Release"), matchBuild);
+        var release = getFirst(path3.join(dir, "build/Release"), matchBuild);
         if (release) return release;
-        var debug = getFirst(path4.join(dir, "build/Debug"), matchBuild);
+        var debug = getFirst(path3.join(dir, "build/Debug"), matchBuild);
         if (debug) return debug;
       }
       var prebuild = resolve(dir);
       if (prebuild) return prebuild;
-      var nearby = resolve(path4.dirname(process.execPath));
+      var nearby = resolve(path3.dirname(process.execPath));
       if (nearby) return nearby;
       var target = [
         "platform=" + platform,
@@ -14871,14 +14871,14 @@ var require_node_gyp_build = __commonJS({
       ].filter(Boolean).join(" ");
       throw new Error("No native build was found for " + target + "\n    loaded from: " + dir + "\n");
       function resolve(dir2) {
-        var tuples = readdirSync(path4.join(dir2, "prebuilds")).map(parseTuple);
+        var tuples = readdirSync(path3.join(dir2, "prebuilds")).map(parseTuple);
         var tuple = tuples.filter(matchTuple(platform, arch)).sort(compareTuples)[0];
         if (!tuple) return;
-        var prebuilds = path4.join(dir2, "prebuilds", tuple.name);
+        var prebuilds = path3.join(dir2, "prebuilds", tuple.name);
         var parsed = readdirSync(prebuilds).map(parseTags);
         var candidates = parsed.filter(matchTags(runtime, abi));
         var winner = candidates.sort(compareTags(runtime))[0];
-        if (winner) return path4.join(prebuilds, winner.file);
+        if (winner) return path3.join(prebuilds, winner.file);
       }
     };
     function readdirSync(dir) {
@@ -14890,7 +14890,7 @@ var require_node_gyp_build = __commonJS({
     }
     function getFirst(dir, filter) {
       var files = readdirSync(dir).filter(filter);
-      return files[0] && path4.join(dir, files[0]);
+      return files[0] && path3.join(dir, files[0]);
     }
     function matchBuild(name) {
       return /\.node$/.test(name);
@@ -31216,20 +31216,20 @@ var require_file_uri_to_path = __commonJS({
       var rest = decodeURI(uri.substring(7));
       var firstSlash = rest.indexOf("/");
       var host = rest.substring(0, firstSlash);
-      var path4 = rest.substring(firstSlash + 1);
+      var path3 = rest.substring(firstSlash + 1);
       if ("localhost" == host) host = "";
       if (host) {
         host = sep + sep + host;
       }
-      path4 = path4.replace(/^(.+)\|/, "$1:");
+      path3 = path3.replace(/^(.+)\|/, "$1:");
       if (sep == "\\") {
-        path4 = path4.replace(/\//g, "\\");
+        path3 = path3.replace(/\//g, "\\");
       }
-      if (/^.+\:/.test(path4)) {
+      if (/^.+\:/.test(path3)) {
       } else {
-        path4 = sep + path4;
+        path3 = sep + path3;
       }
-      return host + path4;
+      return host + path3;
     }
   }
 });
@@ -31238,18 +31238,18 @@ var require_file_uri_to_path = __commonJS({
 var require_bindings = __commonJS({
   "node_modules/bindings/bindings.js"(exports, module) {
     var fs4 = __require("fs");
-    var path4 = __require("path");
+    var path3 = __require("path");
     var fileURLToPath2 = require_file_uri_to_path();
-    var join = path4.join;
-    var dirname = path4.dirname;
-    var exists = fs4.accessSync && function(path5) {
+    var join = path3.join;
+    var dirname = path3.dirname;
+    var exists = fs4.accessSync && function(path4) {
       try {
-        fs4.accessSync(path5);
+        fs4.accessSync(path4);
       } catch (e) {
         return false;
       }
       return true;
-    } || fs4.existsSync || path4.existsSync;
+    } || fs4.existsSync || path3.existsSync;
     var defaults = {
       arrow: process.env.NODE_BINDINGS_ARROW || " \u2192 ",
       compiled: process.env.NODE_BINDINGS_COMPILED_DIR || "compiled",
@@ -31294,7 +31294,7 @@ var require_bindings = __commonJS({
       if (!opts.module_root) {
         opts.module_root = exports.getRoot(exports.getFileName());
       }
-      if (path4.extname(opts.bindings) != ".node") {
+      if (path3.extname(opts.bindings) != ".node") {
         opts.bindings += ".node";
       }
       var requireFunc = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
@@ -31445,6 +31445,17 @@ function redact(text) {
   s = s.replace(/\b[0-9a-fA-F]{64}\b/g, "<redacted>");
   s = s.replace(/\b[1-9A-HJ-NP-Za-km-z]{80,90}\b/g, "<redacted>");
   s = s.replace(/\[(?:\s*\d{1,3}\s*,){40,}\s*\d{1,3}\s*\]/g, "[<redacted>]");
+  s = s.replace(/\b([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^\s"'<>]+)/g, (_m, scheme, rest) => {
+    const withoutUserinfo = rest.includes("@") ? rest.slice(rest.indexOf("@") + 1) : rest;
+    const host = withoutUserinfo.split(/[/?#]/)[0];
+    const hadMore = withoutUserinfo.length > host.length;
+    return `${scheme}://${host}${hadMore ? "/<redacted>" : ""}`;
+  });
+  s = s.replace(/\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}/gi, "$1 <redacted>");
+  s = s.replace(
+    /\b(api[-_]?key|apikey|access[-_]?token|auth[-_]?token|secret|token|password|passwd|pwd)\b(\s*[:=]\s*)("?)[A-Za-z0-9._~+/=-]{6,}\3/gi,
+    "$1$2<redacted>"
+  );
   return s;
 }
 function redactDeep(value) {
@@ -31652,7 +31663,6 @@ function chainFamily(chainId) {
 
 // scripts/src/lib/keys.mjs
 import fs from "node:fs";
-import path from "node:path";
 import { execFileSync } from "node:child_process";
 var SOL_KEY_ENV = "ROZO_CHECKOUT_SOL_KEY";
 function readKey(envName) {
@@ -31665,26 +31675,54 @@ function readKey(envName) {
   }
   return String(v).trim();
 }
+var ENV_FILE_RE = /^\.env(\..+)?$/;
+var PUBLIC_ENV_RE = /^\.env\.(example|sample|template)$/;
 function assertNoTrackedDotEnv(cwd = process.cwd()) {
-  const envFile = path.join(cwd, ".env");
-  if (!fs.existsSync(envFile)) return { checked: true, tracked: false };
-  let out = "";
+  let candidates = [];
   try {
-    out = execFileSync("git", ["ls-files", "--error-unmatch", "--", ".env"], {
+    candidates = fs.readdirSync(cwd).filter((f) => ENV_FILE_RE.test(f) && !PUBLIC_ENV_RE.test(f));
+  } catch {
+    return { checked: true, tracked: false, candidates: [] };
+  }
+  if (candidates.length === 0) return { checked: true, tracked: false, candidates: [] };
+  let insideRepo;
+  try {
+    insideRepo = execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8"
+    }).trim() === "true";
+  } catch (err) {
+    if (err && (err.code === "ENOENT" || err.code === "EACCES")) {
+      throw new SkillError(
+        "TRACKED_DOTENV_UNVERIFIABLE",
+        `Found ${candidates.length} .env file(s) here but git is unavailable, so it cannot be proved they are untracked. Refusing to use hot-wallet keys in this directory.`
+      );
+    }
+    return { checked: true, tracked: false, candidates };
+  }
+  if (!insideRepo) return { checked: true, tracked: false, candidates };
+  let out;
+  try {
+    out = execFileSync("git", ["ls-files", "-z", "--", ...candidates], {
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf8"
     });
   } catch {
-    return { checked: true, tracked: false };
-  }
-  if (out.trim()) {
     throw new SkillError(
-      "TRACKED_DOTENV",
-      "A `.env` file in this directory is tracked by git. Refusing to use hot-wallet keys here \u2014 untrack it (git rm --cached .env) and add it to .gitignore first."
+      "TRACKED_DOTENV_UNVERIFIABLE",
+      "git could not report whether the .env file(s) in this directory are tracked. Refusing to use hot-wallet keys rather than assuming they are safe."
     );
   }
-  return { checked: true, tracked: false };
+  const tracked = out.split("\0").filter(Boolean);
+  if (tracked.length) {
+    throw new SkillError(
+      "TRACKED_DOTENV",
+      `These env file(s) are tracked by git: ${tracked.join(", ")}. Refusing to use hot-wallet keys here \u2014 untrack them (git rm --cached <file>) and gitignore them first.`
+    );
+  }
+  return { checked: true, tracked: false, candidates };
 }
 
 // scripts/src/lib/http.mjs
@@ -31770,6 +31808,74 @@ async function getPayment(rozoPaymentId) {
 
 // scripts/src/lib/guards.mjs
 var UNPAID_STATUS = "payment_unpaid";
+function receiptSignal(source) {
+  const raw = source?.amountReceived;
+  if (raw === null || raw === void 0 || raw === "") {
+    return { money: false, receipt: null, unparsable: false };
+  }
+  try {
+    const receipt = comparePayment(source);
+    return { money: receipt.state !== "none", receipt, unparsable: false };
+  } catch {
+    return { money: true, receipt: null, unparsable: true };
+  }
+}
+function validateDepositInstructions(source) {
+  const family = chainFamily(source?.chainId);
+  const address = typeof source?.receiverAddress === "string" ? source.receiverAddress.trim() : "";
+  const memo = typeof source?.receiverMemo === "string" ? source.receiverMemo.trim() : "";
+  const bolt11 = typeof source?.lnInvoice === "string" && source.lnInvoice.trim() ? source.lnInvoice.trim() : "";
+  let amountAtomic;
+  try {
+    amountAtomic = sourceAtomic(source, "amount");
+  } catch (err) {
+    return {
+      ok: false,
+      code: "DEPOSIT_INCOMPLETE",
+      reason: `The deposit amount is unusable: ${err.message}`
+    };
+  }
+  if (amountAtomic === null || amountAtomic <= 0n) {
+    return {
+      ok: false,
+      code: "DEPOSIT_INCOMPLETE",
+      reason: "The order carries no positive deposit amount."
+    };
+  }
+  if (family === "lightning") {
+    if (!bolt11) {
+      return {
+        ok: false,
+        code: "DEPOSIT_INCOMPLETE",
+        reason: "The Lightning order has no BOLT11 invoice yet (the swap may still be being created). Nothing is payable until it appears."
+      };
+    }
+    return { ok: true, code: null, reason: null, family, amountAtomic, payTo: bolt11, memo: null };
+  }
+  if (!address) {
+    return {
+      ok: false,
+      code: "DEPOSIT_NOT_LIVE",
+      reason: "The live payments response returned no deposit address."
+    };
+  }
+  if (family === "stellar" && !memo) {
+    return {
+      ok: false,
+      code: "DEPOSIT_MEMO_REQUIRED",
+      reason: "A Stellar deposit requires a memo, and this order did not supply one. Sending without it would very likely lose the funds. Refusing to display it as payable."
+    };
+  }
+  return {
+    ok: true,
+    code: null,
+    reason: null,
+    family,
+    amountAtomic,
+    payTo: address,
+    memo: memo || null
+  };
+}
 function reuseGuard({ payment, requested, reused = false }) {
   const source = payment?.source || {};
   const evidence = {
@@ -31783,21 +31889,15 @@ function reuseGuard({ payment, requested, reused = false }) {
     senderAddress: source.senderAddress ?? null
   };
   const hasTx = source.txHash !== null && source.txHash !== void 0 && source.txHash !== "";
-  let received = null;
-  try {
-    received = comparePayment(source);
-  } catch {
-    received = null;
-  }
-  const hasReceipt = received !== null && received.state !== "none";
+  const signal = receiptSignal(source);
   const hasConfirm = source.confirmedAt !== null && source.confirmedAt !== void 0 && source.confirmedAt !== "";
-  if (hasTx || hasReceipt || hasConfirm) {
+  if (hasTx || signal.money || hasConfirm) {
     return {
       ok: false,
       code: "ORDER_ALREADY_FUNDED",
-      reason: "This Coinbase link already has a funded Rozo order (it may have been paid elsewhere). Do NOT pay again \u2014 escalate for manual reconciliation.",
+      reason: signal.unparsable ? "This order reports an amountReceived that cannot be read. It is treated as funded until a human confirms otherwise \u2014 do NOT pay again." : "This Coinbase link already has a funded Rozo order (it may have been paid elsewhere). Do NOT pay again \u2014 escalate for manual reconciliation.",
       moneyDetected: true,
-      evidence: { ...evidence, receipt: received }
+      evidence: { ...evidence, receipt: signal.receipt, receiptUnparsable: signal.unparsable }
     };
   }
   if (payment?.status !== UNPAID_STATUS) {
@@ -31825,16 +31925,17 @@ function reuseGuard({ payment, requested, reused = false }) {
       evidence
     };
   }
-  if (!source.receiverAddress) {
+  const deposit = validateDepositInstructions(source);
+  if (!deposit.ok) {
     return {
       ok: false,
-      code: "DEPOSIT_NOT_LIVE",
-      reason: "The live payments GET returned no deposit address.",
+      code: deposit.code,
+      reason: deposit.reason,
       moneyDetected: false,
       evidence
     };
   }
-  return { ok: true, code: null, reason: null, moneyDetected: false, evidence };
+  return { ok: true, code: null, reason: null, moneyDetected: false, evidence, deposit };
 }
 function checkPayable(statusResponse, now = Date.now()) {
   const cb = statusResponse?.coinbase;
@@ -31863,24 +31964,42 @@ function checkPayable(statusResponse, now = Date.now()) {
       derived
     };
   }
-  if (protocolVersion === "v3" && cb.status && cb.status !== "PAYMENT_SESSION_STATUS_CREATED") {
-    return {
-      ok: false,
-      code: "LINK_NO_LONGER_PAYABLE",
-      reason: `Payment Session status is ${cb.status}; only PAYMENT_SESSION_STATUS_CREATED is payable.`,
-      derived
-    };
-  }
-  if (cb.usageCount !== null && cb.usageCount !== void 0) {
-    const max = cb.maxUsage ?? 1;
-    if (Number(cb.usageCount) >= Number(max)) {
+  if (protocolVersion === "v3") {
+    if (!cb.status) {
       return {
         ok: false,
-        code: "LINK_NO_LONGER_PAYABLE",
-        reason: `Payment link already used (${cb.usageCount}/${max}).`,
+        code: "LINK_PAYABILITY_UNKNOWN",
+        reason: "The Payment Session response carries no status; cannot prove it is still payable.",
         derived
       };
     }
+    if (cb.status !== "PAYMENT_SESSION_STATUS_CREATED") {
+      return {
+        ok: false,
+        code: "LINK_NO_LONGER_PAYABLE",
+        reason: `Payment Session status is ${cb.status}; only PAYMENT_SESSION_STATUS_CREATED is payable.`,
+        derived
+      };
+    }
+    return { ok: true, code: null, reason: null, derived };
+  }
+  const usage = Number(cb.usageCount);
+  const max = Number(cb.maxUsage);
+  if (cb.usageCount === null || cb.usageCount === void 0 || cb.maxUsage === null || cb.maxUsage === void 0 || !Number.isFinite(usage) || !Number.isFinite(max)) {
+    return {
+      ok: false,
+      code: "LINK_PAYABILITY_UNKNOWN",
+      reason: "The payment link response is missing usageCount/maxUsage; cannot prove it has not already been used.",
+      derived
+    };
+  }
+  if (usage >= max) {
+    return {
+      ok: false,
+      code: "LINK_NO_LONGER_PAYABLE",
+      reason: `Payment link already used (${usage}/${max}).`,
+      derived
+    };
   }
   return { ok: true, code: null, reason: null, derived };
 }
@@ -31999,7 +32118,7 @@ function checkExpiry({
 
 // scripts/src/lib/blacklist.mjs
 import fs2 from "node:fs";
-import path2 from "node:path";
+import path from "node:path";
 import crypto2 from "node:crypto";
 import { fileURLToPath } from "node:url";
 var BlacklistError = class extends Error {
@@ -32058,11 +32177,11 @@ function parseBlacklist(doc) {
   return { entries, index, provenance, digest };
 }
 function candidatePaths(moduleUrl) {
-  const here = path2.dirname(fileURLToPath(moduleUrl));
+  const here = path.dirname(fileURLToPath(moduleUrl));
   return [
-    path2.join(here, "blacklist.json"),
-    path2.join(here, "..", "src", "lib", "blacklist.json"),
-    path2.join(here, "..", "..", "src", "lib", "blacklist.json")
+    path.join(here, "blacklist.json"),
+    path.join(here, "..", "src", "lib", "blacklist.json"),
+    path.join(here, "..", "..", "src", "lib", "blacklist.json")
   ];
 }
 var cached = null;
@@ -32122,22 +32241,80 @@ function assertNotBlacklisted(targets, blacklist) {
 
 // scripts/src/lib/state.mjs
 import fs3 from "node:fs";
-import path3 from "node:path";
+import path2 from "node:path";
 import os from "node:os";
 import crypto3 from "node:crypto";
+var LOCK_STALE_MS = 6e4;
+var LOCK_WAIT_MS = 1e4;
+var LOCK_POLL_MS = 25;
+function lockPath() {
+  return path2.join(stateRoot(), ".send.lock");
+}
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function tryAcquire(file) {
+  try {
+    const fd = fs3.openSync(file, "wx", 384);
+    fs3.writeFileSync(fd, JSON.stringify({ pid: process.pid, at: (/* @__PURE__ */ new Date()).toISOString() }));
+    fs3.closeSync(fd);
+    return true;
+  } catch (err) {
+    if (err.code !== "EEXIST") throw err;
+    return false;
+  }
+}
+function withLock(fn) {
+  const file = lockPath();
+  fs3.mkdirSync(path2.dirname(file), { recursive: true, mode: 448 });
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (; ; ) {
+    if (tryAcquire(file)) break;
+    try {
+      const age = Date.now() - fs3.statSync(file).mtimeMs;
+      if (age > LOCK_STALE_MS) {
+        const stolen = `${file}.stale.${crypto3.randomBytes(4).toString("hex")}`;
+        try {
+          fs3.renameSync(file, stolen);
+          fs3.unlinkSync(stolen);
+        } catch {
+        }
+        continue;
+      }
+    } catch (err) {
+      if (err.code !== "ENOENT") throw err;
+      continue;
+    }
+    if (Date.now() > deadline) {
+      throw new SkillError(
+        "LOCK_TIMEOUT",
+        "Another rozo-checkout process is holding the send lock. Refusing to proceed rather than risk a concurrent second send."
+      );
+    }
+    sleepSync(LOCK_POLL_MS);
+  }
+  try {
+    return fn();
+  } finally {
+    try {
+      fs3.unlinkSync(file);
+    } catch {
+    }
+  }
+}
 function stateRoot() {
-  return process.env.ROZO_CHECKOUT_STATE_DIR || path3.join(os.homedir(), ".rozo-checkout", "state");
+  return process.env.ROZO_CHECKOUT_STATE_DIR || path2.join(os.homedir(), ".rozo-checkout", "state");
 }
 function statePath(rozoPaymentId) {
   if (!/^[A-Za-z0-9-]{8,64}$/.test(String(rozoPaymentId || ""))) {
     throw new SkillError("BAD_ROZO_PAYMENT_ID", "Refusing to build a state path from that id.");
   }
-  return path3.join(stateRoot(), `${rozoPaymentId}.json`);
+  return path2.join(stateRoot(), `${rozoPaymentId}.json`);
 }
 function writeAtomic(file, data) {
-  const dir = path3.dirname(file);
+  const dir = path2.dirname(file);
   fs3.mkdirSync(dir, { recursive: true, mode: 448 });
-  const tmp = path3.join(dir, `.${path3.basename(file)}.${crypto3.randomBytes(6).toString("hex")}.tmp`);
+  const tmp = path2.join(dir, `.${path2.basename(file)}.${crypto3.randomBytes(6).toString("hex")}.tmp`);
   const fd = fs3.openSync(tmp, "wx", 384);
   try {
     fs3.writeFileSync(fd, JSON.stringify(data, null, 2) + "\n", "utf8");
@@ -32165,39 +32342,56 @@ function readState(rozoPaymentId) {
     );
   }
 }
-function claimSend(rozoPaymentId, intent) {
-  const state = readState(rozoPaymentId);
-  if (!state) {
-    throw new SkillError(
-      "NO_ORDER_STATE",
-      "No local record for this order. Run create-order.js in this same session first."
-    );
-  }
-  if (state.send) {
-    const err = new SkillError(
-      "ALREADY_SENT",
-      `A send was already recorded for this order at ${state.send.claimedAt} (status: ${state.send.status}). Refusing to send twice. Check the backend for the pay-in before doing anything else.`,
-      { send: state.send }
-    );
-    throw err;
-  }
-  const next = {
-    ...state,
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-    send: {
-      status: "claimed",
-      claimedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      chainId: intent.chainId,
-      tokenSymbol: intent.tokenSymbol,
-      from: intent.from,
-      to: intent.to,
-      amountAtomic: intent.amountAtomic,
-      memo: intent.memo ?? null,
-      txHash: null
+function depositDigest(source) {
+  const canonical = JSON.stringify({
+    chainId: String(source?.chainId ?? ""),
+    tokenSymbol: String(source?.tokenSymbol ?? "").toUpperCase(),
+    tokenAddress: String(source?.tokenAddress ?? ""),
+    receiverAddress: String(source?.receiverAddress ?? ""),
+    receiverMemo: source?.receiverMemo ?? null,
+    amount: String(source?.amount ?? ""),
+    amountUnit: source?.amountUnit ?? null,
+    lnInvoice: source?.lnInvoice ?? null
+  });
+  return crypto3.createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+function claimSend(rozoPaymentId, intent, { allowLarge = false, skipCaps = false } = {}) {
+  return withLock(() => {
+    const state = readState(rozoPaymentId);
+    if (!state) {
+      throw new SkillError(
+        "NO_ORDER_STATE",
+        "No local record for this order. Run create-order.js in this same session first."
+      );
     }
-  };
-  writeAtomic(statePath(rozoPaymentId), next);
-  return next;
+    if (state.send) {
+      throw new SkillError(
+        "ALREADY_SENT",
+        `A send was already recorded for this order at ${state.send.claimedAt} (status: ${state.send.status}). Refusing to send twice. Check the backend for the pay-in before doing anything else.`,
+        { send: state.send }
+      );
+    }
+    const caps = skipCaps ? null : assertSpendCapsUnlocked(state.invoiceAmount, { allowLarge, excludeId: rozoPaymentId });
+    const next = {
+      ...state,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      send: {
+        status: "claimed",
+        claimedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        chainId: intent.chainId,
+        tokenSymbol: intent.tokenSymbol,
+        from: intent.from,
+        to: intent.to,
+        amountAtomic: intent.amountAtomic,
+        memo: intent.memo ?? null,
+        nonceBefore: intent.nonceBefore ?? null,
+        expectedTxHash: intent.expectedTxHash ?? null,
+        txHash: null
+      }
+    };
+    writeAtomic(statePath(rozoPaymentId), next);
+    return { state: next, caps };
+  });
 }
 function recordSendResult(rozoPaymentId, { status, txHash = null, note = null }) {
   const state = readState(rozoPaymentId);
@@ -32218,7 +32412,7 @@ function recordSendResult(rozoPaymentId, { status, txHash = null, note = null })
   writeAtomic(statePath(rozoPaymentId), next);
   return next;
 }
-function sessionSpendUsd() {
+function sessionSpendUsd({ excludeId = null } = {}) {
   const dir = stateRoot();
   let files = [];
   try {
@@ -32228,11 +32422,12 @@ function sessionSpendUsd() {
   }
   let total = 0;
   for (const f of files) {
+    if (excludeId && f === `${excludeId}.json`) continue;
     try {
-      const s = JSON.parse(fs3.readFileSync(path3.join(dir, f), "utf8"));
+      const s = JSON.parse(fs3.readFileSync(path2.join(dir, f), "utf8"));
       if (s?.send && ["claimed", "submitted", "confirmed", "ambiguous"].includes(s.send.status)) {
         const usd = Number(s.invoiceAmount);
-        if (Number.isFinite(usd)) total += usd;
+        total += Number.isFinite(usd) ? usd : MAX_TX_USD;
       }
     } catch {
       total += MAX_TX_USD;
@@ -32242,7 +32437,7 @@ function sessionSpendUsd() {
 }
 var MAX_TX_USD = 100;
 var MAX_SESSION_USD = 200;
-function assertSpendCaps(invoiceUsd, { allowLarge = false } = {}) {
+function assertSpendCapsUnlocked(invoiceUsd, { allowLarge = false, excludeId = null } = {}) {
   const usd = Number(invoiceUsd);
   if (!Number.isFinite(usd) || usd < 0) {
     throw new SkillError("BAD_INVOICE_AMOUNT", "Cannot evaluate spend caps without a USD amount.");
@@ -32253,7 +32448,7 @@ function assertSpendCaps(invoiceUsd, { allowLarge = false } = {}) {
       `$${usd} exceeds the $${MAX_TX_USD} per-transaction cap. Re-run with --yes-large to override.`
     );
   }
-  const prior = sessionSpendUsd();
+  const prior = sessionSpendUsd({ excludeId });
   if (prior + usd > MAX_SESSION_USD) {
     throw new SkillError(
       "CAP_SESSION",
@@ -32264,7 +32459,19 @@ function assertSpendCaps(invoiceUsd, { allowLarge = false } = {}) {
 }
 
 // scripts/src/lib/presend.mjs
-async function preflight({ rozoPaymentId, expectFamily, senderAddress, allowLarge = false }) {
+async function preflight({
+  rozoPaymentId,
+  expectFamily,
+  senderAddress,
+  send = false,
+  dryRun = false
+}) {
+  if (!send && !dryRun) {
+    throw new SkillError(
+      "SEND_NOT_OPTED_IN",
+      "Refusing to move funds without the explicit --send flag. Add --dry-run to see exactly what would be signed instead."
+    );
+  }
   let blacklist;
   try {
     blacklist = loadBlacklist();
@@ -32288,6 +32495,12 @@ async function preflight({ rozoPaymentId, expectFamily, senderAddress, allowLarg
       { send: state.send }
     );
   }
+  if (!state.confirmation) {
+    throw new SkillError(
+      "NOT_CONFIRMED",
+      "This order has never been confirmed. Run `create-order.js --url <link> --chain <id> --token <SYM> --confirm` first, show the user the deposit block it prints, and get an explicit yes before sending."
+    );
+  }
   const payment = await getPayment(rozoPaymentId);
   const source = payment?.source || {};
   const family = chainFamily(source.chainId);
@@ -32306,6 +32519,15 @@ async function preflight({ rozoPaymentId, expectFamily, senderAddress, allowLarg
       ...guard.evidence,
       moneyDetected: guard.moneyDetected
     });
+  }
+  const deposit = validateDepositInstructions(source);
+  if (!deposit.ok) throw new SkillError(deposit.code, deposit.reason);
+  const liveDigest = depositDigest(source);
+  if (liveDigest !== state.confirmation.depositDigest) {
+    throw new SkillError(
+      "CONFIRMATION_STALE",
+      "The live deposit instructions differ from the ones that were confirmed. Re-run create-order.js --confirm, show the user the new details, and get a fresh yes."
+    );
   }
   if (source.receiverAddress !== state.receiverAddress) {
     throw new SkillError(
@@ -32339,12 +32561,68 @@ async function preflight({ rozoPaymentId, expectFamily, senderAddress, allowLarg
     ],
     blacklist
   );
-  const caps = assertSpendCaps(state.invoiceAmount, { allowLarge });
-  const amountAtomic = sourceAtomic(source, "amount");
-  if (amountAtomic === null || amountAtomic <= 0n) {
-    throw new SkillError("BAD_DEPOSIT_AMOUNT", "The order has no positive deposit amount.");
+  return {
+    payment,
+    source,
+    state,
+    expiry,
+    blacklist,
+    amountAtomic: deposit.amountAtomic,
+    deposit,
+    statusNow
+  };
+}
+async function finalPayabilityCheck({ linkId, chainId, intentExpiresAt }) {
+  const statusNow = await invoiceStatus({ linkId });
+  const payable = checkPayable(statusNow, Date.now());
+  if (!payable.ok) throw new SkillError(payable.code, payable.reason, payable.derived);
+  const expiry = checkExpiry({
+    now: Date.now(),
+    chainId,
+    intentExpiresAt,
+    coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry
+  });
+  if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
+  return { statusNow, payable, expiry };
+}
+
+// scripts/src/lib/outcomes.mjs
+function broadcastOutcome({ receiptStatus, executionError = null, receiptSeen = void 0 }) {
+  const seen = receiptSeen ?? (receiptStatus !== null && receiptStatus !== void 0);
+  if (executionError) {
+    return {
+      state: "failed",
+      success: false,
+      exitCode: EXIT_ERROR,
+      code: "TX_FAILED",
+      recordStatus: "failed"
+    };
   }
-  return { payment, source, state, expiry, caps, blacklist, amountAtomic, statusNow };
+  if (!seen) {
+    return {
+      state: "unconfirmed",
+      success: true,
+      exitCode: EXIT_UNCONFIRMED,
+      code: null,
+      recordStatus: "submitted"
+    };
+  }
+  if (receiptStatus === "success") {
+    return {
+      state: "confirmed",
+      success: true,
+      exitCode: EXIT_OK,
+      code: null,
+      recordStatus: "confirmed"
+    };
+  }
+  return {
+    state: "reverted",
+    success: false,
+    exitCode: EXIT_ERROR,
+    code: "TX_REVERTED",
+    recordStatus: "failed"
+  };
 }
 
 // scripts/src/send-sol.mjs
@@ -34117,11 +34395,13 @@ async function main() {
   const secret = decodeSecretKey(readKey(SOL_KEY_ENV));
   const keypair = secret.length === 64 ? import_web36.Keypair.fromSecretKey(secret) : import_web36.Keypair.fromSeed(secret);
   const sender = keypair.publicKey.toBase58();
-  const { source, state, expiry, caps, amountAtomic } = await preflight({
+  const dryRun = Boolean(args["dry-run"]);
+  const { source, state, expiry, amountAtomic, payment } = await preflight({
     rozoPaymentId,
     expectFamily: "solana",
     senderAddress: sender,
-    allowLarge: Boolean(args["yes-large"])
+    send: Boolean(args.send),
+    dryRun
   });
   const rpcUrl = args.rpc && args.rpc !== true && String(args.rpc) || process.env.ROZO_CHECKOUT_RPC_900 || "https://api.mainnet-beta.solana.com";
   const connection = new import_web36.Connection(rpcUrl, "confirmed");
@@ -34197,7 +34477,7 @@ async function main() {
       );
     }
   }
-  if (args["dry-run"]) {
+  if (dryRun) {
     emit({
       success: true,
       step: "send-sol-dry-run",
@@ -34213,19 +34493,11 @@ async function main() {
         toIsTokenAccount,
         withMemo: Boolean(source.receiverMemo)
       },
-      caps,
+      confirmedAt: state.confirmation?.confirmedAt ?? null,
       minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4),
-      note: "Nothing was signed or broadcast."
+      note: "Nothing was signed or broadcast. Add --send (without --dry-run) to execute."
     });
   }
-  claimSend(rozoPaymentId, {
-    chainId: "900",
-    tokenSymbol: source.tokenSymbol,
-    from: sender,
-    to: source.receiverAddress,
-    amountAtomic: amountAtomic.toString(),
-    memo: source.receiverMemo ?? null
-  });
   const tx = new import_web36.Transaction();
   tx.add(
     createTransferCheckedInstruction(
@@ -34252,7 +34524,25 @@ async function main() {
   tx.recentBlockhash = blockhash;
   tx.feePayer = keypair.publicKey;
   tx.sign(keypair);
-  const signature = tx.signatures[0]?.signature ? require_bs58_encode(tx.signatures[0].signature) : null;
+  const signature = tx.signatures[0]?.signature ? base58Encode(tx.signatures[0].signature) : null;
+  await finalPayabilityCheck({
+    linkId: state.linkId,
+    chainId: source.chainId,
+    intentExpiresAt: payment?.expiresAt
+  });
+  claimSend(
+    rozoPaymentId,
+    {
+      chainId: "900",
+      tokenSymbol: source.tokenSymbol,
+      from: sender,
+      to: source.receiverAddress,
+      amountAtomic: amountAtomic.toString(),
+      memo: source.receiverMemo ?? null,
+      expectedTxHash: signature
+    },
+    { allowLarge: Boolean(args["yes-large"]) }
+  );
   let sent = null;
   try {
     sent = await connection.sendRawTransaction(tx.serialize(), {
@@ -34291,14 +34581,44 @@ async function main() {
   }
   recordSendResult(rozoPaymentId, { status: "submitted", txHash: sent });
   let confirmed = false;
+  let executionError = null;
   try {
     const res = await connection.confirmTransaction(
       { signature: sent, blockhash, lastValidBlockHeight },
       "confirmed"
     );
-    confirmed = !res?.value?.err;
+    if (res?.value?.err) {
+      executionError = res.value.err;
+    } else {
+      confirmed = true;
+    }
   } catch {
     confirmed = false;
+  }
+  if (executionError) {
+    const outcome = broadcastOutcome({ executionError });
+    recordSendResult(rozoPaymentId, {
+      status: outcome.recordStatus,
+      txHash: sent,
+      note: redact(JSON.stringify(executionError))
+    });
+    emit(
+      {
+        success: false,
+        step: "send-sol",
+        submitted: true,
+        confirmed: false,
+        rozoPaymentId,
+        linkId: state.linkId,
+        txHash: sent,
+        error: {
+          code: broadcastOutcome({ executionError }).code,
+          message: `The transaction landed but failed on chain: ${redact(JSON.stringify(executionError))}`
+        },
+        guidance: "The transfer failed, so no funds moved \u2014 but this order stays locked against a second automated send. Investigate before retrying anything."
+      },
+      EXIT_ERROR
+    );
   }
   if (!confirmed) {
     emit(
@@ -34336,7 +34656,7 @@ async function main() {
     guidance: "On-chain confirmation is not settlement. Poll status.js until the state is `settled`."
   });
 }
-function require_bs58_encode(buf) {
+function base58Encode(buf) {
   let num = 0n;
   for (const b of buf) num = num * 256n + BigInt(b);
   let out = "";

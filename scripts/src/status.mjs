@@ -17,11 +17,12 @@
  * failure and never suggests paying again.
  */
 
-import { parseArgs, emit, fail, usage, EXIT_UNCONFIRMED } from './lib/output.mjs';
+import { parseArgs, emit, fail, usage, EXIT_UNCONFIRMED, EXIT_ERROR } from './lib/output.mjs';
 import { isRozoPaymentId, maskAddress } from './lib/ids.mjs';
 import { invoiceStatus, getPayment } from './lib/api.mjs';
 import { chainName, formatAmount } from './lib/amounts.mjs';
 import { classifyStatus } from './lib/guards.mjs';
+import { findByLinkId } from './lib/state.mjs';
 
 const POLL_INTERVAL_MS = 10_000;
 
@@ -36,7 +37,20 @@ async function snapshot({ rozoPaymentId, linkId }) {
     statusError = { code: err.code, message: err.message };
   }
 
-  const id = rozoPaymentId || status?.rozo_payment_id || null;
+  // The backend only echoes rozo_payment_id when it was given one (a
+  // link-only query does not resolve it), so fall back to the local record
+  // written at create time. Without an id there is no authoritative pay-in
+  // view and the money-detected rule cannot be enforced.
+  let id = rozoPaymentId || status?.rozo_payment_id || null;
+  let idSource = rozoPaymentId ? 'argument' : status?.rozo_payment_id ? 'invoice-status' : null;
+  if (!id && linkId) {
+    const local = findByLinkId(linkId);
+    if (local) {
+      id = local.rozoPaymentId;
+      idSource = 'local state';
+    }
+  }
+
   let payment = null;
   let paymentError = null;
   if (id && isRozoPaymentId(id)) {
@@ -47,18 +61,24 @@ async function snapshot({ rozoPaymentId, linkId }) {
     }
   }
 
+  const viewsFailed = Boolean(statusError) && !payment;
   const verdict = classifyStatus({
     payment: payment || status?.rozoPayment || {},
     routerState: status?.routerState,
     coinbase: status?.coinbase,
+    viewsFailed,
   });
 
   const source = payment?.source || status?.rozoPayment?.source || {};
 
   return {
     rozoPaymentId: id,
+    rozoPaymentIdSource: idSource,
+    // Without the authoritative payment object we are reading a partial view.
+    authoritativeView: Boolean(payment),
     linkId: linkId || status?.pl_id || null,
     state: verdict.state,
+    unknown: verdict.unknown,
     moneyDetected: verdict.moneyDetected,
     terminal: verdict.terminal,
     escalate: verdict.escalate,
@@ -102,7 +122,7 @@ async function main() {
   let result = await snapshot({ rozoPaymentId, linkId });
   const history = [{ at: new Date().toISOString(), state: result.state }];
 
-  while (watch && !result.terminal && !result.escalate && Date.now() < deadline) {
+  while (watch && !result.terminal && !result.escalate && !result.unknown && Date.now() < deadline) {
     await sleep(POLL_INTERVAL_MS);
     const next = await snapshot({ rozoPaymentId: result.rozoPaymentId || rozoPaymentId, linkId });
     if (next.state !== result.state) history.push({ at: new Date().toISOString(), state: next.state });
@@ -113,24 +133,32 @@ async function main() {
     ? 'MONEY DETECTED and the order is not on a healthy path. Do NOT pay again and do NOT create ' +
       'a new order for this link. Preserve linkId, rozoPaymentId and every tx hash, then escalate ' +
       'to the operator for manual reconciliation.'
-    : result.state === 'expired_unfunded'
-      ? 'Nothing was funded. It is safe to start over with a fresh link.'
-      : result.terminal
-        ? 'Done.'
-        : 'Still in flight. Poll again in ~10s.';
+    : result.unknown
+      ? 'The order state could not be established. This is NOT evidence that nothing was paid — ' +
+        'do not create a new order and do not send again on the strength of it. Retry, or pass ' +
+        '--rozo-payment-id so the authoritative pay-in view can be read.'
+      : !result.authoritativeView
+        ? 'Only the fulfilment view was readable; the pay-in view is unavailable, so the ' +
+          'money-detected rule cannot be enforced. Pass --rozo-payment-id for a complete answer.'
+        : result.state === 'expired_unfunded'
+          ? 'Nothing was funded. It is safe to start over with a fresh link.'
+          : result.terminal
+            ? 'Done.'
+            : 'Still in flight. Poll again in ~10s.';
 
-  const unresolved = watch && !result.terminal && !result.escalate;
+  const unresolved = watch && !result.terminal && !result.escalate && !result.unknown;
+  const failed = result.escalate || result.unknown || !result.authoritativeView;
 
   emit(
     {
-      success: !result.escalate,
+      success: !failed,
       step: 'status',
       ...result,
       history,
       guidance,
       timedOut: unresolved,
     },
-    unresolved ? EXIT_UNCONFIRMED : 0,
+    failed ? EXIT_ERROR : unresolved ? EXIT_UNCONFIRMED : 0,
   );
 }
 

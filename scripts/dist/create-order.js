@@ -13,6 +13,17 @@ function redact(text) {
   s = s.replace(/\b[0-9a-fA-F]{64}\b/g, "<redacted>");
   s = s.replace(/\b[1-9A-HJ-NP-Za-km-z]{80,90}\b/g, "<redacted>");
   s = s.replace(/\[(?:\s*\d{1,3}\s*,){40,}\s*\d{1,3}\s*\]/g, "[<redacted>]");
+  s = s.replace(/\b([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^\s"'<>]+)/g, (_m, scheme, rest) => {
+    const withoutUserinfo = rest.includes("@") ? rest.slice(rest.indexOf("@") + 1) : rest;
+    const host = withoutUserinfo.split(/[/?#]/)[0];
+    const hadMore = withoutUserinfo.length > host.length;
+    return `${scheme}://${host}${hadMore ? "/<redacted>" : ""}`;
+  });
+  s = s.replace(/\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}/gi, "$1 <redacted>");
+  s = s.replace(
+    /\b(api[-_]?key|apikey|access[-_]?token|auth[-_]?token|secret|token|password|passwd|pwd)\b(\s*[:=]\s*)("?)[A-Za-z0-9._~+/=-]{6,}\3/gi,
+    "$1$2<redacted>"
+  );
   return s;
 }
 function redactDeep(value) {
@@ -84,7 +95,7 @@ var IdError = class extends Error {
   }
 };
 var PL_RE = /(pl_[0-9a-zA-Z]+)/;
-var SESSION_RE = /(paymentSession_[0-9a-zA-Z]+)/;
+var SESSION_RE = /(paymentSession_[A-Za-z0-9_-]+)/;
 var UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 function extractLinkId(urlOrId) {
   if (typeof urlOrId !== "string" || !urlOrId.trim()) {
@@ -496,6 +507,74 @@ function checkExpiry({
 
 // scripts/src/lib/guards.mjs
 var UNPAID_STATUS = "payment_unpaid";
+function receiptSignal(source) {
+  const raw = source?.amountReceived;
+  if (raw === null || raw === void 0 || raw === "") {
+    return { money: false, receipt: null, unparsable: false };
+  }
+  try {
+    const receipt = comparePayment(source);
+    return { money: receipt.state !== "none", receipt, unparsable: false };
+  } catch {
+    return { money: true, receipt: null, unparsable: true };
+  }
+}
+function validateDepositInstructions(source) {
+  const family = chainFamily(source?.chainId);
+  const address = typeof source?.receiverAddress === "string" ? source.receiverAddress.trim() : "";
+  const memo = typeof source?.receiverMemo === "string" ? source.receiverMemo.trim() : "";
+  const bolt11 = typeof source?.lnInvoice === "string" && source.lnInvoice.trim() ? source.lnInvoice.trim() : "";
+  let amountAtomic;
+  try {
+    amountAtomic = sourceAtomic(source, "amount");
+  } catch (err) {
+    return {
+      ok: false,
+      code: "DEPOSIT_INCOMPLETE",
+      reason: `The deposit amount is unusable: ${err.message}`
+    };
+  }
+  if (amountAtomic === null || amountAtomic <= 0n) {
+    return {
+      ok: false,
+      code: "DEPOSIT_INCOMPLETE",
+      reason: "The order carries no positive deposit amount."
+    };
+  }
+  if (family === "lightning") {
+    if (!bolt11) {
+      return {
+        ok: false,
+        code: "DEPOSIT_INCOMPLETE",
+        reason: "The Lightning order has no BOLT11 invoice yet (the swap may still be being created). Nothing is payable until it appears."
+      };
+    }
+    return { ok: true, code: null, reason: null, family, amountAtomic, payTo: bolt11, memo: null };
+  }
+  if (!address) {
+    return {
+      ok: false,
+      code: "DEPOSIT_NOT_LIVE",
+      reason: "The live payments response returned no deposit address."
+    };
+  }
+  if (family === "stellar" && !memo) {
+    return {
+      ok: false,
+      code: "DEPOSIT_MEMO_REQUIRED",
+      reason: "A Stellar deposit requires a memo, and this order did not supply one. Sending without it would very likely lose the funds. Refusing to display it as payable."
+    };
+  }
+  return {
+    ok: true,
+    code: null,
+    reason: null,
+    family,
+    amountAtomic,
+    payTo: address,
+    memo: memo || null
+  };
+}
 function reuseGuard({ payment, requested, reused = false }) {
   const source = payment?.source || {};
   const evidence = {
@@ -509,21 +588,15 @@ function reuseGuard({ payment, requested, reused = false }) {
     senderAddress: source.senderAddress ?? null
   };
   const hasTx = source.txHash !== null && source.txHash !== void 0 && source.txHash !== "";
-  let received = null;
-  try {
-    received = comparePayment(source);
-  } catch {
-    received = null;
-  }
-  const hasReceipt = received !== null && received.state !== "none";
+  const signal = receiptSignal(source);
   const hasConfirm = source.confirmedAt !== null && source.confirmedAt !== void 0 && source.confirmedAt !== "";
-  if (hasTx || hasReceipt || hasConfirm) {
+  if (hasTx || signal.money || hasConfirm) {
     return {
       ok: false,
       code: "ORDER_ALREADY_FUNDED",
-      reason: "This Coinbase link already has a funded Rozo order (it may have been paid elsewhere). Do NOT pay again \u2014 escalate for manual reconciliation.",
+      reason: signal.unparsable ? "This order reports an amountReceived that cannot be read. It is treated as funded until a human confirms otherwise \u2014 do NOT pay again." : "This Coinbase link already has a funded Rozo order (it may have been paid elsewhere). Do NOT pay again \u2014 escalate for manual reconciliation.",
       moneyDetected: true,
-      evidence: { ...evidence, receipt: received }
+      evidence: { ...evidence, receipt: signal.receipt, receiptUnparsable: signal.unparsable }
     };
   }
   if (payment?.status !== UNPAID_STATUS) {
@@ -551,35 +624,46 @@ function reuseGuard({ payment, requested, reused = false }) {
       evidence
     };
   }
-  if (!source.receiverAddress) {
+  const deposit = validateDepositInstructions(source);
+  if (!deposit.ok) {
     return {
       ok: false,
-      code: "DEPOSIT_NOT_LIVE",
-      reason: "The live payments GET returned no deposit address.",
+      code: deposit.code,
+      reason: deposit.reason,
       moneyDetected: false,
       evidence
     };
   }
-  return { ok: true, code: null, reason: null, moneyDetected: false, evidence };
+  return { ok: true, code: null, reason: null, moneyDetected: false, evidence, deposit };
 }
 function verifyCreateAgainstQuote({ snapshot, created, requested }) {
   const drift = [];
-  const cmp = (field, a, b, normalize = (v) => v === null || v === void 0 ? null : String(v)) => {
+  const require2 = (field, a, b, normalize = defaultNormalize) => {
     const na = normalize(a);
     const nb = normalize(b);
-    if (na !== null && nb !== null && na !== nb) drift.push({ field, quoted: na, created: nb });
+    if (na === null) {
+      drift.push({ field, quoted: null, created: nb, note: "missing in quote" });
+      return;
+    }
+    if (nb === null) {
+      drift.push({ field, quoted: na, created: null, note: "missing in create response" });
+      return;
+    }
+    if (na !== nb) drift.push({ field, quoted: na, created: nb });
   };
-  cmp("linkId", snapshot?.linkId, created?.linkId);
-  cmp("merchant", snapshot?.merchant, created?.merchant);
-  cmp("original", snapshot?.original, created?.original, normalizeDecimal);
-  cmp("callerPays", snapshot?.callerPays, created?.callerPays, normalizeDecimal);
+  require2("linkId", snapshot?.linkId, created?.linkId);
+  require2("merchant", snapshot?.merchant, created?.merchant, normalizeMerchant);
+  require2("original", snapshot?.original, created?.original, normalizeDecimal);
+  require2("callerPays", snapshot?.callerPays, created?.callerPays, normalizeDecimal);
   const wantChain = String(requested?.chainId ?? "").trim();
   const wantToken = String(requested?.tokenSymbol ?? "").trim().toUpperCase();
   const gotChain = String(created?.source?.chainId ?? "").trim();
   const gotToken = String(created?.source?.tokenSymbol ?? "").trim().toUpperCase();
-  if (gotChain !== wantChain) drift.push({ field: "source.chainId", quoted: wantChain, created: gotChain });
-  if (gotToken !== wantToken) {
-    drift.push({ field: "source.tokenSymbol", quoted: wantToken, created: gotToken });
+  if (!gotChain || gotChain !== wantChain) {
+    drift.push({ field: "source.chainId", quoted: wantChain, created: gotChain || null });
+  }
+  if (!gotToken || gotToken !== wantToken) {
+    drift.push({ field: "source.tokenSymbol", quoted: wantToken, created: gotToken || null });
   }
   if (drift.length) {
     return {
@@ -609,6 +693,20 @@ function verifyCreateAgainstQuote({ snapshot, created, requested }) {
     };
   }
   return { ok: true, code: null, reason: null, drift: [] };
+}
+function defaultNormalize(v) {
+  if (v === null || v === void 0) return null;
+  const s = String(v).trim();
+  return s === "" ? null : s;
+}
+function normalizeMerchant(v) {
+  if (v === null || v === void 0) return null;
+  if (typeof v === "object") {
+    const name = v.name ?? v.merchantName ?? null;
+    return name ? String(name).trim() || null : null;
+  }
+  const s = String(v).trim();
+  return s === "" ? null : s;
 }
 function normalizeDecimal(v) {
   if (v === null || v === void 0) return null;
@@ -646,24 +744,42 @@ function checkPayable(statusResponse, now = Date.now()) {
       derived
     };
   }
-  if (protocolVersion === "v3" && cb.status && cb.status !== "PAYMENT_SESSION_STATUS_CREATED") {
-    return {
-      ok: false,
-      code: "LINK_NO_LONGER_PAYABLE",
-      reason: `Payment Session status is ${cb.status}; only PAYMENT_SESSION_STATUS_CREATED is payable.`,
-      derived
-    };
-  }
-  if (cb.usageCount !== null && cb.usageCount !== void 0) {
-    const max = cb.maxUsage ?? 1;
-    if (Number(cb.usageCount) >= Number(max)) {
+  if (protocolVersion === "v3") {
+    if (!cb.status) {
       return {
         ok: false,
-        code: "LINK_NO_LONGER_PAYABLE",
-        reason: `Payment link already used (${cb.usageCount}/${max}).`,
+        code: "LINK_PAYABILITY_UNKNOWN",
+        reason: "The Payment Session response carries no status; cannot prove it is still payable.",
         derived
       };
     }
+    if (cb.status !== "PAYMENT_SESSION_STATUS_CREATED") {
+      return {
+        ok: false,
+        code: "LINK_NO_LONGER_PAYABLE",
+        reason: `Payment Session status is ${cb.status}; only PAYMENT_SESSION_STATUS_CREATED is payable.`,
+        derived
+      };
+    }
+    return { ok: true, code: null, reason: null, derived };
+  }
+  const usage2 = Number(cb.usageCount);
+  const max = Number(cb.maxUsage);
+  if (cb.usageCount === null || cb.usageCount === void 0 || cb.maxUsage === null || cb.maxUsage === void 0 || !Number.isFinite(usage2) || !Number.isFinite(max)) {
+    return {
+      ok: false,
+      code: "LINK_PAYABILITY_UNKNOWN",
+      reason: "The payment link response is missing usageCount/maxUsage; cannot prove it has not already been used.",
+      derived
+    };
+  }
+  if (usage2 >= max) {
+    return {
+      ok: false,
+      code: "LINK_NO_LONGER_PAYABLE",
+      reason: `Payment link already used (${usage2}/${max}).`,
+      derived
+    };
   }
   return { ok: true, code: null, reason: null, derived };
 }
@@ -854,7 +970,39 @@ function createOrderRecord(record) {
     expiresAt: record.expiresAt ?? null,
     createdAt: existing?.createdAt ?? (/* @__PURE__ */ new Date()).toISOString(),
     updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    confirmation: existing?.confirmation ?? null,
     send: existing?.send ?? null
+  };
+  writeAtomic(statePath(rozoPaymentId), next);
+  return next;
+}
+function depositDigest(source) {
+  const canonical = JSON.stringify({
+    chainId: String(source?.chainId ?? ""),
+    tokenSymbol: String(source?.tokenSymbol ?? "").toUpperCase(),
+    tokenAddress: String(source?.tokenAddress ?? ""),
+    receiverAddress: String(source?.receiverAddress ?? ""),
+    receiverMemo: source?.receiverMemo ?? null,
+    amount: String(source?.amount ?? ""),
+    amountUnit: source?.amountUnit ?? null,
+    lnInvoice: source?.lnInvoice ?? null
+  });
+  return crypto2.createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+function recordConfirmation(rozoPaymentId, { source, invoiceAmount, tier }) {
+  const state = readState(rozoPaymentId);
+  if (!state) {
+    throw new SkillError("NO_ORDER_STATE", "Cannot confirm an order with no local record.");
+  }
+  const next = {
+    ...state,
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    confirmation: {
+      confirmedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      depositDigest: depositDigest(source),
+      invoiceAmount: invoiceAmount ?? state.invoiceAmount ?? null,
+      tier: tier ?? null
+    }
   };
   writeAtomic(statePath(rozoPaymentId), next);
   return next;
@@ -885,6 +1033,7 @@ async function main() {
     );
   }
   const requested = { chainId, tokenSymbol };
+  const confirmed = Boolean(args.confirm);
   let blacklist;
   try {
     blacklist = loadBlacklist();
@@ -1020,41 +1169,54 @@ async function main() {
     expiresAt: payment?.expiresAt ?? null
   });
   const usd = created.original ?? snapshot.original;
+  const family = chainFamily(source.chainId);
+  const tier = confirmTier(usd);
+  const depositInfo = guard.deposit;
+  if (confirmed) {
+    recordConfirmation(rozoPaymentId, { source, invoiceAmount: usd, tier });
+  }
+  const memoRequirement = lightning ? "Lightning invoices carry their own routing data; there is no separate memo." : source.receiverMemo ? "This deposit REQUIRES the memo/tag below. Sending without it will very likely lose the funds." : family === "stellar" ? "A Stellar deposit always requires a memo." : "This deposit does not use a memo. Leave the memo field empty.";
   emit({
     success: true,
     step: "create-order",
+    confirmed,
     reused: Boolean(created.reused),
     reusedNote: created.reused ? "An existing unfunded order for this link was reused; it passed the funded-check above." : null,
     linkId: created.linkId ?? parsedLinkId,
     rozoPaymentId,
     paymentLink: created.paymentLink ?? null,
-    merchant: created.merchant ?? snapshot.merchant,
+    merchant: normalizeMerchant(created.merchant ?? snapshot.merchant),
     invoice: { amount: usd, currency: snapshot?.fiat?.currency ?? "USD" },
     callerPays: created.callerPays ?? snapshot.callerPays,
     discount: created.discount ?? "0",
-    // Machine-readable, copy-pastable. This is the ONLY place the full address
-    // and memo appear.
-    deposit: {
+    // Machine-readable, copy-pastable — and WITHHELD until --confirm. This is
+    // the only place the full address, memo and BOLT11 ever appear.
+    deposit: confirmed ? {
       chainId: source.chainId,
       chain: chainName(source.chainId),
       tokenSymbol: source.tokenSymbol,
-      tokenAddress: source.tokenAddress ?? null,
-      receiverAddress: source.receiverAddress,
+      tokenAddress: source.tokenAddress || null,
+      // Lightning has no deposit address: the BOLT11 IS the instruction.
+      receiverAddress: lightning ? null : source.receiverAddress,
       receiverMemo: source.receiverMemo ?? null,
       amount: source.amount,
       amountUnit: source.amountUnit ?? null,
       isSats: isSatsUnit(source.amountUnit),
-      lnInvoice: bolt11,
+      lnInvoice: bolt11 || null,
+      payTo: depositInfo.payTo,
       expiresAt: payment?.expiresAt ?? null
-    },
+    } : null,
+    depositWithheld: !confirmed,
     // Safe for prose / chat.
     display: {
       chain: chainName(source.chainId),
       token: source.tokenSymbol,
       amount: formatAmount(source),
-      receiverAddressMasked: maskAddress(source.receiverAddress),
+      isSats: isSatsUnit(source.amountUnit),
+      payToMasked: maskAddress(depositInfo.payTo),
       receiverMemoMasked: maskMemo(source.receiverMemo),
-      hasMemo: Boolean(source.receiverMemo)
+      hasMemo: Boolean(source.receiverMemo),
+      memoRequirement
     },
     expiry: {
       intentExpiresAt: payment?.expiresAt ?? null,
@@ -1064,12 +1226,14 @@ async function main() {
       minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4)
     },
     confirmation: {
-      required: confirmTier(usd),
-      note: "This is the binding confirmation point. Present chain, token, exact amount, masked address, memo presence, both expiries and the reused flag, then ask.",
+      required: tier,
+      satisfied: confirmed,
+      note: confirmed ? "Confirmation recorded. The send scripts will verify it against the live deposit data." : "BINDING CONFIRMATION POINT. Present chain, token, exact amount, the masked address, the memo requirement, both expiries and the reused flag, and get an explicit yes. Then re-run this command with --confirm to release the full deposit details.",
       warnings: [
         "Wrong token, wrong network, or wrong amount is usually unrecoverable.",
-        source.receiverMemo ? "This deposit REQUIRES the memo/tag. Sending without it can lose the funds." : "No memo is required for this deposit.",
-        "Send exactly once. A second send to the same one-time address is not guaranteed to be credited."
+        memoRequirement,
+        "Send exactly once. A second send to the same one-time address is not guaranteed to be credited.",
+        "The deposit amount can exceed the invoice: it includes the bridge and network fees."
       ]
     },
     blacklist: {
@@ -1077,9 +1241,11 @@ async function main() {
       addressesInList: blacklist.entries.length,
       digest: blacklist.provenance.addressesSha256
     },
-    nextStep: {
-      modeA: "Pay the deposit from any wallet, then poll: status.js --rozo-payment-id <id>",
-      modeB: chainFamily(source.chainId) === "evm" ? "send-evm.js --rozo-payment-id <id>  (requires ROZO_CHECKOUT_EVM_KEY)" : chainFamily(source.chainId) === "solana" ? "send-sol.js --rozo-payment-id <id>  (requires ROZO_CHECKOUT_SOL_KEY)" : "not available for this chain \u2014 pay from a wallet (Mode A)"
+    nextStep: confirmed ? {
+      modeA: "Give the user the `deposit` block, then poll: status.js --rozo-payment-id <id>",
+      modeB: family === "evm" ? `send-evm.js --rozo-payment-id ${rozoPaymentId} --send  (requires ROZO_CHECKOUT_EVM_KEY)` : family === "solana" ? `send-sol.js --rozo-payment-id ${rozoPaymentId} --send  (requires ROZO_CHECKOUT_SOL_KEY)` : "not available for this chain \u2014 pay from a wallet (Mode A)"
+    } : {
+      confirm: "Re-run this exact command with --confirm once the user has said yes."
     }
   });
 }
