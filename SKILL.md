@@ -92,8 +92,13 @@ Read the USD amount from the invoice (`invoice.amount`).
 
 The binding confirmation happens at **step 4 (final confirm)**, never before —
 the pre-create preview cannot bind because the deposit address, the exact
-deposit amount and the order expiry do not exist yet. Mode B never signs
-without that confirmation having happened in the same run.
+deposit amount and the order expiry do not exist yet.
+
+This is **enforced in code, not just documented**. `create-order.js` withholds
+the full deposit address, memo and BOLT11 until it is re-run with `--confirm`,
+and `--confirm` writes a confirmation record bound to a digest of those exact
+instructions. The send scripts refuse to run without both `--send` and a
+confirmation record whose digest still matches the live deposit data.
 
 ## The flow
 
@@ -128,26 +133,34 @@ Chain ids: `1` Ethereum · `56` BNB Chain · `137` Polygon · `8453` Base ·
 
 Creating an order moves no money and costs nothing if left unfunded. In one
 run it creates the order, verifies it against the quote, fetches the
-authoritative deposit instructions, runs the reuse guard, checks the expiry
-margins, checks the deposit address against the compromised-address list, and
-re-checks that the Coinbase link is still payable.
+authoritative deposit instructions, runs the reuse guard, validates that the
+deposit instructions are complete, checks the expiry margins, checks the
+deposit address against the compromised-address list, and re-checks that the
+Coinbase link is still payable.
+
+**Without `--confirm` the full deposit address, memo and BOLT11 are withheld**
+(`deposit: null`, `depositWithheld: true`). You get everything you need to ask
+the user — masked address, exact amount, memo requirement, both expiries, the
+reused flag — and nothing that could be paid by accident.
 
 Any non-zero exit here means **do not fund the order**. See Troubleshooting.
 
 ### Step 4 — final confirm (binding)
 
-Present, from the `display` and `expiry` blocks:
+Present, from the `display` and `expiry` blocks of the run above:
 
 ```
 About to pay:
   Merchant:   {merchant}
   Invoice:    {invoice.amount} USD   (you pay the full amount, no discount)
   Send:       {display.amount} on {display.chain}
-  To:         {display.receiverAddressMasked}      <- masked, always
-  Memo/tag:   {display.receiverMemoMasked or "none required"}
+  To:         {display.payToMasked}                <- masked, always
+  Memo/tag:   {display.memoRequirement}
   Order ends: {expiry.effectiveDeadlineIso}  ({expiry.minutesOfSlack} min of slack)
   Reused existing order: {reused}
 
+  The deposit amount can exceed the invoice: it includes the bridge and
+  network fees.
   Wrong token, wrong network or wrong amount is usually unrecoverable.
   Send exactly once — a second send to this one-time address is not
   guaranteed to be credited.
@@ -155,9 +168,18 @@ About to pay:
 Confirm? (yes/no)
 ```
 
-Use the masked address in prose. The **full** address, memo and BOLT11 string
-live only in the machine-readable `deposit` object — hand that block over
-verbatim when the user needs to copy it, and never re-type an address by hand.
+Only after an explicit yes (per the threshold table), re-run the **exact same
+command with `--confirm`**:
+
+```bash
+node scripts/dist/create-order.js --url "<coinbase link>" --chain 900 --token USDT --confirm
+```
+
+That reuses the same order, re-runs every check, releases the full `deposit`
+block, and records the confirmation. Use the masked address in prose. The
+**full** address, memo and BOLT11 string live only in the machine-readable
+`deposit` object — hand that block over verbatim when the user needs to copy
+it, and never re-type an address by hand.
 
 Then pick a mode.
 
@@ -172,18 +194,21 @@ environment:
 
 ```bash
 # EVM (Ethereum, BNB Chain, Polygon, Base)
-ROZO_CHECKOUT_EVM_KEY=... node scripts/dist/send-evm.js --rozo-payment-id <uuid>
+ROZO_CHECKOUT_EVM_KEY=... node scripts/dist/send-evm.js --rozo-payment-id <uuid> --send
 
 # Solana
-ROZO_CHECKOUT_SOL_KEY=... node scripts/dist/send-sol.js --rozo-payment-id <uuid>
+ROZO_CHECKOUT_SOL_KEY=... node scripts/dist/send-sol.js --rozo-payment-id <uuid> --send
 
-# add --dry-run to see exactly what would be signed, without signing
-# add --yes-large to exceed the $100 per-transaction cap
+# --dry-run shows exactly what would be signed and signs nothing (no --send needed)
+# --yes-large exceeds the $100 per-transaction cap
 ```
 
-Mode B re-runs every check live before signing, verifies the RPC really is on
-the intended chain, verifies the token's on-chain decimals, and records the
-send locally **before** broadcasting so the same order can never be paid twice.
+`--send` is mandatory; without it the script exits with `SEND_NOT_OPTED_IN`
+and does nothing. Mode B re-runs every check live before signing, re-proves
+payability as the last step before broadcast, verifies the RPC really is on the
+intended chain, verifies the token's on-chain decimals, signs before
+broadcasting so the transaction hash is known in advance, and records the send
+locally **before** broadcasting so the same order can never be paid twice.
 Caps: **$100 per transaction**, **$200 cumulative per session**.
 
 ### Step 5 — poll
@@ -192,9 +217,18 @@ Caps: **$100 per transaction**, **$200 cumulative per session**.
 node scripts/dist/status.js --rozo-payment-id <uuid> --watch --timeout 600
 ```
 
+Always pass `--rozo-payment-id` when you have it. A link-only query cannot
+reach the authoritative pay-in view (the router does not resolve the id from a
+link alone), so the money-detected rule cannot be enforced; the script says so
+via `authoritativeView: false` and exits non-zero rather than guessing.
+
 States: `awaiting_deposit` → `payin_detected` → `payin_confirmed` →
 `bridging` → `paying_coinbase` → `settled`. Other terminal or exceptional
-states: `expired_unfunded`, `underpaid`, `stuck_after_payment`.
+states: `expired_unfunded`, `underpaid`, `stuck_after_payment`, and `unknown`
+(the backend could not be read — **not** evidence that nothing was paid).
+
+`settled` is only reported on real settlement evidence. The bridge reaching
+`payment_completed` is not that evidence and shows as `paying_coinbase`.
 
 ### Step 6 — report
 
@@ -231,13 +265,22 @@ Then stop and hand off. Do not run any send script again.
 
 | `error.code` | What happened | What to do |
 |---|---|---|
+| `SEND_NOT_OPTED_IN` | a send script was run without `--send` | intentional; add `--send` only after the user has confirmed |
+| `NOT_CONFIRMED` | no confirmation record for this order | run `create-order.js ... --confirm` after the user says yes |
+| `CONFIRMATION_STALE` | the live deposit details changed since the confirmation | re-confirm with fresh details; never send against the old ones |
 | `LINK_NO_LONGER_PAYABLE` | the Coinbase link is used, expired, settled, or was consumed by someone else between quote and now | ask the merchant for a fresh link; do not fund anything |
+| `LINK_PAYABILITY_UNKNOWN` | the Coinbase state was incomplete, so payability could not be proved | treat as not payable; retry, and do not fund on a guess |
+| `DEPOSIT_INCOMPLETE` | no positive amount, or a Lightning order with no BOLT11 yet | wait and re-run; nothing is payable yet |
+| `DEPOSIT_MEMO_REQUIRED` | a Stellar order arrived without its memo | do not send; a Stellar deposit without its memo is usually lost |
+| `LOCK_TIMEOUT` | another rozo-checkout process holds the send lock | wait for it; never bypass by clearing the lock mid-flight |
+| `TRACKED_DOTENV_UNVERIFIABLE` | env files exist but git could not prove they are untracked | fix git, or run from a directory with no env files |
+| `TX_REVERTED` / `TX_FAILED` | the transfer landed and failed | no funds moved, but the order stays locked; investigate before retrying |
 | `ORDER_ALREADY_FUNDED` | an order for this link already shows money | **money-detected rule** — do not pay again, escalate |
 | `REUSED_SOURCE_MISMATCH` | an existing order expects a different chain/token than the caller chose | let it expire, or pay the chain the order actually expects after re-confirming with the user |
 | `CREATE_DRIFT` | the created order disagrees with the quote (merchant, amount or link) | do not fund it; let it expire unfunded and report the drift |
 | `NO_DISCOUNT_VIOLATION` | the server reported a discount, or `callerPays ≠ invoice` | stop; this flow must charge the full invoice |
 | `EXPIRY_MARGIN` / `EXPIRED` | not enough time left to fund, bridge and settle | start over with a fresh link |
-| `BOLT11_TOO_SHORT` | the Lightning invoice has under 10 minutes left | re-run `create-order.js` for a fresh BOLT11 |
+| `BOLT11_TOO_SHORT` | the Lightning invoice has under 10 minutes left | see "Lightning invoice too short" below |
 | `BLACKLIST_HIT` | the deposit address or the sender is on the compromised-address list | send nothing; report it to the operator immediately |
 | `BLACKLIST_UNAVAILABLE` | the vendored list is missing, malformed or its digest does not match | the skill fails closed by design; do not work around it |
 | `ALREADY_SENT` | a send is already recorded for this order | do not send again; poll `status.js` and check the chain |
@@ -250,6 +293,14 @@ Then stop and hand off. Do not run any send script again.
 | `MISSING_KEY` | the key env var is not exported | ask the user to export it in their own shell |
 | `TRACKED_DOTENV` | a `.env` in this directory is tracked by git | untrack it before using hot-wallet keys here |
 | `EXPIRY_UNPARSABLE` | a deadline is missing or unreadable | abort; never treat an unknown deadline as "probably fine" |
+
+### Lightning invoice too short
+
+Re-running `create-order.js` does **not** mint a fresh BOLT11: while the
+existing order is unexpired the router reuses it, invoice and all. The options
+are to wait for the order to expire and then create a new one, or to ask the
+merchant for a fresh Coinbase link. Do not pay a BOLT11 with under ten minutes
+left.
 
 ### The user pasted a `commerce.coinbase.com/pay/{uuid}` URL
 

@@ -8,8 +8,13 @@ A Coinbase Payment Link only accepts USDC on Base. This repo is an agent skill
 (plus the Node scripts behind it) that routes any of the coins above through a
 bridge: you get a one-time deposit address for the coin you actually hold, and
 once your deposit lands a funder wallet settles the Coinbase invoice on your
-behalf. You pay the **full invoice amount** — there is no discount and no
-surcharge on this route.
+behalf.
+
+On the invoice itself there is **no discount**: `callerPays` equals the invoice
+amount. The **deposit** you send is a different number, and it is normally
+larger — it includes the bridge and source-chain fees needed to deliver the
+invoice amount in Base USDC. Always send exactly the `deposit.amount` the
+backend returns; never assume it equals the invoice.
 
 - `SKILL.md` — the agent-facing instructions (Claude Code skill format).
 - `scripts/` — the Node implementation; `src/` is the source, `dist/` holds
@@ -118,14 +123,23 @@ refused/failed (read `error.code`), `2` usage, `3` submitted but unconfirmed.
 # Step 1 — read-only quote, costs nothing
 node scripts/dist/quote.js --url "$LINK"
 
-# Step 2 — create the order (no money moves; unfunded orders expire)
+# Step 2 — create the order (no money moves; unfunded orders expire).
+#          The full deposit address is WITHHELD at this stage: you get the
+#          masked summary to review, and `depositWithheld: true`.
 node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT
 
-# Step 3a — Mode A: pay the printed deposit address from your own wallet,
+# Step 3 — review the amount, chain, masked address, memo requirement and
+#          expiry. Only when you have decided to pay, re-run the same command
+#          with --confirm. This releases the full deposit block and records the
+#          confirmation the send scripts require.
+node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT --confirm
+
+# Step 4a — Mode A: pay the deposit block from your own wallet,
 #           then watch it settle
 node scripts/dist/status.js --rozo-payment-id <uuid> --watch --timeout 600
 
-# Step 3b — Mode B: let the script pay from a hot wallet (opt-in)
+# Step 4b — Mode B: let the script pay from a hot wallet. --dry-run signs
+#           nothing; a real send additionally requires --send.
 ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
   node scripts/dist/send-sol.js --rozo-payment-id <uuid> --dry-run
 ```
@@ -152,17 +166,31 @@ post-create verification comparator.
 
 The interesting part of this repo is what it refuses to do.
 
+- **Two-phase confirmation, enforced.** `create-order.js` withholds the full
+  deposit address, memo and BOLT11 until it is re-run with `--confirm`, which
+  records a confirmation bound to a sha256 of those exact instructions. The
+  send scripts refuse without both `--send` and a confirmation whose digest
+  still matches the live data, so neither an accidental invocation nor a
+  swapped deposit address can move funds.
 - **Full invoice, always.** `callerPays` must equal the invoice amount and
   `discount` must be `"0"`; anything else aborts with `NO_DISCOUNT_VIOLATION`.
+  Security-critical fields (`linkId`, `merchant`, `original`, `callerPays`, the
+  echoed source) must be present as well as equal — a missing field is drift.
 - **Reuse guard.** Creating an order for a link that already has an unexpired
   order returns that existing order — even if it has already been funded. So on
   every run the live order is required to be unpaid (`payment_unpaid`, no tx
   hash, no amount received, no confirmation) and to match the chain and token
   the caller chose. Otherwise: `ORDER_ALREADY_FUNDED` or
   `REUSED_SOURCE_MISMATCH`.
-- **Money-detected rule.** Once any pay-in exists, the tooling never reports a
-  plain failure, never advises paying again, and never retries into a new
-  order. It preserves every identifier and escalates.
+- **Money-detected rule, fail closed.** Once any pay-in exists, the tooling
+  never reports a plain failure, never advises paying again, and never retries
+  into a new order. An `amountReceived` that is non-null but unreadable counts
+  as money, not as absence of money. An unreadable backend reports `unknown`,
+  never `awaiting_deposit`.
+- **Complete deposit instructions.** A zero, negative or unparsable amount
+  aborts. Lightning requires the BOLT11 (which arrives in `source.lnInvoice`
+  with an empty address). Stellar requires its memo — a missing memo is a hard
+  abort, never rendered as "no memo required".
 - **Expiry margins.** Payment is refused unless the earlier of the order expiry
   and the Coinbase expiry is more than a per-chain margin away (10 min EVM and
   Stellar, 5 min Solana). Lightning additionally requires at least 10 minutes
@@ -170,21 +198,29 @@ The interesting part of this repo is what it refuses to do.
 - **Payability revalidation.** A quote receipt makes order creation skip the
   live Coinbase check, and the link can be consumed by someone else at any
   moment — so payability is re-checked immediately before the deposit address
-  is shown and again immediately before signing.
+  is shown, and again as the very last step before broadcast, after all the RPC
+  preparation. Incomplete Coinbase state is treated as "cannot prove payable",
+  not as payable.
 - **Compromised-address list, fail closed.** `scripts/src/lib/blacklist.json`
   carries a vendored list with a provenance header and a sha256 over the
   addresses. Both the deposit address and the sending wallet are checked. If
   the file is missing, malformed, empty, or its digest does not match, every
   send is refused rather than proceeding unchecked.
-- **Send-once.** Order state lives in `$HOME/.rozo-checkout/state/<uuid>.json`,
-  written atomically (temp file, fsync, rename). A send is claimed there
-  *before* broadcasting, so an ambiguous RPC error can never become a second
-  transfer. On an ambiguous result the scripts inspect chain state instead of
-  rebroadcasting.
+- **Send-once, across processes.** Order state lives in
+  `$HOME/.rozo-checkout/state/<uuid>.json`, written atomically (temp file,
+  fsync, rename). The claim and the spend caps are taken together under an
+  exclusive lockfile, so two concurrent invocations cannot both decide they are
+  first. A send is claimed *before* broadcasting, so an ambiguous RPC error can
+  never become a second transfer. Transactions are signed before broadcast so
+  the hash is known in advance; on an ambiguous result the scripts look that
+  exact transaction up instead of rebroadcasting.
 - **Hot-wallet controls.** Keys come from the environment only
   (`ROZO_CHECKOUT_EVM_KEY`, `ROZO_CHECKOUT_SOL_KEY`), are never printed and
   never accepted on the command line; library and RPC errors are redacted
-  before display. The RPC's chain id (or Solana genesis hash) and the token's
+  before display, including credential-bearing provider URLs, bearer tokens and
+  key-shaped strings. The scripts refuse to run when any `.env`/`.env.*` in the
+  working directory is git-tracked, and refuse just as hard when git cannot
+  prove it is untracked. The RPC's chain id (or Solana genesis hash) and the token's
   on-chain decimals are verified before signing. Caps: $100 per transaction,
   $200 cumulative per session.
 - **Address masking.** Prose shows `first6...last4`. The full deposit address,
