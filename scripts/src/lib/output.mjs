@@ -1,6 +1,5 @@
 /**
- * Stdout/exit conventions, shared by every script (same shape as the sibling
- * internal payment skills payment scripts):
+ * Stdout/exit conventions, shared by every script:
  *
  *   - exactly ONE JSON object on stdout
  *   - exit 0 = success, 1 = runtime error / refused, 2 = usage error,
@@ -16,19 +15,46 @@ export const EXIT_USAGE = 2;
 export const EXIT_UNCONFIRMED = 3;
 
 /**
- * Redact anything that could be key material before it reaches stdout.
- * Covers 0x-prefixed 32-byte hex (EVM private keys — and, unavoidably, tx
- * hashes that appear inside error strings), bare 64-char hex, and base58
- * blobs long enough to be a Solana secret key.
+ * Redact anything that could be credential material before it reaches stdout.
+ *
+ * Two classes of secret end up in provider errors:
+ *
+ *  1. Key material — 0x-prefixed 32-byte hex (EVM private keys, and
+ *     unavoidably tx hashes that appear inside error strings), bare 64-char
+ *     hex, base58 blobs long enough to be a Solana secret key, and JSON byte
+ *     arrays.
+ *  2. Credential-bearing URLs — RPC providers routinely put the API key in the
+ *     URL path (`/v2/<key>`) or query string, and viem/web3 quote the failing
+ *     URL verbatim in their error messages. Any URL is therefore reduced to
+ *     `scheme://host/<redacted>`: enough to see which provider failed, never
+ *     enough to reuse the endpoint. Bearer tokens and `key=`-style parameters
+ *     are stripped wherever else they appear.
  */
 export function redact(text) {
   if (text === null || text === undefined) return text;
   let s = typeof text === 'string' ? text : String(text);
+
+  // Key material.
   s = s.replace(/0x[0-9a-fA-F]{64}/g, '0x<redacted>');
   s = s.replace(/\b[0-9a-fA-F]{64}\b/g, '<redacted>');
   s = s.replace(/\b[1-9A-HJ-NP-Za-km-z]{80,90}\b/g, '<redacted>');
-  // Defensive: JSON-ish secret key arrays.
   s = s.replace(/\[(?:\s*\d{1,3}\s*,){40,}\s*\d{1,3}\s*\]/g, '[<redacted>]');
+
+  // Credential-bearing URLs: keep the host, drop userinfo, path and query.
+  s = s.replace(/\b([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^\s"'<>]+)/g, (_m, scheme, rest) => {
+    const withoutUserinfo = rest.includes('@') ? rest.slice(rest.indexOf('@') + 1) : rest;
+    const host = withoutUserinfo.split(/[/?#]/)[0];
+    const hadMore = withoutUserinfo.length > host.length;
+    return `${scheme}://${host}${hadMore ? '/<redacted>' : ''}`;
+  });
+
+  // Bearer / token / key parameters anywhere else in the message.
+  s = s.replace(/\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 <redacted>');
+  s = s.replace(
+    /\b(api[-_]?key|apikey|access[-_]?token|auth[-_]?token|secret|token|password|passwd|pwd)\b(\s*[:=]\s*)("?)[A-Za-z0-9._~+/=-]{6,}\3/gi,
+    '$1$2<redacted>',
+  );
+
   return s;
 }
 

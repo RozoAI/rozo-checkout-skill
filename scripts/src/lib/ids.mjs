@@ -12,8 +12,10 @@ export class IdError extends Error {
   }
 }
 
+// Charsets match what the backend accepts: payment-session ids may contain
+// `_` and `-` (base64url-ish), payment-link ids are alphanumeric.
 const PL_RE = /(pl_[0-9a-zA-Z]+)/;
-const SESSION_RE = /(paymentSession_[0-9a-zA-Z]+)/;
+const SESSION_RE = /(paymentSession_[A-Za-z0-9_-]+)/;
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 /**

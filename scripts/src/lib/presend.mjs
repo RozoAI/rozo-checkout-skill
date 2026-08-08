@@ -5,22 +5,29 @@
  * is trusted from the create-order run except the local send-once record.
  *
  * Order of checks (all hard aborts):
+ *   SEND_NOT_OPTED_IN  -> --send was not passed
  *   NO_ORDER_STATE     -> create-order.js was never run for this id
+ *   NOT_CONFIRMED      -> no confirmation record from `create-order --confirm`
  *   ALREADY_SENT       -> a send is already recorded (claimed later, see claimSend)
  *   ORDER_ALREADY_FUNDED / REUSED_SOURCE_MISMATCH -> live reuse guard
+ *   DEPOSIT_INCOMPLETE / DEPOSIT_MEMO_REQUIRED -> unusable instructions
+ *   CONFIRMATION_STALE -> live deposit data differs from what was confirmed
  *   DEPOSIT_CHANGED    -> live deposit address/amount differs from the record
  *   EXPIRY_MARGIN      -> not enough time left on this chain
- *   LINK_NO_LONGER_PAYABLE -> Coinbase resource consumed meanwhile
+ *   LINK_NO_LONGER_PAYABLE / LINK_PAYABILITY_UNKNOWN -> Coinbase state
  *   BLACKLIST_UNAVAILABLE / BLACKLIST_HIT -> compromised-address rails
- *   CAP_PER_TX / CAP_SESSION -> hot-wallet spend caps
+ *   CAP_PER_TX / CAP_SESSION -> hot-wallet spend caps (charged at claim time)
+ *
+ * `finalPayabilityCheck` is exported separately and MUST be called again as the
+ * very last step before signing, after all the slow RPC preparation.
  */
 
 import { getPayment, invoiceStatus } from './api.mjs';
-import { reuseGuard, checkPayable } from './guards.mjs';
+import { reuseGuard, checkPayable, validateDepositInstructions } from './guards.mjs';
 import { checkExpiry } from './expiry.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './blacklist.mjs';
-import { readState, assertSpendCaps } from './state.mjs';
-import { chainFamily, sourceAtomic } from './amounts.mjs';
+import { readState, depositDigest } from './state.mjs';
+import { chainFamily } from './amounts.mjs';
 import { SkillError } from './output.mjs';
 
 /**
@@ -31,8 +38,24 @@ import { SkillError } from './output.mjs';
  * @param {boolean} [args.allowLarge]
  * @returns {Promise<{payment, source, state, expiry, caps, blacklist}>}
  */
-export async function preflight({ rozoPaymentId, expectFamily, senderAddress, allowLarge = false }) {
-  // 0. Blacklist must load before anything else; fail closed.
+export async function preflight({
+  rozoPaymentId,
+  expectFamily,
+  senderAddress,
+  send = false,
+  dryRun = false,
+}) {
+  // 0a. Moving money requires an explicit opt-in on the command line. Being
+  //     able to run the documented command must not be enough.
+  if (!send && !dryRun) {
+    throw new SkillError(
+      'SEND_NOT_OPTED_IN',
+      'Refusing to move funds without the explicit --send flag. Add --dry-run to see exactly ' +
+        'what would be signed instead.',
+    );
+  }
+
+  // 0b. Blacklist must load before anything else; fail closed.
   let blacklist;
   try {
     blacklist = loadBlacklist();
@@ -57,6 +80,17 @@ export async function preflight({ rozoPaymentId, expectFamily, senderAddress, al
       `A send was already recorded for this order at ${state.send.claimedAt} ` +
         `(status: ${state.send.status}). Refusing to send twice.`,
       { send: state.send },
+    );
+  }
+
+  // 1b. A human must have been shown the full deposit instructions and said
+  //     yes, via `create-order.js --confirm`, in this state directory.
+  if (!state.confirmation) {
+    throw new SkillError(
+      'NOT_CONFIRMED',
+      'This order has never been confirmed. Run `create-order.js --url <link> --chain <id> ' +
+        '--token <SYM> --confirm` first, show the user the deposit block it prints, and get an ' +
+        'explicit yes before sending.',
     );
   }
 
@@ -85,7 +119,21 @@ export async function preflight({ rozoPaymentId, expectFamily, senderAddress, al
     });
   }
 
-  // 4. The deposit instructions must be byte-identical to what was confirmed.
+  // 3b. The instructions must be complete and payable as they stand.
+  const deposit = validateDepositInstructions(source);
+  if (!deposit.ok) throw new SkillError(deposit.code, deposit.reason);
+
+  // 4a. The live deposit data must be exactly what the human confirmed.
+  const liveDigest = depositDigest(source);
+  if (liveDigest !== state.confirmation.depositDigest) {
+    throw new SkillError(
+      'CONFIRMATION_STALE',
+      'The live deposit instructions differ from the ones that were confirmed. Re-run ' +
+        'create-order.js --confirm, show the user the new details, and get a fresh yes.',
+    );
+  }
+
+  // 4b. The deposit instructions must also match the record written at create.
   if (source.receiverAddress !== state.receiverAddress) {
     throw new SkillError(
       'DEPOSIT_CHANGED',
@@ -125,13 +173,41 @@ export async function preflight({ rozoPaymentId, expectFamily, senderAddress, al
     blacklist,
   );
 
-  // 8. Spend caps.
-  const caps = assertSpendCaps(state.invoiceAmount, { allowLarge });
+  // 8. Spend caps are charged atomically at claim time (see claimSend), not
+  //    here, so two concurrent runs cannot both pass a preview check.
 
-  const amountAtomic = sourceAtomic(source, 'amount');
-  if (amountAtomic === null || amountAtomic <= 0n) {
-    throw new SkillError('BAD_DEPOSIT_AMOUNT', 'The order has no positive deposit amount.');
-  }
+  return {
+    payment,
+    source,
+    state,
+    expiry,
+    blacklist,
+    amountAtomic: deposit.amountAtomic,
+    deposit,
+    statusNow,
+  };
+}
 
-  return { payment, source, state, expiry, caps, blacklist, amountAtomic, statusNow };
+/**
+ * Re-prove payability and the expiry margin as the LAST step before signing.
+ *
+ * `preflight` runs before the RPC round-trips (chain id, decimals, balance,
+ * blockhash), which can take many seconds; the Coinbase link can be consumed
+ * by another payer in that window. Both send scripts call this immediately
+ * before they broadcast.
+ */
+export async function finalPayabilityCheck({ linkId, chainId, intentExpiresAt }) {
+  const statusNow = await invoiceStatus({ linkId });
+  const payable = checkPayable(statusNow, Date.now());
+  if (!payable.ok) throw new SkillError(payable.code, payable.reason, payable.derived);
+
+  const expiry = checkExpiry({
+    now: Date.now(),
+    chainId,
+    intentExpiresAt,
+    coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry,
+  });
+  if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
+
+  return { statusNow, payable, expiry };
 }

@@ -13,10 +13,115 @@
  *   NO_DISCOUNT_VIOLATION    callerPays != original, or discount != "0"
  */
 
-import { comparePayment } from './amounts.mjs';
+import { comparePayment, sourceAtomic, chainFamily } from './amounts.mjs';
 
 /** Statuses that mean "nothing has been funded yet". */
 export const UNPAID_STATUS = 'payment_unpaid';
+
+/**
+ * Decide whether a `source` shows a receipt, failing CLOSED.
+ *
+ * PLAN requires `amountReceived` to be strictly null or zero before an order
+ * may be funded. A value we cannot parse ("unknown", "1,5", an object) is NOT
+ * evidence of absence — treating it as "no receipt" is how a second payment
+ * gets sent. Anything non-null that does not parse to exactly zero counts as
+ * money.
+ *
+ * @returns {{money:boolean, receipt:object|null, unparsable:boolean}}
+ */
+export function receiptSignal(source) {
+  const raw = source?.amountReceived;
+  if (raw === null || raw === undefined || raw === '') {
+    return { money: false, receipt: null, unparsable: false };
+  }
+  try {
+    const receipt = comparePayment(source);
+    return { money: receipt.state !== 'none', receipt, unparsable: false };
+  } catch {
+    // Non-null but unreadable: assume money until a human says otherwise.
+    return { money: true, receipt: null, unparsable: true };
+  }
+}
+
+/**
+ * Deposit instructions must be COMPLETE before anyone is told to pay them
+ * (PLAN §3 step 6). Returns a verdict rather than throwing so both Mode A and
+ * Mode B can route it into their own output shape.
+ *
+ * Per-family requirements:
+ *   lightning — a BOLT11 string; `receiverAddress` is empty by design
+ *   stellar   — an address AND a memo; a Stellar deposit without its memo is
+ *               credited to nobody, so a missing memo is a hard abort and must
+ *               never be rendered as "no memo required"
+ *   others    — an address; a memo if the backend supplied one
+ * All families — a parsable, strictly positive amount.
+ */
+export function validateDepositInstructions(source) {
+  const family = chainFamily(source?.chainId);
+  const address = typeof source?.receiverAddress === 'string' ? source.receiverAddress.trim() : '';
+  const memo = typeof source?.receiverMemo === 'string' ? source.receiverMemo.trim() : '';
+  const bolt11 =
+    typeof source?.lnInvoice === 'string' && source.lnInvoice.trim() ? source.lnInvoice.trim() : '';
+
+  let amountAtomic;
+  try {
+    amountAtomic = sourceAtomic(source, 'amount');
+  } catch (err) {
+    return {
+      ok: false,
+      code: 'DEPOSIT_INCOMPLETE',
+      reason: `The deposit amount is unusable: ${err.message}`,
+    };
+  }
+  if (amountAtomic === null || amountAtomic <= 0n) {
+    return {
+      ok: false,
+      code: 'DEPOSIT_INCOMPLETE',
+      reason: 'The order carries no positive deposit amount.',
+    };
+  }
+
+  if (family === 'lightning') {
+    if (!bolt11) {
+      return {
+        ok: false,
+        code: 'DEPOSIT_INCOMPLETE',
+        reason:
+          'The Lightning order has no BOLT11 invoice yet (the swap may still be being created). ' +
+          'Nothing is payable until it appears.',
+      };
+    }
+    return { ok: true, code: null, reason: null, family, amountAtomic, payTo: bolt11, memo: null };
+  }
+
+  if (!address) {
+    return {
+      ok: false,
+      code: 'DEPOSIT_NOT_LIVE',
+      reason: 'The live payments response returned no deposit address.',
+    };
+  }
+
+  if (family === 'stellar' && !memo) {
+    return {
+      ok: false,
+      code: 'DEPOSIT_MEMO_REQUIRED',
+      reason:
+        'A Stellar deposit requires a memo, and this order did not supply one. Sending without ' +
+        'it would very likely lose the funds. Refusing to display it as payable.',
+    };
+  }
+
+  return {
+    ok: true,
+    code: null,
+    reason: null,
+    family,
+    amountAtomic,
+    payTo: address,
+    memo: memo || null,
+  };
+}
 
 /**
  * Reuse guard (PLAN §3 step 5, fix P0-4 / R2-4).
@@ -52,24 +157,20 @@ export function reuseGuard({ payment, requested, reused = false }) {
   // 1. Money-detected first: this outranks everything, including a mismatch,
   //    because the response must never advise paying again.
   const hasTx = source.txHash !== null && source.txHash !== undefined && source.txHash !== '';
-  let received = null;
-  try {
-    received = comparePayment(source);
-  } catch {
-    received = null;
-  }
-  const hasReceipt = received !== null && received.state !== 'none';
+  const signal = receiptSignal(source);
   const hasConfirm =
     source.confirmedAt !== null && source.confirmedAt !== undefined && source.confirmedAt !== '';
-  if (hasTx || hasReceipt || hasConfirm) {
+  if (hasTx || signal.money || hasConfirm) {
     return {
       ok: false,
       code: 'ORDER_ALREADY_FUNDED',
-      reason:
-        'This Coinbase link already has a funded Rozo order (it may have been paid ' +
-        'elsewhere). Do NOT pay again — escalate for manual reconciliation.',
+      reason: signal.unparsable
+        ? 'This order reports an amountReceived that cannot be read. It is treated as funded ' +
+          'until a human confirms otherwise — do NOT pay again.'
+        : 'This Coinbase link already has a funded Rozo order (it may have been paid ' +
+          'elsewhere). Do NOT pay again — escalate for manual reconciliation.',
       moneyDetected: true,
-      evidence: { ...evidence, receipt: received },
+      evidence: { ...evidence, receipt: signal.receipt, receiptUnparsable: signal.unparsable },
     };
   }
 
@@ -105,18 +206,21 @@ export function reuseGuard({ payment, requested, reused = false }) {
     };
   }
 
-  // 4. There must actually be a deposit address to pay.
-  if (!source.receiverAddress) {
+  // 4. The deposit instructions must be complete and payable as they stand.
+  //    Lightning carries the BOLT11 in source.lnInvoice with an EMPTY
+  //    receiverAddress, so "is there an address" is the wrong question here.
+  const deposit = validateDepositInstructions(source);
+  if (!deposit.ok) {
     return {
       ok: false,
-      code: 'DEPOSIT_NOT_LIVE',
-      reason: 'The live payments GET returned no deposit address.',
+      code: deposit.code,
+      reason: deposit.reason,
       moneyDetected: false,
       evidence,
     };
   }
 
-  return { ok: true, code: null, reason: null, moneyDetected: false, evidence };
+  return { ok: true, code: null, reason: null, moneyDetected: false, evidence, deposit };
 }
 
 /**
@@ -125,25 +229,42 @@ export function reuseGuard({ payment, requested, reused = false }) {
  */
 export function verifyCreateAgainstQuote({ snapshot, created, requested }) {
   const drift = [];
-  const cmp = (field, a, b, normalize = (v) => (v === null || v === undefined ? null : String(v))) => {
+
+  /**
+   * Security-critical fields are REQUIRED on both sides. A create response
+   * that simply omits `merchant` or `linkId` must not sail through: without
+   * them there is no proof that the rozoPaymentId we are about to fund belongs
+   * to the link and merchant that were quoted.
+   */
+  const require = (field, a, b, normalize = defaultNormalize) => {
     const na = normalize(a);
     const nb = normalize(b);
-    if (na !== null && nb !== null && na !== nb) drift.push({ field, quoted: na, created: nb });
+    if (na === null) {
+      drift.push({ field, quoted: null, created: nb, note: 'missing in quote' });
+      return;
+    }
+    if (nb === null) {
+      drift.push({ field, quoted: na, created: null, note: 'missing in create response' });
+      return;
+    }
+    if (na !== nb) drift.push({ field, quoted: na, created: nb });
   };
 
-  cmp('linkId', snapshot?.linkId, created?.linkId);
-  cmp('merchant', snapshot?.merchant, created?.merchant);
-  cmp('original', snapshot?.original, created?.original, normalizeDecimal);
-  cmp('callerPays', snapshot?.callerPays, created?.callerPays, normalizeDecimal);
+  require('linkId', snapshot?.linkId, created?.linkId);
+  require('merchant', snapshot?.merchant, created?.merchant, normalizeMerchant);
+  require('original', snapshot?.original, created?.original, normalizeDecimal);
+  require('callerPays', snapshot?.callerPays, created?.callerPays, normalizeDecimal);
 
-  // Requested source must be echoed exactly.
+  // Requested source must be echoed exactly, and must actually be present.
   const wantChain = String(requested?.chainId ?? '').trim();
   const wantToken = String(requested?.tokenSymbol ?? '').trim().toUpperCase();
   const gotChain = String(created?.source?.chainId ?? '').trim();
   const gotToken = String(created?.source?.tokenSymbol ?? '').trim().toUpperCase();
-  if (gotChain !== wantChain) drift.push({ field: 'source.chainId', quoted: wantChain, created: gotChain });
-  if (gotToken !== wantToken) {
-    drift.push({ field: 'source.tokenSymbol', quoted: wantToken, created: gotToken });
+  if (!gotChain || gotChain !== wantChain) {
+    drift.push({ field: 'source.chainId', quoted: wantChain, created: gotChain || null });
+  }
+  if (!gotToken || gotToken !== wantToken) {
+    drift.push({ field: 'source.tokenSymbol', quoted: wantToken, created: gotToken || null });
   }
 
   if (drift.length) {
@@ -183,6 +304,26 @@ export function verifyCreateAgainstQuote({ snapshot, created, requested }) {
   }
 
   return { ok: true, code: null, reason: null, drift: [] };
+}
+
+function defaultNormalize(v) {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  return s === '' ? null : s;
+}
+
+/**
+ * The merchant may arrive as a bare string or as `{ name }` depending on which
+ * service serialized it. Compare the human name either way.
+ */
+export function normalizeMerchant(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'object') {
+    const name = v.name ?? v.merchantName ?? null;
+    return name ? String(name).trim() || null : null;
+  }
+  const s = String(v).trim();
+  return s === '' ? null : s;
 }
 
 /** "1.50" and "1.5" and "1.500000" are the same money. */
@@ -231,24 +372,56 @@ export function checkPayable(statusResponse, now = Date.now()) {
       derived,
     };
   }
-  if (protocolVersion === 'v3' && cb.status && cb.status !== 'PAYMENT_SESSION_STATUS_CREATED') {
-    return {
-      ok: false,
-      code: 'LINK_NO_LONGER_PAYABLE',
-      reason: `Payment Session status is ${cb.status}; only PAYMENT_SESSION_STATUS_CREATED is payable.`,
-      derived,
-    };
-  }
-  if (cb.usageCount !== null && cb.usageCount !== undefined) {
-    const max = cb.maxUsage ?? 1;
-    if (Number(cb.usageCount) >= Number(max)) {
+
+  // Payability must be PROVED, not assumed. Incomplete state is not a pass:
+  // a response missing usageCount, maxUsage or a v3 status tells us nothing
+  // about whether someone else has consumed the link in the meantime.
+  if (protocolVersion === 'v3') {
+    if (!cb.status) {
       return {
         ok: false,
-        code: 'LINK_NO_LONGER_PAYABLE',
-        reason: `Payment link already used (${cb.usageCount}/${max}).`,
+        code: 'LINK_PAYABILITY_UNKNOWN',
+        reason: 'The Payment Session response carries no status; cannot prove it is still payable.',
         derived,
       };
     }
+    if (cb.status !== 'PAYMENT_SESSION_STATUS_CREATED') {
+      return {
+        ok: false,
+        code: 'LINK_NO_LONGER_PAYABLE',
+        reason: `Payment Session status is ${cb.status}; only PAYMENT_SESSION_STATUS_CREATED is payable.`,
+        derived,
+      };
+    }
+    return { ok: true, code: null, reason: null, derived };
+  }
+
+  const usage = Number(cb.usageCount);
+  const max = Number(cb.maxUsage);
+  if (
+    cb.usageCount === null ||
+    cb.usageCount === undefined ||
+    cb.maxUsage === null ||
+    cb.maxUsage === undefined ||
+    !Number.isFinite(usage) ||
+    !Number.isFinite(max)
+  ) {
+    return {
+      ok: false,
+      code: 'LINK_PAYABILITY_UNKNOWN',
+      reason:
+        'The payment link response is missing usageCount/maxUsage; cannot prove it has not ' +
+        'already been used.',
+      derived,
+    };
+  }
+  if (usage >= max) {
+    return {
+      ok: false,
+      code: 'LINK_NO_LONGER_PAYABLE',
+      reason: `Payment link already used (${usage}/${max}).`,
+      derived,
+    };
   }
   return { ok: true, code: null, reason: null, derived };
 }
@@ -260,17 +433,13 @@ export function checkPayable(statusResponse, now = Date.now()) {
  * @returns {{state:string, moneyDetected:boolean, terminal:boolean,
  *            escalate:boolean, detail:string}}
  */
-export function classifyStatus({ payment, routerState, coinbase, now = Date.now() }) {
+export function classifyStatus({ payment, routerState, coinbase, now = Date.now(), viewsFailed = false }) {
   const source = payment?.source || {};
   const hasTx = Boolean(source.txHash);
   const confirmed = Boolean(source.confirmedAt);
-  let receipt = null;
-  try {
-    receipt = comparePayment(source);
-  } catch {
-    receipt = null;
-  }
-  const moneyDetected = hasTx || confirmed || (receipt && receipt.state !== 'none');
+  const signal = receiptSignal(source);
+  const receipt = signal.receipt;
+  const moneyDetected = hasTx || confirmed || signal.money;
   const routerStatus = routerState?.status ?? null;
 
   const mk = (state, detail, opts = {}) => ({
@@ -278,12 +447,37 @@ export function classifyStatus({ payment, routerState, coinbase, now = Date.now(
     moneyDetected: Boolean(moneyDetected),
     terminal: Boolean(opts.terminal),
     escalate: Boolean(opts.escalate),
+    unknown: Boolean(opts.unknown),
     detail,
     receipt,
+    receiptUnparsable: signal.unparsable,
     routerStatus,
   });
 
-  // Terminal success first.
+  // We could not read the backend at all. Saying "awaiting deposit" here would
+  // be a claim we have no evidence for.
+  if (viewsFailed || (!payment?.status && !routerStatus && !coinbase)) {
+    return mk(
+      'unknown',
+      'Could not read the order state from the backend. This is NOT evidence that nothing has ' +
+        'been paid — do not act on it.',
+      { unknown: true },
+    );
+  }
+
+  if (signal.unparsable) {
+    return mk(
+      'stuck_after_payment',
+      'The order reports an amountReceived that cannot be read. Treating it as funded until a ' +
+        'human confirms otherwise.',
+      { escalate: true },
+    );
+  }
+
+  // Settlement of the Coinbase invoice is proved ONLY by the router saying it
+  // paid, or by Coinbase reporting the resource settled. The intents-side
+  // `payment_completed` is the bridge lifecycle finishing, which happens
+  // before (and independently of) the Coinbase leg.
   if (routerStatus === 'paid' || coinbase?.settled === true) {
     return mk('settled', 'Coinbase invoice settled by the funder wallet.', { terminal: true });
   }
@@ -337,7 +531,12 @@ export function classifyStatus({ payment, routerState, coinbase, now = Date.now(
           : 'Payout landed; waiting on Coinbase settlement.',
       );
     case 'payment_completed':
-      return mk('settled', 'Rozo payment completed.', { terminal: true });
+      // Bridge lifecycle complete — NOT proof the Coinbase invoice was paid.
+      // That proof is handled above (routerStatus === 'paid' / settled).
+      return mk(
+        'paying_coinbase',
+        'The bridge leg completed, but Coinbase settlement is not yet confirmed. Keep polling.',
+      );
     case 'payment_expired':
       return moneyDetected
         ? mk('stuck_after_payment', 'Order expired AFTER funds arrived — escalate immediately.', {
@@ -357,8 +556,8 @@ export function classifyStatus({ payment, routerState, coinbase, now = Date.now(
   if (routerStatus === 'paying') return mk('paying_coinbase', 'Funder is paying Coinbase.');
 
   return mk(
-    moneyDetected ? 'stuck_after_payment' : 'awaiting_deposit',
-    `Unrecognized backend status "${payment?.status ?? 'unknown'}".`,
-    { escalate: Boolean(moneyDetected) },
+    moneyDetected ? 'stuck_after_payment' : 'unknown',
+    `Unrecognized backend status "${payment?.status ?? 'unknown'}"; not assuming anything about it.`,
+    { escalate: Boolean(moneyDetected), unknown: !moneyDetected },
   );
 }

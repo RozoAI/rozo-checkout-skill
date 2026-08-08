@@ -23,6 +23,91 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { SkillError } from './output.mjs';
 
+/**
+ * Cross-process mutual exclusion.
+ *
+ * Atomic rename protects a single file from being torn; it does NOT stop two
+ * processes from both reading `send == null` and both writing a claim. Every
+ * check-then-act sequence that could authorise a transfer — the send claim and
+ * the cumulative spend cap — runs inside this lock.
+ *
+ * The lock is a file created with O_EXCL in the state root. A lock older than
+ * LOCK_STALE_MS is assumed to belong to a crashed process and is reclaimed.
+ */
+export const LOCK_STALE_MS = 60_000;
+const LOCK_WAIT_MS = 10_000;
+const LOCK_POLL_MS = 25;
+
+function lockPath() {
+  return path.join(stateRoot(), '.send.lock');
+}
+
+/** Synchronous sleep — these are short waits inside a critical section. */
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function tryAcquire(file) {
+  try {
+    const fd = fs.openSync(file, 'wx', 0o600);
+    fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+    fs.closeSync(fd);
+    return true;
+  } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
+    return false;
+  }
+}
+
+/** Run `fn` while holding the exclusive lock. */
+export function withLock(fn) {
+  const file = lockPath();
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const deadline = Date.now() + LOCK_WAIT_MS;
+
+  for (;;) {
+    if (tryAcquire(file)) break;
+
+    // Reclaim a stale lock, but only via an atomic rename-out so two waiters
+    // cannot both decide to steal it.
+    try {
+      const age = Date.now() - fs.statSync(file).mtimeMs;
+      if (age > LOCK_STALE_MS) {
+        const stolen = `${file}.stale.${crypto.randomBytes(4).toString('hex')}`;
+        try {
+          fs.renameSync(file, stolen);
+          fs.unlinkSync(stolen);
+        } catch {
+          // Another waiter got there first; fall through and retry.
+        }
+        continue;
+      }
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+      continue;
+    }
+
+    if (Date.now() > deadline) {
+      throw new SkillError(
+        'LOCK_TIMEOUT',
+        'Another rozo-checkout process is holding the send lock. Refusing to proceed rather ' +
+          'than risk a concurrent second send.',
+      );
+    }
+    sleepSync(LOCK_POLL_MS);
+  }
+
+  try {
+    return fn();
+  } finally {
+    try {
+      fs.unlinkSync(file);
+    } catch {
+      // Already released.
+    }
+  }
+}
+
 export function stateRoot() {
   return process.env.ROZO_CHECKOUT_STATE_DIR || path.join(os.homedir(), '.rozo-checkout', 'state');
 }
@@ -92,6 +177,7 @@ export function createOrderRecord(record) {
     expiresAt: record.expiresAt ?? null,
     createdAt: existing?.createdAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    confirmation: existing?.confirmation ?? null,
     send: existing?.send ?? null,
   };
   writeAtomic(statePath(rozoPaymentId), next);
@@ -99,46 +185,101 @@ export function createOrderRecord(record) {
 }
 
 /**
- * Claim the exclusive right to send for this order.
- * Throws ALREADY_SENT if any prior send record exists (submitted, confirmed or
- * even merely claimed) — we never blind-retry, because a claimed-but-unknown
- * send may well be on chain.
+ * Digest over the deposit instructions a human was actually shown. The send
+ * scripts recompute this from the LIVE payment response and refuse to sign if
+ * it differs — so a confirmation can only ever authorise the exact deposit it
+ * was given for.
  */
-export function claimSend(rozoPaymentId, intent) {
+export function depositDigest(source) {
+  const canonical = JSON.stringify({
+    chainId: String(source?.chainId ?? ''),
+    tokenSymbol: String(source?.tokenSymbol ?? '').toUpperCase(),
+    tokenAddress: String(source?.tokenAddress ?? ''),
+    receiverAddress: String(source?.receiverAddress ?? ''),
+    receiverMemo: source?.receiverMemo ?? null,
+    amount: String(source?.amount ?? ''),
+    amountUnit: source?.amountUnit ?? null,
+    lnInvoice: source?.lnInvoice ?? null,
+  });
+  return crypto.createHash('sha256').update(canonical, 'utf8').digest('hex');
+}
+
+/**
+ * Record that a human was shown the full deposit instructions and said yes
+ * (PLAN §3 step 6b). This is what makes a later `--send` legitimate.
+ */
+export function recordConfirmation(rozoPaymentId, { source, invoiceAmount, tier }) {
   const state = readState(rozoPaymentId);
   if (!state) {
-    throw new SkillError(
-      'NO_ORDER_STATE',
-      'No local record for this order. Run create-order.js in this same session first.',
-    );
-  }
-  if (state.send) {
-    const err = new SkillError(
-      'ALREADY_SENT',
-      `A send was already recorded for this order at ${state.send.claimedAt} ` +
-        `(status: ${state.send.status}). Refusing to send twice. ` +
-        'Check the backend for the pay-in before doing anything else.',
-      { send: state.send },
-    );
-    throw err;
+    throw new SkillError('NO_ORDER_STATE', 'Cannot confirm an order with no local record.');
   }
   const next = {
     ...state,
     updatedAt: new Date().toISOString(),
-    send: {
-      status: 'claimed',
-      claimedAt: new Date().toISOString(),
-      chainId: intent.chainId,
-      tokenSymbol: intent.tokenSymbol,
-      from: intent.from,
-      to: intent.to,
-      amountAtomic: intent.amountAtomic,
-      memo: intent.memo ?? null,
-      txHash: null,
+    confirmation: {
+      confirmedAt: new Date().toISOString(),
+      depositDigest: depositDigest(source),
+      invoiceAmount: invoiceAmount ?? state.invoiceAmount ?? null,
+      tier: tier ?? null,
     },
   };
   writeAtomic(statePath(rozoPaymentId), next);
   return next;
+}
+
+/**
+ * Claim the exclusive right to send for this order, and charge the spend caps,
+ * as ONE atomic operation under the cross-process lock.
+ *
+ * Throws ALREADY_SENT if any prior send record exists (submitted, confirmed or
+ * even merely claimed) — we never blind-retry, because a claimed-but-unknown
+ * send may well be on chain.
+ */
+export function claimSend(rozoPaymentId, intent, { allowLarge = false, skipCaps = false } = {}) {
+  return withLock(() => {
+    const state = readState(rozoPaymentId);
+    if (!state) {
+      throw new SkillError(
+        'NO_ORDER_STATE',
+        'No local record for this order. Run create-order.js in this same session first.',
+      );
+    }
+    if (state.send) {
+      throw new SkillError(
+        'ALREADY_SENT',
+        `A send was already recorded for this order at ${state.send.claimedAt} ` +
+          `(status: ${state.send.status}). Refusing to send twice. ` +
+          'Check the backend for the pay-in before doing anything else.',
+        { send: state.send },
+      );
+    }
+
+    // The cap must be evaluated and consumed inside the same lock as the
+    // claim, otherwise two processes can each see themselves as under budget.
+    const caps = skipCaps
+      ? null
+      : assertSpendCapsUnlocked(state.invoiceAmount, { allowLarge, excludeId: rozoPaymentId });
+
+    const next = {
+      ...state,
+      updatedAt: new Date().toISOString(),
+      send: {
+        status: 'claimed',
+        claimedAt: new Date().toISOString(),
+        chainId: intent.chainId,
+        tokenSymbol: intent.tokenSymbol,
+        from: intent.from,
+        to: intent.to,
+        amountAtomic: intent.amountAtomic,
+        memo: intent.memo ?? null,
+        nonceBefore: intent.nonceBefore ?? null,
+        expectedTxHash: intent.expectedTxHash ?? null,
+        txHash: null,
+      },
+    };
+    writeAtomic(statePath(rozoPaymentId), next);
+    return { state: next, caps };
+  });
 }
 
 /** Attach the broadcast outcome. `status` is submitted | confirmed | ambiguous | failed. */
@@ -162,8 +303,36 @@ export function recordSendResult(rozoPaymentId, { status, txHash = null, note = 
   return next;
 }
 
-/** Cumulative USD sent in this state dir, used for the per-session cap. */
-export function sessionSpendUsd() {
+/**
+ * Find the most recent local record for a Coinbase linkId.
+ *
+ * The router's link-only status response does not resolve `rozo_payment_id`,
+ * so this is how `status.js --link-id` reaches the authoritative pay-in view
+ * for an order this machine created.
+ */
+export function findByLinkId(linkId) {
+  const dir = stateRoot();
+  let files = [];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+  } catch {
+    return null;
+  }
+  let best = null;
+  for (const f of files) {
+    try {
+      const s = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+      if (s?.linkId !== linkId) continue;
+      if (!best || String(s.createdAt) > String(best.createdAt)) best = s;
+    } catch {
+      // Skip unreadable neighbours; this is a convenience lookup only.
+    }
+  }
+  return best;
+}
+
+/** Cumulative USD already claimed in this state dir, for the per-session cap. */
+export function sessionSpendUsd({ excludeId = null } = {}) {
   const dir = stateRoot();
   let files = [];
   try {
@@ -173,11 +342,13 @@ export function sessionSpendUsd() {
   }
   let total = 0;
   for (const f of files) {
+    if (excludeId && f === `${excludeId}.json`) continue;
     try {
       const s = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
       if (s?.send && ['claimed', 'submitted', 'confirmed', 'ambiguous'].includes(s.send.status)) {
         const usd = Number(s.invoiceAmount);
-        if (Number.isFinite(usd)) total += usd;
+        // An unreadable amount on a real claim must not count as zero.
+        total += Number.isFinite(usd) ? usd : MAX_TX_USD;
       }
     } catch {
       // A corrupt neighbour must not silently lower the running total, so we
@@ -191,8 +362,11 @@ export function sessionSpendUsd() {
 export const MAX_TX_USD = 100;
 export const MAX_SESSION_USD = 200;
 
-/** Hot-wallet spend caps (PLAN §5.3). */
-export function assertSpendCaps(invoiceUsd, { allowLarge = false } = {}) {
+/**
+ * Hot-wallet spend caps (PLAN §5.3). Assumes the caller already holds the
+ * lock — use `assertSpendCaps` (or `claimSend`) from outside.
+ */
+export function assertSpendCapsUnlocked(invoiceUsd, { allowLarge = false, excludeId = null } = {}) {
   const usd = Number(invoiceUsd);
   if (!Number.isFinite(usd) || usd < 0) {
     throw new SkillError('BAD_INVOICE_AMOUNT', 'Cannot evaluate spend caps without a USD amount.');
@@ -203,7 +377,7 @@ export function assertSpendCaps(invoiceUsd, { allowLarge = false } = {}) {
       `$${usd} exceeds the $${MAX_TX_USD} per-transaction cap. Re-run with --yes-large to override.`,
     );
   }
-  const prior = sessionSpendUsd();
+  const prior = sessionSpendUsd({ excludeId });
   if (prior + usd > MAX_SESSION_USD) {
     throw new SkillError(
       'CAP_SESSION',
@@ -212,4 +386,9 @@ export function assertSpendCaps(invoiceUsd, { allowLarge = false } = {}) {
     );
   }
   return { priorUsd: prior, totalUsd: prior + usd };
+}
+
+/** Lock-taking wrapper, for callers that only want to preview the caps. */
+export function assertSpendCaps(invoiceUsd, opts = {}) {
+  return withLock(() => assertSpendCapsUnlocked(invoiceUsd, opts));
 }

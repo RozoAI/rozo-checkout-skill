@@ -1,6 +1,10 @@
 node_modules/
+
+# Never commit secrets. The send scripts additionally refuse to run when any
+# of these is tracked by git.
 .env
 .env.*
 !.env.example
+
 *.log
 .DS_Store
