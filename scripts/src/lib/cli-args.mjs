@@ -35,6 +35,60 @@ export const CHAIN_ALIASES = {
   btc: 'lightning',
 };
 
+/**
+ * The interactive picker's menu, grouped by coin. Pure data: the TTY layer in
+ * cli.mjs renders it and reads a number, but the number -> source mapping
+ * lives here so it can be tested without a terminal.
+ */
+export const PICKER_OPTIONS = [
+  { token: 'USDT', chain: 'Solana', chainId: '900' },
+  { token: 'USDT', chain: 'BNB Chain', chainId: '56' },
+  { token: 'USDT', chain: 'Ethereum', chainId: '1' },
+  { token: 'USDT', chain: 'Polygon', chainId: '137' },
+  { token: 'USDC', chain: 'Solana', chainId: '900' },
+  { token: 'USDC', chain: 'BNB Chain', chainId: '56' },
+  { token: 'USDC', chain: 'Ethereum', chainId: '1' },
+  { token: 'USDC', chain: 'Polygon', chainId: '137' },
+  { token: 'USDC', chain: 'Base', chainId: '8453' },
+  { token: 'USDC', chain: 'Stellar', chainId: '1500' },
+  { token: 'BTC', chain: 'Lightning', chainId: 'lightning' },
+].map((o, i) => ({
+  number: i + 1,
+  ...o,
+  tokenSymbol: o.token,
+  // The flag a user could have typed instead, echoed back so they learn it.
+  preset: `${o.token.toLowerCase()}-${
+    { '900': 'solana', '56': 'bnb', '1': 'ethereum', '137': 'polygon', '8453': 'base', '1500': 'stellar', lightning: 'lightning' }[
+      o.chainId
+    ]
+  }`,
+}));
+
+/**
+ * Resolve what the user typed at the picker. Accepts the menu number, or the
+ * preset name itself for anyone who already knows it. Pure and total.
+ */
+export function resolvePickerChoice(input) {
+  const raw = String(input ?? '').trim();
+  if (!raw) throw new CliError('BAD_CHOICE', 'Nothing entered. Type the number of a coin.');
+  if (/^\d+$/.test(raw)) {
+    const option = PICKER_OPTIONS.find((o) => o.number === Number(raw));
+    if (!option) {
+      throw new CliError(
+        'BAD_CHOICE',
+        `${raw} is not on the list. Choose 1-${PICKER_OPTIONS.length}.`,
+      );
+    }
+    return { chainId: option.chainId, tokenSymbol: option.tokenSymbol, preset: option.preset };
+  }
+  // Not a number: fall back to normal preset parsing, which has its own errors.
+  const { chainId, tokenSymbol } = resolvePreset(raw);
+  const option = PICKER_OPTIONS.find(
+    (o) => o.chainId === chainId && o.tokenSymbol === tokenSymbol,
+  );
+  return { chainId, tokenSymbol, preset: option ? option.preset : raw.toLowerCase() };
+}
+
 export class CliError extends Error {
   constructor(code, message, details) {
     super(message);
@@ -101,10 +155,11 @@ const BOOLEAN_FLAGS = new Set([
   'dry-run',
   'no-watch',
   'watch',
+  'fresh',
 ]);
 
 /** Flags that take a value. */
-const VALUE_FLAGS = new Set(['with', 'chain', 'token', 'rpc', 'timeout']);
+const VALUE_FLAGS = new Set(['with', 'chain', 'token', 'rpc', 'timeout', 'payer']);
 
 /**
  * Parse a full argv tail (everything after the binary name) into a normalized
@@ -216,8 +271,13 @@ export function parseCliArgs(argv) {
       );
     }
     source = { chainId, tokenSymbol };
-  } else {
+  } else if (flags.with !== undefined) {
     source = resolvePreset(flags.with);
+  } else {
+    // No coin given. On a terminal the CLI offers a picker; for a non-TTY
+    // caller this stays an error, decided in cli.mjs — an agent must be
+    // explicit rather than fall back to some default chain.
+    source = null;
   }
 
   const timeout = flags.timeout === undefined ? 900 : Number(flags.timeout);
@@ -236,6 +296,8 @@ export function parseCliArgs(argv) {
     watch: flags['no-watch'] !== true,
     timeout,
     rpc: flags.rpc,
+    payer: flags.payer,
+    fresh: flags.fresh === true,
   };
 }
 
@@ -243,6 +305,7 @@ export const HELP = `rozo-checkout — pay a Coinbase Payment Link with BTC Ligh
 or USDT/USDC on Solana, BNB Chain, Ethereum, Polygon, Base or Stellar.
 
 USAGE
+  npx @rozoai/checkout pay <coinbase-link>              (pick a coin from a list)
   npx @rozoai/checkout pay <coinbase-link> --with <coin>
   npx @rozoai/checkout quote <coinbase-link>
   npx @rozoai/checkout status <rozoPaymentId | coinbase-link>
@@ -257,7 +320,8 @@ By default, pay just prints an address for you to pay from any wallet:
 no private key, no environment variable, no configuration.
 
 OPTIONS
-  --with <coin>   which coin to pay with (see above)
+  --with <coin>   which coin to pay with. Omit it on a terminal and you get a
+                  numbered list to choose from; scripts and agents must pass it.
   --send          optional. Sign from a hot wallet instead of paying yourself.
                   This is the only option that needs a key, read from
                   ROZO_CHECKOUT_EVM_KEY or ROZO_CHECKOUT_SOL_KEY. A single
@@ -267,11 +331,16 @@ OPTIONS
   --json, -j      machine-readable output
   --no-watch      stop after showing the deposit instructions
   --timeout <s>   how long to poll for settlement (default 900)
+  --payer <addr>  optional. Check what this wallet holds and mark the coin
+                  list accordingly. Display help only; it never changes what
+                  gets signed.
+  --fresh         ignore the remembered wallet address and coin for this run
   --rpc <url>     override the RPC endpoint for --send
   --help, -h      this text
   --version, -v   print the version
 
 EXAMPLES
+  npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01...
   npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01... --with usdt-solana
   npx @rozoai/checkout pay pl_01... --with btc-lightning
   npx @rozoai/checkout status 11111111-2222-4333-8444-555555555555

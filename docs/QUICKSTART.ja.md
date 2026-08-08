@@ -4,18 +4,30 @@
 
 OpenRouter の Coinbase 決済リンク (Payment Link) を、Solana、BNB Chain、
 Ethereum、Polygon、Base、Stellar 上の USDT/USDC、または Lightning 経由の BTC で支払います。所要 5 分。
-仕組みと設計意図については [README.md](README.md) を参照してください。
+仕組みと設計意図については [README.md](../README.md) を参照してください。
 
 ## ワンライナー
+
+```bash
+npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLINKID
+```
+
+これ 1 つで、以下の全ステップを実行します。通貨の選択、見積もり、注文作成、確認、承認、
+入金手順の表示、そして決済完了までのポーリングです。通貨を選ぶ場面でウォレットアドレスを
+貼り付けると、残高を調べてどの通貨なら支払えるかを表示します。これは任意で、実際に署名
+される内容は一切変わりません。
+
+使う通貨が決まっている場合は、指定すればこの質問を省略できます:
 
 ```bash
 npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLINKID --with usdt-solana
 ```
 
-これ 1 つで、以下の全ステップを実行します。見積もり、注文作成、確認、承認、入金手順の
-表示、そして決済完了までのポーリングです。`--with` に指定できる通貨: `usdt-solana`、
+`--with` に指定できる通貨: `usdt-solana`、
 `usdc-solana`、`usdt-bnb`、`usdc-bnb`、`usdt-ethereum`、`usdc-ethereum`、
 `usdt-polygon`、`usdc-polygon`、`usdc-base`、`usdc-stellar`、`btc-lightning`。
+スクリプトやエージェントでは必ず `--with` を渡してください。対話式の選択は端末でのみ
+表示され、既定の通貨はありません。
 
 既定では、任意のウォレットから支払うためのアドレスを表示するだけです — 鍵も設定も
 不要です。CLI にホットウォレットから署名させたい場合にだけ `--send` を、機械可読な
@@ -52,8 +64,8 @@ node scripts/dist/quote.js --url "$LINK"
 {
   "success": true,
   "merchant": "OpenRouter, Inc.",
-  "invoice": { "amount": "5.00", "fiat": { "amount": "5.00", "currency": "USD" } },
-  "callerPays": "5.00",
+  "invoice": { "amount": "1050.00", "fiat": { "amount": "1050.00", "currency": "USD" } },
+  "callerPays": "1050.00",
   "coinbaseExpiryIso": "2026-08-09T10:00:00.000Z"
 }
 ```
@@ -74,17 +86,20 @@ node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT
 {
   "success": true,
   "rozoPaymentId": "11111111-2222-4333-8444-555555555555",
-  "invoice": { "amount": "5.000000", "currency": "USD" },
+  "invoice": { "amount": "1050.000000", "currency": "USD" },
   "deposit": null,
   "depositWithheld": true,
   "display": {
     "chain": "Solana",
-    "amount": "5.021000 USDT",
+    "amount": "1054.410000 USDT",
     "payToMasked": "9WzDXw...AWWM"
   },
   "expiry": { "effectiveDeadlineIso": "2026-08-08T11:00:00.000Z", "minutesOfSlack": 55 }
 }
 ```
+
+この例は代表的なケースです。$1,000 分の OpenRouter クレジットに対する **$1,050.00**
+のインボイスです。**$1,100** までのインボイスであれば同じ方法で支払えます。
 
 **先へ進む前に必ず `display.amount` を確認してください。** 通常はインボイス金額より
 大きくなります — ブリッジ (bridge) 手数料とネットワーク手数料が含まれるためです。`rozoPaymentId` を
@@ -109,7 +124,7 @@ node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT --confi
     "tokenSymbol": "USDT",
     "receiverAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
     "receiverMemo": "rozo-901",
-    "amount": "5.021000",
+    "amount": "1054.410000",
     "payTo": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
   }
 }
@@ -198,5 +213,5 @@ node scripts/dist/status.js --rozo-payment-id <rozoPaymentId> --watch --timeout 
 依頼してください。使い捨ての入金アドレスへの 2 回目の支払いは、入金として反映される
 保証がありません。
 
-エラーコードの完全な一覧は [README.md](README.md) に、エージェント向けの指示は
-[SKILL.md](SKILL.md) にあります。
+エラーコードの完全な一覧は [README.md](../README.md) に、エージェント向けの指示は
+[SKILL.md](../SKILL.md) にあります。

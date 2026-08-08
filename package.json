@@ -28,15 +28,10 @@
   },
   "files": [
     "scripts/dist",
+    "docs/*.md",
+    "!docs/reviews",
     "llms.txt",
     "README.md",
-    "README.zh.md",
-    "README.ja.md",
-    "README.es.md",
-    "QUICKSTART.md",
-    "QUICKSTART.zh.md",
-    "QUICKSTART.ja.md",
-    "QUICKSTART.es.md",
     "LICENSE"
   ],
   "engines": {

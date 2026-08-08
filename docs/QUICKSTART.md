@@ -4,18 +4,30 @@
 
 Pay an OpenRouter Coinbase Payment Link with USDT/USDC on Solana, BNB Chain,
 Ethereum, Polygon, Base or Stellar, or with BTC over Lightning. Five minutes.
-For how it works and why, see [README.md](README.md).
+For how it works and why, see [README.md](../README.md).
 
 ## The one-liner
+
+```bash
+npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLINKID
+```
+
+That runs every step below for you: pick a coin, quote, create, review,
+confirm, deposit instructions, then polling until settlement. At the coin
+prompt you can paste your wallet address and the picker will check your
+balances and mark which coins you can afford — optional, and it never changes
+what gets signed.
+
+If you already know your coin, name it and skip the question:
 
 ```bash
 npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLINKID --with usdt-solana
 ```
 
-That runs every step below for you: quote, create, review, confirm, deposit
-instructions, then polling until settlement. Coins for `--with`: `usdt-solana`,
-`usdc-solana`, `usdt-bnb`, `usdc-bnb`, `usdt-ethereum`, `usdc-ethereum`,
-`usdt-polygon`, `usdc-polygon`, `usdc-base`, `usdc-stellar`, `btc-lightning`.
+Coins for `--with`: `usdt-solana`, `usdc-solana`, `usdt-bnb`, `usdc-bnb`,
+`usdt-ethereum`, `usdc-ethereum`, `usdt-polygon`, `usdc-polygon`, `usdc-base`,
+`usdc-stellar`, `btc-lightning`. Scripts and agents must pass `--with`: the
+picker only appears on a terminal, and there is no default coin.
 
 By default it just prints an address for you to pay from any wallet — no key
 and no configuration needed. Add `--send` only if you want the CLI to sign
@@ -52,8 +64,8 @@ node scripts/dist/quote.js --url "$LINK"
 {
   "success": true,
   "merchant": "OpenRouter, Inc.",
-  "invoice": { "amount": "5.00", "fiat": { "amount": "5.00", "currency": "USD" } },
-  "callerPays": "5.00",
+  "invoice": { "amount": "1050.00", "fiat": { "amount": "1050.00", "currency": "USD" } },
+  "callerPays": "1050.00",
   "coinbaseExpiryIso": "2026-08-09T10:00:00.000Z"
 }
 ```
@@ -74,17 +86,20 @@ is **withheld** at this stage — you get a masked summary to check first.
 {
   "success": true,
   "rozoPaymentId": "11111111-2222-4333-8444-555555555555",
-  "invoice": { "amount": "5.000000", "currency": "USD" },
+  "invoice": { "amount": "1050.000000", "currency": "USD" },
   "deposit": null,
   "depositWithheld": true,
   "display": {
     "chain": "Solana",
-    "amount": "5.021000 USDT",
+    "amount": "1054.410000 USDT",
     "payToMasked": "9WzDXw...AWWM"
   },
   "expiry": { "effectiveDeadlineIso": "2026-08-08T11:00:00.000Z", "minutesOfSlack": 55 }
 }
 ```
+
+This example is the flagship case: a **$1,050.00** invoice for $1,000 of
+OpenRouter credits. Any invoice up to **$1,100** can be paid this way.
 
 **Check `display.amount` before going on.** It is normally larger than the
 invoice — it includes the bridge and network fees. Note the `rozoPaymentId`;
@@ -110,7 +125,7 @@ scripts require.
     "tokenSymbol": "USDT",
     "receiverAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
     "receiverMemo": "rozo-901",
-    "amount": "5.021000",
+    "amount": "1054.410000",
     "payTo": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
   }
 }
@@ -199,5 +214,5 @@ Read `error.code`. The three you are most likely to hit:
 reconcile it. A second payment to a one-time deposit address is not guaranteed
 to be credited.
 
-The full error table is in [README.md](README.md), and the agent-facing
-instructions are in [SKILL.md](SKILL.md).
+The full error table is in [README.md](../README.md), and the agent-facing
+instructions are in [SKILL.md](../SKILL.md).

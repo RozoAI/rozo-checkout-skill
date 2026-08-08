@@ -21,8 +21,22 @@ import readline from 'node:readline';
 import { createRequire } from 'node:module';
 
 import { capture, formatFailure, EXIT_OK, EXIT_ERROR, EXIT_USAGE } from './lib/output.mjs';
-import { parseCliArgs, CliError, HELP } from './lib/cli-args.mjs';
+import {
+  parseCliArgs,
+  CliError,
+  HELP,
+  PICKER_OPTIONS,
+  resolvePickerChoice,
+} from './lib/cli-args.mjs';
 import { chainFamily, isSatsUnit } from './lib/amounts.mjs';
+import {
+  detectAddressFamily,
+  fetchWalletOptions,
+  markPickerOptions,
+  isProvablyShort,
+} from './lib/wallet-check.mjs';
+import { readPrefs, savePrefs } from './lib/prefs.mjs';
+import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
 import { extractLinkId, isRozoPaymentId } from './lib/ids.mjs';
 
 import { run as runQuote } from './quote.mjs';
@@ -30,6 +44,13 @@ import { run as runCreateOrder } from './create-order.mjs';
 import { run as runStatus } from './status.mjs';
 import { run as runSendEvm } from './send-evm.mjs';
 import { run as runSendSol } from './send-sol.mjs';
+
+class SkillErrorLike extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+}
 
 const VERSION = (() => {
   try {
@@ -91,6 +112,131 @@ function targetToArgs(target) {
   return ['--link-id', linkId];
 }
 
+async function ask(question) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await new Promise((resolve) => rl.question(question, resolve));
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * Validate an address the user offered for the optional balance check, and
+ * refuse a compromised one. Returns null when the address is unusable, since
+ * the whole feature is optional.
+ */
+function vetPayerAddress(address) {
+  const family = detectAddressFamily(address);
+  if (!family) {
+    out(`  ${yellow('That does not look like an EVM, Solana or Stellar address. Skipping the check.')}`);
+    return null;
+  }
+  try {
+    assertNotBlacklisted([{ address, family, role: 'wallet address' }], loadBlacklist());
+  } catch (err) {
+    out(`  ${red('✗')} ${err.message}`);
+    return null;
+  }
+  return family;
+}
+
+/**
+ * Ask for a wallet address to check balances against. Entirely optional: a
+ * blank answer, an unusable address or a failed lookup all fall through to the
+ * plain list.
+ */
+async function askPayerAddress(saved) {
+  const savedMask = saved?.lastPayerAddress ? maskAddress(saved.lastPayerAddress) : null;
+  const prompt = savedMask
+    ? `  Wallet address [${savedMask}, Enter to reuse, 'n' for none]: `
+    : "  Wallet address you'll pay from (optional — checks balances; Enter to skip): ";
+
+  const answer = String(await ask(prompt)).trim();
+  if (/^n(o)?$/i.test(answer)) return null;
+  const address = answer || saved?.lastPayerAddress || null;
+  if (!address) return null;
+
+  // A remembered address is re-vetted exactly like a freshly typed one.
+  const family = vetPayerAddress(address);
+  return family ? { address, family } : null;
+}
+
+/**
+ * Interactive coin picker, shown only when the caller is on a terminal and
+ * gave no coin. Grouped by coin so the list reads as three short blocks
+ * rather than eleven flat lines. When a wallet address is supplied, rows are
+ * annotated with what that wallet appears to hold and affordable ones sort
+ * first — a hint only; the payment still comes from whichever wallet the user
+ * actually opens.
+ */
+async function pickSource({ invoiceUsd, saved, fresh }) {
+  const payer = await askPayerAddress(fresh ? null : saved);
+
+  let marked = PICKER_OPTIONS.map((o) => ({ ...o, mark: 'unchecked', balanceUsd: null }));
+  let checked = null;
+  if (payer) {
+    out(dim('  Checking balances…'));
+    const result = await fetchWalletOptions({ address: payer.address, usdRequired: invoiceUsd });
+    if (result.ok) {
+      marked = markPickerOptions(PICKER_OPTIONS, result);
+      checked = result;
+    } else {
+      out(`  ${yellow(`Could not check balances (${result.reason}). Showing all coins.`)}`);
+    }
+  }
+
+  out();
+  out(`  ${bold('Which coin do you want to pay with?')}`);
+  const savedPreset = fresh ? null : saved?.lastPreset ?? null;
+  let group = null;
+  for (const o of marked) {
+    if (o.token !== group) {
+      group = o.token;
+      out();
+      out(`  ${dim(o.token)}`);
+    }
+    const badge =
+      o.mark === 'affordable'
+        ? green(`✓ $${Number(o.balanceUsd ?? 0).toFixed(2)} available`)
+        : o.mark === 'insufficient'
+          ? dim('✗ insufficient')
+          : dim('— not checked');
+    const star = savedPreset === o.preset ? bold(' (last used)') : '';
+    out(`    ${String(o.number).padStart(2)}. ${o.chain.padEnd(12)} ${badge}${star}`);
+  }
+  out();
+
+  const defaultChoice = savedPreset ? ` [Enter for ${savedPreset}]` : '';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const answer = String(await ask(`  Number 1-${PICKER_OPTIONS.length}${defaultChoice}: `)).trim();
+    const raw = answer || savedPreset;
+    if (!raw) {
+      out(`  ${yellow('Type the number of a coin.')}`);
+      continue;
+    }
+    try {
+      const choice = resolvePickerChoice(raw);
+      if (checked && isProvablyShort(choice, checked)) {
+        out(`  ${yellow('That wallet appears not to hold enough for this invoice.')}`);
+        out(`  ${dim('You can still choose it — you may be paying from a different wallet.')}`);
+      }
+      // Echo the shortcut so the next run can skip this step.
+      out(`  ${dim(`→ same as: --with ${choice.preset}`)}`);
+      out();
+      return {
+        chainId: choice.chainId,
+        tokenSymbol: choice.tokenSymbol,
+        preset: choice.preset,
+        payer,
+      };
+    } catch (err) {
+      out(`  ${yellow(err.message)}`);
+    }
+  }
+  throw new CliError('BAD_CHOICE', 'No valid choice after three attempts.');
+}
+
 async function askYesNo(question) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
@@ -148,6 +294,13 @@ async function cmdStatus(opts) {
   return exitCode;
 }
 
+function presetFor(chainId, tokenSymbol) {
+  const hit = PICKER_OPTIONS.find(
+    (o) => o.chainId === String(chainId) && o.tokenSymbol === String(tokenSymbol).toUpperCase(),
+  );
+  return hit ? hit.preset : null;
+}
+
 function stateLabel(state) {
   if (state === 'settled') return green(bold(state));
   if (['underpaid', 'stuck_after_payment', 'unknown'].includes(state)) return red(bold(state));
@@ -157,6 +310,62 @@ function stateLabel(state) {
 
 async function cmdPay(opts) {
   let sendResult = null;
+
+  const saved = opts.fresh ? null : readPrefs();
+  let chosenPreset = null;
+  let payer = null;
+
+  // The invoice amount drives the balance check, so quote before picking.
+  let invoiceUsd = null;
+  if (!opts.source || opts.payer) {
+    const q = await step(runQuote, ['--url', opts.target]);
+    if (!q.payload.success) {
+      if (opts.json) printJson(q.payload);
+      else printError(q.payload);
+      return q.exitCode;
+    }
+    invoiceUsd = Number(q.payload.invoice?.amount);
+  }
+
+  // No coin given. On a terminal we ask; for a script or an agent this stays a
+  // hard error — silently defaulting to some chain would be a way to lose money
+  // on a network the caller never chose.
+  if (!opts.source) {
+    if (!process.stdin.isTTY || opts.json) {
+      throw new CliError(
+        'MISSING_PRESET',
+        'No coin specified. Pass --with (e.g. --with usdt-solana), or run this on a ' +
+          'terminal to choose from a list. There is no default.',
+      );
+    }
+    const picked = await pickSource({ invoiceUsd, saved, fresh: opts.fresh });
+    opts.source = { chainId: picked.chainId, tokenSymbol: picked.tokenSymbol };
+    chosenPreset = picked.preset;
+    payer = picked.payer;
+  } else if (opts.payer) {
+    // Non-interactive: an explicit coin plus an explicit wallet is the one
+    // case where a provable shortfall should fail early rather than after a
+    // deposit address has been printed.
+    const family = detectAddressFamily(opts.payer);
+    if (!family) {
+      throw new CliError('BAD_PAYER_ADDRESS', 'That is not a recognisable EVM, Solana or Stellar address.');
+    }
+    assertNotBlacklisted([{ address: opts.payer, family, role: 'wallet address' }], loadBlacklist());
+    const result = await fetchWalletOptions({ address: opts.payer, usdRequired: invoiceUsd });
+    if (isProvablyShort(opts.source, result)) {
+      throw new SkillErrorLike(
+        'INSUFFICIENT_BALANCE',
+        `${opts.payer.slice(0, 6)}…${opts.payer.slice(-4)} does not appear to hold enough ` +
+          `${opts.source.tokenSymbol} for a $${invoiceUsd} invoice. Choose another coin, or ` +
+          'omit --payer to proceed anyway from a different wallet.',
+      );
+    }
+    if (!result.ok && !opts.json) {
+      out(`  ${yellow(`Could not check balances (${result.reason}). Continuing.`)}`);
+    }
+    payer = { address: opts.payer, family };
+  }
+
   const { chainId, tokenSymbol } = opts.source;
   const baseArgs = ['--url', opts.target, '--chain', chainId, '--token', tokenSymbol];
 
@@ -173,6 +382,14 @@ async function cmdPay(opts) {
 
   const p = created.payload;
   const rozoPaymentId = p.rozoPaymentId;
+
+  // Remember the setup for next time: address, coin and when. Never a key,
+  // never a balance, never anything about the invoice.
+  savePrefs({
+    lastPayerAddress: payer?.address,
+    lastAddressFamily: payer?.family,
+    lastPreset: chosenPreset || presetFor(chainId, tokenSymbol),
+  });
 
   if (!opts.json) {
     out();
@@ -266,6 +483,7 @@ async function cmdPay(opts) {
     } else {
       out(`  ${green('✓')} Sent. tx ${sent.payload.txHash}`);
       out();
+      savePrefs({ lastPreset: chosenPreset || presetFor(chainId, tokenSymbol) });
     }
     if (sent.exitCode !== EXIT_OK && sent.exitCode !== 3) return sent.exitCode;
   } else if (!opts.json) {
@@ -325,6 +543,12 @@ function printDeposit(deposit, opts) {
     if (deposit.receiverMemo) out(`    Memo     ${bold(deposit.receiverMemo)} ${red('(required)')}`);
   }
   out();
+  const unit = isSatsUnit(deposit.amountUnit) ? 'sats' : deposit.tokenSymbol;
+  const where = deposit.lnInvoice ? 'over Lightning' : `on ${deposit.chain}`;
+  out(
+    `  Make sure the wallet you pay from holds at least ` +
+      `${bold(`${deposit.amount} ${unit}`)} ${where}.`,
+  );
   out(dim('  Copy the address from this block; do not retype it.'));
   out(dim('  Send it exactly once.'));
   out();
@@ -363,7 +587,22 @@ async function main() {
     case 'status':
       return cmdStatus(opts);
     case 'pay':
-      return cmdPay(opts);
+      try {
+        return await cmdPay(opts);
+      } catch (err) {
+        // A usage problem discovered after parsing (no coin, on a non-TTY)
+        // should still exit 2, like every other usage error.
+        if (err instanceof CliError) {
+          const payload = formatFailure(err);
+          if (opts.json) printJson(payload);
+          else {
+            printError(payload);
+            out(dim('\n  rozo-checkout --help for usage.'));
+          }
+          return EXIT_USAGE;
+        }
+        throw err;
+      }
     default:
       out(HELP);
       return EXIT_USAGE;

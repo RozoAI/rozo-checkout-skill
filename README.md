@@ -1,273 +1,235 @@
 # rozo-checkout
 
-**English** | [简体中文](README.zh.md) | [日本語](README.ja.md) | [Español](README.es.md)
+**English** | [简体中文](docs/README.zh.md) | [日本語](docs/README.ja.md) | [Español](docs/README.es.md)
 
-**[Quick start →](QUICKSTART.md)** — pay a link in five minutes, without reading any of this.
+Pay an **OpenRouter Coinbase Payment Link** with a coin that link cannot take
+directly — BTC over Lightning, or USDT/USDC on Solana, BNB Chain, Ethereum,
+Polygon, Base or Stellar. A Coinbase Payment Link only accepts USDC on Base;
+this routes the coin you actually hold through a bridge, and a funder wallet
+settles the invoice for you. No account, no API key, no browser.
+
+```bash
+npx @rozoai/checkout pay <coinbase-link>
+```
+
+It asks which coin you want to pay with — paste your wallet address at the
+prompt and it will mark which coins you can actually afford — then prints a
+deposit address for you to pay from any wallet — **no private key, no environment variable, no
+configuration** — and waits until the invoice is settled.
+
+Know your coin already? Skip the question:
 
 ```bash
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
-Pay an **OpenRouter Coinbase Payment Link** with a coin that link cannot take
-directly — BTC over Lightning, or USDT/USDC on Solana, BNB Chain, Ethereum,
-Polygon, Base or Stellar.
+## Coins you can pay with
 
-A Coinbase Payment Link only accepts USDC on Base. This repo is an agent skill
-(plus the Node scripts behind it) that routes any of the coins above through a
-bridge: you get a one-time deposit address for the coin you actually hold, and
-once your deposit lands a funder wallet settles the Coinbase invoice on your
-behalf.
-
-On the invoice itself there is **no discount**: `callerPays` equals the invoice
-amount. The **deposit** you send is a different number, and it is normally
-larger — it includes the bridge and source-chain fees needed to deliver the
-invoice amount in Base USDC. Always send exactly the `deposit.amount` the
-backend returns; never assume it equals the invoice.
-
-- `SKILL.md` — the agent-facing instructions (Claude Code skill format).
-- `llms.txt` — a compact summary for agents that read one file.
-- `scripts/` — the Node implementation; `src/` is the source, `dist/` holds
-  self-contained bundles you can run with plain `node`.
-- `test/` — offline unit tests for the money-handling and safety logic.
-- `PLAN.md` — the design document the implementation follows.
-
-You do **not** need an account, an API key, or any relationship with the
-operator to use this. Every endpoint it calls is public and keyless.
-
-## How it works
-
-```mermaid
-flowchart TD
-    A["Coinbase Payment Link<br/>payments.coinbase.com/payment-links/pl_*"] --> B
-    B["quote-invoice<br/>(public POST)"] --> C["create-invoice<br/>(public POST)"]
-    C --> D["Bridge order<br/>one-time deposit address<br/>+ exact amount + expiry"]
-    D --> E["You send USDT/USDC/BTC<br/>on your chosen chain"]
-    E --> F["Bridge converts the pay-in"]
-    F --> G["Funder wallet settles<br/>the Coinbase invoice"]
-    G --> H["Merchant is paid<br/>(e.g. OpenRouter credit)"]
-```
-
-The same thing as ASCII, for terminals without mermaid:
-
-```
-  Coinbase Payment Link (pl_* / paymentSession_*)
-            |
-            v
-  [ quote-invoice ]  ->  merchant, amount, expiry, short-lived quote receipt
-            |
-            v
-  [ create-invoice ] ->  bridge order:  rozoPaymentId + deposit address
-            |                            + exact amount + order expiry
-            v
-  you send USDT / USDC / BTC on your chain  ------> deposit address
-            |
-            v
-  bridge converts the pay-in  ------>  funder wallet pays the Coinbase invoice
-            |
-            v
-  merchant credited; poll until the state is `settled`
-```
-
-Three identifiers appear throughout and are never interchangeable:
-
-| Identifier | What it is |
-|---|---|
-| `linkId` | the Coinbase id: `pl_*` (Payment Link) or `paymentSession_*` (v3 session) |
-| `rozoPaymentId` | the bridge order's UUID — use this for deposit detail and status |
-| `paymentLink` | a hosted pay page URL for the bridge order (human fallback) |
-
-## Supported sources
-
-| Chain | Chain id | Tokens | Notes |
+| Chain | `--with` | Chain id | Notes |
 |---|---|---|---|
-| Ethereum | `1` | USDC, USDT | 6 decimals |
-| BNB Chain | `56` | USDC, USDT | **18 decimals** — the usual source of off-by-10^12 bugs |
-| Polygon | `137` | USDC, USDT | 6 decimals |
-| Base | `8453` | USDC | 6 decimals |
-| Solana | `900` | USDC, USDT | 6 decimals; SPL. Native SOL is **not** supported |
-| Stellar | `1500` | USDC | 7 decimals; memo required — shown in the deposit block |
-| Bitcoin Lightning | `lightning` | BTC | amounts are integer **satoshis**, paid via a BOLT11 invoice |
+| Ethereum | `usdt-ethereum` `usdc-ethereum` | `1` | 6 decimals |
+| BNB Chain | `usdt-bnb` `usdc-bnb` | `56` | 18 decimals |
+| Polygon | `usdt-polygon` `usdc-polygon` | `137` | 6 decimals |
+| Base | `usdc-base` | `8453` | 6 decimals |
+| Solana | `usdt-solana` `usdc-solana` | `900` | SPL; native SOL not supported |
+| Stellar | `usdc-stellar` | `1500` | memo required — shown in the deposit block |
+| Bitcoin Lightning | `btc-lightning` | `lightning` | BOLT11; amounts in satoshis |
 
 Native gas coins (SOL, BNB, ETH, MATIC) and on-chain BTC are not accepted.
 
-## Quickstart
+## Use it from your agent
 
-### 1. Try the public endpoints with curl
+The payload is the same everywhere: the one-liner above, or point the agent at
+[llms.txt](llms.txt). Agents and scripts should always pass `--with` — the
+picker only appears on a terminal, and there is deliberately no default coin. **Paying from your own wallet never needs a key.** Only
+the optional `--send` flag signs locally, and only that flag reads
+`ROZO_CHECKOUT_EVM_KEY` / `ROZO_CHECKOUT_SOL_KEY`.
 
-Replace `pl_01YOURLINKID` with a real Coinbase Payment Link. No auth header is
-needed anywhere below.
+<details>
+<summary><b>Claude Code</b> — install the skill, or paste the one-liner</summary>
+
+This repo is a Claude Code skill: it ships `SKILL.md` plus the executables in
+`scripts/dist/`. Clone it into your skills directory and Claude Code picks it
+up automatically.
 
 ```bash
-MPP="https://apiserver.mpprouter.dev/v1/services/rozo-agent-api"
-INTENTS="https://intentapiv4.rozo.ai/functions/v1/payment-api"
+git clone https://github.com/RozoAI/rozo-checkout-skill ~/.claude/skills/rozo-checkout
+```
+
+Or skip the install and just ask it to run:
+
+```
+Pay this OpenRouter link with USDT on Solana:
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
+Wallet: any wallet, no key. Add `--send` only if you want Claude to sign from a
+hot wallet, which needs the env key.
+</details>
+
+<details>
+<summary><b>Codex CLI</b> — AGENTS.md, or run it directly</summary>
+
+Codex reads `AGENTS.md` from the project root. Add a standing instruction so it
+knows how to pay without being told each time:
+
+```
+To pay an OpenRouter / Coinbase payment link, run:
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
+Wallet: any wallet, no key. `--send` needs the env key.
+</details>
+
+<details>
+<summary><b>OpenCode</b> — AGENTS.md, or run it directly</summary>
+
+OpenCode also reads `AGENTS.md` from the project root, so the Codex snippet
+above works unchanged. The shortest path is still the command itself:
+
+```bash
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
+Wallet: any wallet, no key. `--send` needs the env key.
+</details>
+
+<details>
+<summary><b>Cline</b> — .clinerules, or run it directly</summary>
+
+Cline reads standing instructions from `.clinerules` in the project root:
+
+```
+To pay an OpenRouter / Coinbase payment link, run:
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
+Wallet: any wallet, no key. `--send` needs the env key.
+</details>
+
+<details>
+<summary><b>Cursor</b> — .cursor/rules, or run it directly</summary>
+
+Add a project rule at `.cursor/rules/rozo-checkout.mdc`:
+
+```
+To pay an OpenRouter / Coinbase payment link, run:
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
+Wallet: any wallet, no key. `--send` needs the env key.
+</details>
+
+<details>
+<summary><b>Hermes Agent</b> — run the one-liner in a session</summary>
+
+Hermes Agent (Nous Research) has shell access and its own skill system. Start it
+with `hermes` and ask:
+
+```
+Fetch https://checkout.rozo.ai/llms.txt, then pay this OpenRouter link:
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
+Wallet: any wallet, no key. `--send` needs the env key.
+</details>
+
+<details>
+<summary><b>OpenClaw</b> — openclaw agent exec</summary>
+
+OpenClaw's headless entry point runs a one-off task, which suits a payment you
+trigger from a script or a chat channel:
+
+```bash
+openclaw agent exec "Pay this OpenRouter link with USDT on Solana by running: npx @rozoai/checkout pay <coinbase-link> --with usdt-solana"
+```
+
+Wallet: any wallet, no key. `--send` needs the env key.
+</details>
+
+<details>
+<summary><b>Pi</b> — run the one-liner in a session</summary>
+
+Pi is a BYOK terminal agent whose built-in tools include `bash`, so it can run
+the command directly. Start it with `pi` and ask:
+
+```
+Pay this OpenRouter link with USDT on Solana by running:
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
+Wallet: any wallet, no key. `--send` needs the env key.
+</details>
+
+<details>
+<summary><b>Terminal — no agent at all</b> — run the scripts step by step</summary>
+
+Drive each step yourself. The bundles are self-contained; nothing to install
+beyond Node 18+.
+
+```bash
+git clone https://github.com/RozoAI/rozo-checkout-skill && cd rozo-checkout-skill
 LINK="https://payments.coinbase.com/payment-links/pl_01YOURLINKID"
 
-# Quote it: merchant, amount, expiry, and a ~60-second quoteReceipt.
-curl -s -X POST "$MPP/quote-invoice" \
-  -H 'content-type: application/json' \
-  -d "{\"url\":\"$LINK\"}"
+# Read-only quote, costs nothing
+node scripts/dist/quote.js --url "$LINK"
 
-# Create a bridge order for, say, USDT on Solana.
-# This creates an order but moves no money; an unfunded order simply expires.
-curl -s -X POST "$MPP/create-invoice" \
-  -H 'content-type: application/json' \
-  -d "{\"url\":\"$LINK\",\"source\":{\"chainId\":\"900\",\"tokenSymbol\":\"USDT\"}}"
+# Create the order. The full deposit address is WITHHELD here; you get a
+# masked summary to review first.
+node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT
 
-# Deposit instructions (authoritative), using the rozoPaymentId from above.
-curl -s "$INTENTS/payments/<rozoPaymentId>"
+# Once you have decided to pay, re-run with --confirm to release it
+node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT --confirm
 
-# Fulfilment status, using the Coinbase linkId.
-curl -s "$MPP/invoice-status?payment_id=pl_01YOURLINKID"
+# Pay the deposit block from any wallet, then watch it settle
+node scripts/dist/status.js --rozo-payment-id <uuid> --watch
 ```
-
-`create-invoice` is rate-limited per IP (about 30/hour); the read endpoints are
-not.
-
-### 2. Use the CLI
-
-Nothing to install — `npx` fetches and runs it:
-
-```bash
-npx @rozoai/checkout quote <coinbase-link>
-npx @rozoai/checkout pay   <coinbase-link> --with usdt-solana
-npx @rozoai/checkout status <rozoPaymentId>
-```
-
-`pay` walks the whole flow: quote, create the order, show a masked review, ask
-for a yes, then print the deposit instructions and poll until settlement. Add
-`--send` to pay from a hot wallet instead of your own, `--json` for machine
-output, and `--help` for everything else.
-
-### 3. Or run the scripts directly
-
-Cloning the repo gives you the same flows as individual scripts — this is what
-the agent skill uses, and what the CLI calls underneath.
 
 Each script prints exactly one JSON object on stdout. Exit `0` success, `1`
 refused/failed (read `error.code`), `2` usage, `3` submitted but unconfirmed.
+Full walkthrough: [QUICKSTART](docs/QUICKSTART.md).
 
-```bash
-# Step 1 — read-only quote, costs nothing
-node scripts/dist/quote.js --url "$LINK"
+Wallet: any wallet, no key. For hot-wallet sending see `send-evm.js` /
+`send-sol.js`, which read `ROZO_CHECKOUT_EVM_KEY` / `ROZO_CHECKOUT_SOL_KEY`.
+</details>
 
-# Step 2 — create the order (no money moves; unfunded orders expire).
-#          The full deposit address is WITHHELD at this stage: you get the
-#          masked summary to review, and `depositWithheld: true`.
-node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT
+<details>
+<summary><b>Any other agent</b> — point it at llms.txt</summary>
 
-# Step 3 — review the amount, chain, masked address and expiry.
-#          Only when you have decided to pay, re-run the same command
-#          with --confirm. This releases the full deposit block and records the
-#          confirmation the send scripts require.
-node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT --confirm
+Any agent that can fetch a URL and run a command can do this:
 
-# Step 4a — Mode A (default): pay the deposit block from any wallet.
-#           Needs no key and no configuration. Then watch it settle.
-node scripts/dist/status.js --rozo-payment-id <uuid> --watch --timeout 600
-
-# Step 4b — Mode B (optional): let the script sign for you. This is the only
-#           step that needs a private key. --dry-run signs nothing; a real
-#           send additionally requires --send.
-ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
-  node scripts/dist/send-sol.js --rozo-payment-id <uuid> --dry-run
+```
+Fetch https://checkout.rozo.ai/llms.txt into your context, then use it
+to pay this OpenRouter link: <coinbase-link>
 ```
 
-`scripts/dist/*.js` are self-contained bundles — no `npm install` is needed at
-the call site. The CLI above is the same code with a friendlier surface: it
-imports these flows rather than reimplementing them, so every check below
-applies identically whichever entry point you use.
+If the agent has no shell but can make HTTP requests, it can drive the four
+public endpoints directly — see [how it works](docs/how-it-works.md).
 
-## Build and test
+Wallet: any wallet, no key. `--send` needs the env key.
+</details>
 
-```bash
-npm install     # only needed to rebuild or to run the tests
-npm run build   # esbuild -> scripts/dist/*.js (node18 target) + blacklist.json
-npm test        # node:test, fully offline
-npm run check   # build + test
-```
+## Three rules worth knowing
 
-Tests make **no network calls**; every backend response is a fixture in
-`test/fixtures/`. They cover the atomic-amount conversion (6/18 decimals and
-Lightning satoshis), the expiry-margin arithmetic, compromised-address
-normalization and fail-closed behaviour, the order reuse decision, the
-post-create verification comparator, and the deposit-completeness rules.
+- **The deposit address is one-time.** Never reuse one from an older order, a
+  cached response or a screenshot.
+- **Send the exact amount shown.** It is normally larger than the invoice — it
+  includes the bridge and network fees.
+- **Never pay a funded order twice.** If a payment has already been detected,
+  stop and get a human to reconcile it; a second payment to a one-time address
+  is not guaranteed to be credited.
 
-Two groups spawn real child processes rather than calling functions, because
-they test things a single-process test cannot: the concurrency suite races
-several processes to claim one order (exactly one may win) and to exhaust the
-session cap, and the entry-point suite runs the built send scripts to prove
-they refuse without `--send`, without a confirmation, and after a prior claim.
+The full list of what this refuses to do, and why, is in
+[docs/safety.md](docs/safety.md).
 
-## Safety design
+## Links
 
-The interesting part of this repo is what it refuses to do.
-
-- **Two-phase confirmation, enforced.** `create-order.js` withholds the full
-  deposit address, memo and BOLT11 until it is re-run with `--confirm`, which
-  records a confirmation bound to a sha256 of those exact instructions. The
-  send scripts refuse without both `--send` and a confirmation whose digest
-  still matches the live data, so neither an accidental invocation nor a
-  swapped deposit address can move funds.
-- **Full invoice, always.** `callerPays` must equal the invoice amount and
-  `discount` must be `"0"`; anything else aborts with `NO_DISCOUNT_VIOLATION`.
-  Security-critical fields (`linkId`, `merchant`, `original`, `callerPays`, the
-  echoed source) must be present as well as equal — a missing field is drift.
-- **Reuse guard.** Creating an order for a link that already has an unexpired
-  order returns that existing order — even if it has already been funded. So on
-  every run the live order is required to be unpaid (`payment_unpaid`, no tx
-  hash, no amount received, no confirmation) and to match the chain and token
-  the caller chose. Otherwise: `ORDER_ALREADY_FUNDED` or
-  `REUSED_SOURCE_MISMATCH`.
-- **Money-detected rule, fail closed.** Once any pay-in exists, the tooling
-  never reports a plain failure, never advises paying again, and never retries
-  into a new order. An `amountReceived` that is non-null but unreadable counts
-  as money, not as absence of money. An unreadable backend reports `unknown`,
-  never `awaiting_deposit`.
-- **Complete deposit instructions.** A zero, negative or unparsable amount
-  aborts. Lightning requires the BOLT11 (which arrives in `source.lnInvoice`
-  with an empty address). A Stellar deposit is a shared hub address plus a
-  per-order memo, so the memo is part of the destination: an order that
-  arrives without one is a hard abort, never rendered as "no memo required".
-- **Expiry margins.** Payment is refused unless the earlier of the order expiry
-  and the Coinbase expiry is more than a per-chain margin away (10 min EVM and
-  Stellar, 5 min Solana). Lightning additionally requires at least 10 minutes
-  of BOLT11 validity. A missing or unparsable deadline aborts.
-- **Payability revalidation.** A quote receipt makes order creation skip the
-  live Coinbase check, and the link can be consumed by someone else at any
-  moment — so payability is re-checked immediately before the deposit address
-  is shown, and again as the very last step before broadcast, after all the RPC
-  preparation. Incomplete Coinbase state is treated as "cannot prove payable",
-  not as payable.
-- **Compromised-address list, fail closed.** `scripts/src/lib/blacklist.json`
-  carries a vendored list with a provenance header and a sha256 over the
-  addresses. The digest proves only that this vendored copy has not been edited
-  since its sync date; it is not a signature by the upstream source. Both the
-  deposit address and the sending wallet are checked. If the file is missing,
-  malformed, empty, or its digest does not match, every send is refused rather
-  than proceeding unchecked.
-- **Send-once, across processes.** Order state lives in
-  `$HOME/.rozo-checkout/state/<uuid>.json`, written atomically (temp file,
-  fsync, rename). Every read-modify-write of a state file — the claim, the
-  spend caps, the order record and the confirmation — runs inside one exclusive
-  lockfile, so two concurrent invocations can neither both decide they are
-  first, nor overwrite each other's send record. A send is claimed *before* broadcasting, so an ambiguous RPC error can
-  never become a second transfer. Transactions are signed before broadcast so
-  the hash is known in advance; on an ambiguous result the scripts look that
-  exact transaction up instead of rebroadcasting.
-- **Hot-wallet controls.** Keys come from the environment only
-  (`ROZO_CHECKOUT_EVM_KEY`, `ROZO_CHECKOUT_SOL_KEY`), are never printed and
-  never accepted on the command line; library and RPC errors are redacted
-  before display, including credential-bearing provider URLs, bearer tokens and
-  key-shaped strings. The scripts refuse to run when any `.env`/`.env.*` in the
-  working directory is git-tracked, and refuse just as hard when git cannot
-  prove it is untracked. The RPC's chain id (or Solana genesis hash) and the token's
-  on-chain decimals are verified before signing. One limit applies: a single
-  payment may not exceed $1,100. There is no override flag and no cumulative
-  session cap — a larger invoice is paid from your own wallet, which needs no
-  key and has no limit.
-- **Address masking.** Prose shows `first6...last4`. The full deposit address,
-  memo and BOLT11 string appear only inside the machine-readable `deposit`
-  object, so they stay copy-pastable without being scattered through logs.
+- [Quick start](docs/QUICKSTART.md) — the five commands, with expected output
+- [How it works](docs/how-it-works.md) — the flow, the endpoints, the identifiers
+- [Safety design](docs/safety.md) — every rail, in detail
+- [SKILL.md](SKILL.md) — agent-facing instructions · [llms.txt](llms.txt) — one-file summary
+- [checkout.rozo.ai/agent](https://checkout.rozo.ai/agent.html) — the same thing on the web
+- [Issues](https://github.com/RozoAI/rozo-checkout-skill/issues) — bugs and requests
 
 ## Changelog
 

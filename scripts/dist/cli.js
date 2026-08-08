@@ -20457,8 +20457,8 @@ var require_dist = __commonJS({
         constructor(failure, failures) {
           let cached2;
           const { message, explanation, ...rest } = failure;
-          const { path: path3 } = failure;
-          const msg = path3.length === 0 ? message : `At path: ${path3.join(".")} -- ${message}`;
+          const { path: path4 } = failure;
+          const msg = path4.length === 0 ? message : `At path: ${path4.join(".")} -- ${message}`;
           super(explanation ?? msg);
           if (explanation != null)
             this.cause = msg;
@@ -20503,15 +20503,15 @@ var require_dist = __commonJS({
         } else if (typeof result === "string") {
           result = { message: result };
         }
-        const { path: path3, branch } = context;
+        const { path: path4, branch } = context;
         const { type: type2 } = struct6;
         const { refinement, message = `Expected a value of type \`${type2}\`${refinement ? ` with refinement \`${refinement}\`` : ""}, but received: \`${print(value)}\`` } = result;
         return {
           value,
           type: type2,
           refinement,
-          key: path3[path3.length - 1],
-          path: path3,
+          key: path4[path4.length - 1],
+          path: path4,
           branch,
           ...result,
           message
@@ -20529,8 +20529,8 @@ var require_dist = __commonJS({
         }
       }
       function* run6(value, struct6, options = {}) {
-        const { path: path3 = [], branch = [value], coerce: coerce2 = false, mask: mask2 = false } = options;
-        const ctx = { path: path3, branch, mask: mask2 };
+        const { path: path4 = [], branch = [value], coerce: coerce2 = false, mask: mask2 = false } = options;
+        const ctx = { path: path4, branch, mask: mask2 };
         if (coerce2) {
           value = struct6.coercer(value, ctx);
         }
@@ -20542,7 +20542,7 @@ var require_dist = __commonJS({
         }
         for (let [k, v, s] of struct6.entries(value, ctx)) {
           const ts = run6(v, s, {
-            path: k === void 0 ? path3 : [...path3, k],
+            path: k === void 0 ? path4 : [...path4, k],
             branch: k === void 0 ? branch : [...branch, v],
             coerce: coerce2,
             mask: mask2,
@@ -22472,14 +22472,14 @@ var require_url_state_machine = __commonJS({
       return url.replace(/\u0009|\u000A|\u000D/g, "");
     }
     function shortenPath(url) {
-      const path3 = url.path;
-      if (path3.length === 0) {
+      const path4 = url.path;
+      if (path4.length === 0) {
         return;
       }
-      if (url.scheme === "file" && path3.length === 1 && isNormalizedWindowsDriveLetter(path3[0])) {
+      if (url.scheme === "file" && path4.length === 1 && isNormalizedWindowsDriveLetter(path4[0])) {
         return;
       }
-      path3.pop();
+      path4.pop();
     }
     function includesCredentials(url) {
       return url.username !== "" || url.password !== "";
@@ -24774,16 +24774,16 @@ var require_constants = __commonJS({
 // node_modules/node-gyp-build/node-gyp-build.js
 var require_node_gyp_build = __commonJS({
   "node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
-    var fs4 = __require("fs");
-    var path3 = __require("path");
-    var os2 = __require("os");
+    var fs5 = __require("fs");
+    var path4 = __require("path");
+    var os3 = __require("os");
     var runtimeRequire = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
     var vars = process.config && process.config.variables || {};
     var prebuildsOnly = !!process.env.PREBUILDS_ONLY;
     var abi2 = process.versions.modules;
     var runtime = isElectron() ? "electron" : isNwjs() ? "node-webkit" : "node";
-    var arch = process.env.npm_config_arch || os2.arch();
-    var platform = process.env.npm_config_platform || os2.platform();
+    var arch = process.env.npm_config_arch || os3.arch();
+    var platform = process.env.npm_config_platform || os3.platform();
     var libc = process.env.LIBC || (isAlpine(platform) ? "musl" : "glibc");
     var armv = process.env.ARM_VERSION || (arch === "arm64" ? "8" : vars.arm_version) || "";
     var uv = (process.versions.uv || "").split(".")[0];
@@ -24792,21 +24792,21 @@ var require_node_gyp_build = __commonJS({
       return runtimeRequire(load.resolve(dir));
     }
     load.resolve = load.path = function(dir) {
-      dir = path3.resolve(dir || ".");
+      dir = path4.resolve(dir || ".");
       try {
-        var name = runtimeRequire(path3.join(dir, "package.json")).name.toUpperCase().replace(/-/g, "_");
+        var name = runtimeRequire(path4.join(dir, "package.json")).name.toUpperCase().replace(/-/g, "_");
         if (process.env[name + "_PREBUILD"]) dir = process.env[name + "_PREBUILD"];
       } catch (err) {
       }
       if (!prebuildsOnly) {
-        var release = getFirst(path3.join(dir, "build/Release"), matchBuild);
+        var release = getFirst(path4.join(dir, "build/Release"), matchBuild);
         if (release) return release;
-        var debug = getFirst(path3.join(dir, "build/Debug"), matchBuild);
+        var debug = getFirst(path4.join(dir, "build/Debug"), matchBuild);
         if (debug) return debug;
       }
       var prebuild = resolve(dir);
       if (prebuild) return prebuild;
-      var nearby = resolve(path3.dirname(process.execPath));
+      var nearby = resolve(path4.dirname(process.execPath));
       if (nearby) return nearby;
       var target = [
         "platform=" + platform,
@@ -24823,26 +24823,26 @@ var require_node_gyp_build = __commonJS({
       ].filter(Boolean).join(" ");
       throw new Error("No native build was found for " + target + "\n    loaded from: " + dir + "\n");
       function resolve(dir2) {
-        var tuples = readdirSync(path3.join(dir2, "prebuilds")).map(parseTuple);
+        var tuples = readdirSync(path4.join(dir2, "prebuilds")).map(parseTuple);
         var tuple = tuples.filter(matchTuple(platform, arch)).sort(compareTuples)[0];
         if (!tuple) return;
-        var prebuilds = path3.join(dir2, "prebuilds", tuple.name);
+        var prebuilds = path4.join(dir2, "prebuilds", tuple.name);
         var parsed = readdirSync(prebuilds).map(parseTags);
         var candidates = parsed.filter(matchTags(runtime, abi2));
         var winner = candidates.sort(compareTags(runtime))[0];
-        if (winner) return path3.join(prebuilds, winner.file);
+        if (winner) return path4.join(prebuilds, winner.file);
       }
     };
     function readdirSync(dir) {
       try {
-        return fs4.readdirSync(dir);
+        return fs5.readdirSync(dir);
       } catch (err) {
         return [];
       }
     }
     function getFirst(dir, filter) {
       var files = readdirSync(dir).filter(filter);
-      return files[0] && path3.join(dir, files[0]);
+      return files[0] && path4.join(dir, files[0]);
     }
     function matchBuild(name) {
       return /\.node$/.test(name);
@@ -24929,7 +24929,7 @@ var require_node_gyp_build = __commonJS({
       return typeof window !== "undefined" && window.process && window.process.type === "renderer";
     }
     function isAlpine(platform2) {
-      return platform2 === "linux" && fs4.existsSync("/etc/alpine-release");
+      return platform2 === "linux" && fs5.existsSync("/etc/alpine-release");
     }
     load.parseTags = parseTags;
     load.matchTags = matchTags;
@@ -41168,20 +41168,20 @@ var require_file_uri_to_path = __commonJS({
       var rest = decodeURI(uri.substring(7));
       var firstSlash = rest.indexOf("/");
       var host = rest.substring(0, firstSlash);
-      var path3 = rest.substring(firstSlash + 1);
+      var path4 = rest.substring(firstSlash + 1);
       if ("localhost" == host) host = "";
       if (host) {
         host = sep + sep + host;
       }
-      path3 = path3.replace(/^(.+)\|/, "$1:");
+      path4 = path4.replace(/^(.+)\|/, "$1:");
       if (sep == "\\") {
-        path3 = path3.replace(/\//g, "\\");
+        path4 = path4.replace(/\//g, "\\");
       }
-      if (/^.+\:/.test(path3)) {
+      if (/^.+\:/.test(path4)) {
       } else {
-        path3 = sep + path3;
+        path4 = sep + path4;
       }
-      return host + path3;
+      return host + path4;
     }
   }
 });
@@ -41189,19 +41189,19 @@ var require_file_uri_to_path = __commonJS({
 // node_modules/bindings/bindings.js
 var require_bindings = __commonJS({
   "node_modules/bindings/bindings.js"(exports, module) {
-    var fs4 = __require("fs");
-    var path3 = __require("path");
+    var fs5 = __require("fs");
+    var path4 = __require("path");
     var fileURLToPath2 = require_file_uri_to_path();
-    var join = path3.join;
-    var dirname = path3.dirname;
-    var exists = fs4.accessSync && function(path4) {
+    var join = path4.join;
+    var dirname = path4.dirname;
+    var exists = fs5.accessSync && function(path5) {
       try {
-        fs4.accessSync(path4);
+        fs5.accessSync(path5);
       } catch (e) {
         return false;
       }
       return true;
-    } || fs4.existsSync || path3.existsSync;
+    } || fs5.existsSync || path4.existsSync;
     var defaults = {
       arrow: process.env.NODE_BINDINGS_ARROW || " \u2192 ",
       compiled: process.env.NODE_BINDINGS_COMPILED_DIR || "compiled",
@@ -41246,7 +41246,7 @@ var require_bindings = __commonJS({
       if (!opts.module_root) {
         opts.module_root = exports.getRoot(exports.getFileName());
       }
-      if (path3.extname(opts.bindings) != ".node") {
+      if (path4.extname(opts.bindings) != ".node") {
         opts.bindings += ".node";
       }
       var requireFunc = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
@@ -41685,6 +41685,44 @@ var CHAIN_ALIASES = {
   bitcoin: "lightning",
   btc: "lightning"
 };
+var PICKER_OPTIONS = [
+  { token: "USDT", chain: "Solana", chainId: "900" },
+  { token: "USDT", chain: "BNB Chain", chainId: "56" },
+  { token: "USDT", chain: "Ethereum", chainId: "1" },
+  { token: "USDT", chain: "Polygon", chainId: "137" },
+  { token: "USDC", chain: "Solana", chainId: "900" },
+  { token: "USDC", chain: "BNB Chain", chainId: "56" },
+  { token: "USDC", chain: "Ethereum", chainId: "1" },
+  { token: "USDC", chain: "Polygon", chainId: "137" },
+  { token: "USDC", chain: "Base", chainId: "8453" },
+  { token: "USDC", chain: "Stellar", chainId: "1500" },
+  { token: "BTC", chain: "Lightning", chainId: "lightning" }
+].map((o, i) => ({
+  number: i + 1,
+  ...o,
+  tokenSymbol: o.token,
+  // The flag a user could have typed instead, echoed back so they learn it.
+  preset: `${o.token.toLowerCase()}-${{ "900": "solana", "56": "bnb", "1": "ethereum", "137": "polygon", "8453": "base", "1500": "stellar", lightning: "lightning" }[o.chainId]}`
+}));
+function resolvePickerChoice(input) {
+  const raw = String(input ?? "").trim();
+  if (!raw) throw new CliError("BAD_CHOICE", "Nothing entered. Type the number of a coin.");
+  if (/^\d+$/.test(raw)) {
+    const option2 = PICKER_OPTIONS.find((o) => o.number === Number(raw));
+    if (!option2) {
+      throw new CliError(
+        "BAD_CHOICE",
+        `${raw} is not on the list. Choose 1-${PICKER_OPTIONS.length}.`
+      );
+    }
+    return { chainId: option2.chainId, tokenSymbol: option2.tokenSymbol, preset: option2.preset };
+  }
+  const { chainId, tokenSymbol } = resolvePreset(raw);
+  const option = PICKER_OPTIONS.find(
+    (o) => o.chainId === chainId && o.tokenSymbol === tokenSymbol
+  );
+  return { chainId, tokenSymbol, preset: option ? option.preset : raw.toLowerCase() };
+}
 var CliError = class extends Error {
   constructor(code, message, details) {
     super(message);
@@ -41738,9 +41776,10 @@ var BOOLEAN_FLAGS = /* @__PURE__ */ new Set([
   "version",
   "dry-run",
   "no-watch",
-  "watch"
+  "watch",
+  "fresh"
 ]);
-var VALUE_FLAGS = /* @__PURE__ */ new Set(["with", "chain", "token", "rpc", "timeout"]);
+var VALUE_FLAGS = /* @__PURE__ */ new Set(["with", "chain", "token", "rpc", "timeout", "payer"]);
 function parseCliArgs(argv) {
   const positional = [];
   const flags = {};
@@ -41837,8 +41876,10 @@ function parseCliArgs(argv) {
       );
     }
     source = { chainId, tokenSymbol };
-  } else {
+  } else if (flags.with !== void 0) {
     source = resolvePreset(flags.with);
+  } else {
+    source = null;
   }
   const timeout = flags.timeout === void 0 ? 900 : Number(flags.timeout);
   if (!Number.isFinite(timeout) || timeout < 0) {
@@ -41854,13 +41895,16 @@ function parseCliArgs(argv) {
     dryRun: flags["dry-run"] === true,
     watch: flags["no-watch"] !== true,
     timeout,
-    rpc: flags.rpc
+    rpc: flags.rpc,
+    payer: flags.payer,
+    fresh: flags.fresh === true
   };
 }
 var HELP = `rozo-checkout \u2014 pay a Coinbase Payment Link with BTC Lightning,
 or USDT/USDC on Solana, BNB Chain, Ethereum, Polygon, Base or Stellar.
 
 USAGE
+  npx @rozoai/checkout pay <coinbase-link>              (pick a coin from a list)
   npx @rozoai/checkout pay <coinbase-link> --with <coin>
   npx @rozoai/checkout quote <coinbase-link>
   npx @rozoai/checkout status <rozoPaymentId | coinbase-link>
@@ -41875,7 +41919,8 @@ By default, pay just prints an address for you to pay from any wallet:
 no private key, no environment variable, no configuration.
 
 OPTIONS
-  --with <coin>   which coin to pay with (see above)
+  --with <coin>   which coin to pay with. Omit it on a terminal and you get a
+                  numbered list to choose from; scripts and agents must pass it.
   --send          optional. Sign from a hot wallet instead of paying yourself.
                   This is the only option that needs a key, read from
                   ROZO_CHECKOUT_EVM_KEY or ROZO_CHECKOUT_SOL_KEY. A single
@@ -41885,17 +41930,588 @@ OPTIONS
   --json, -j      machine-readable output
   --no-watch      stop after showing the deposit instructions
   --timeout <s>   how long to poll for settlement (default 900)
+  --payer <addr>  optional. Check what this wallet holds and mark the coin
+                  list accordingly. Display help only; it never changes what
+                  gets signed.
+  --fresh         ignore the remembered wallet address and coin for this run
   --rpc <url>     override the RPC endpoint for --send
   --help, -h      this text
   --version, -v   print the version
 
 EXAMPLES
+  npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01...
   npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01... --with usdt-solana
   npx @rozoai/checkout pay pl_01... --with btc-lightning
   npx @rozoai/checkout status 11111111-2222-4333-8444-555555555555
 
 Creating an order moves no money; an unfunded order simply expires. Nothing is
 paid until you confirm, and --send is required before anything is signed.`;
+
+// scripts/src/lib/wallet-check.mjs
+var INTENT_API_BASE = process.env.ROZO_CHECKOUT_INTENT_API || "https://intentapi.rozo.ai";
+var BALANCE_TIMEOUT_MS = 3e3;
+var APP_ID = "rozoCheckoutCli";
+var DEST_CHAIN_ID = 8453;
+var EVM_RE = /^0x[0-9a-fA-F]{40}$/;
+var STELLAR_RE = /^G[A-Z2-7]{55}$/;
+var SOLANA_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+function detectAddressFamily(address) {
+  const a = String(address ?? "").trim();
+  if (!a) return null;
+  if (EVM_RE.test(a)) return "evm";
+  if (STELLAR_RE.test(a)) return "stellar";
+  if (SOLANA_RE.test(a)) return "solana";
+  return null;
+}
+function familyCoversChain(family, chainId) {
+  const id = String(chainId);
+  if (id === "lightning") return false;
+  if (id === "900") return family === "solana";
+  if (id === "1500") return family === "stellar";
+  return family === "evm";
+}
+function buildBalanceRequest({ family, address, usdRequired }) {
+  const usd = Number(usdRequired);
+  if (!Number.isFinite(usd) || usd <= 0) {
+    throw new SkillError("BAD_USD_REQUIRED", "A positive USD amount is required.");
+  }
+  const wrap3 = (payload) => encodeURIComponent(JSON.stringify({ 0: payload }));
+  if (family === "evm") {
+    return `${INTENT_API_BASE}/getWalletPaymentOptions?input=${wrap3({
+      payerAddress: address,
+      usdRequired: usd,
+      destChainId: DEST_CHAIN_ID,
+      appId: APP_ID
+    })}`;
+  }
+  if (family === "solana") {
+    return `${INTENT_API_BASE}/getSolanaPaymentOptions?input=${wrap3({
+      pubKey: address,
+      usdRequired: usd,
+      appId: APP_ID
+    })}`;
+  }
+  if (family === "stellar") {
+    return `${INTENT_API_BASE}/getStellarPaymentOptions?input=${wrap3({
+      stellarAddress: address,
+      usdRequired: usd,
+      appId: APP_ID
+    })}`;
+  }
+  throw new SkillError("BAD_ADDRESS_FAMILY", `No balance endpoint for family "${family}".`);
+}
+function parsePaymentOptions(json) {
+  const data = Array.isArray(json) ? json[0]?.result?.data : json?.result?.data ?? json?.data;
+  if (!Array.isArray(data)) return [];
+  const out2 = [];
+  for (const o of data) {
+    const token = o?.balance?.token ?? o?.required?.token;
+    const chainId = token?.chainId;
+    const symbol = token?.symbol;
+    if (chainId === void 0 || !symbol) continue;
+    const balanceUsd = Number(o?.balance?.usd);
+    const requiredUsd = Number(o?.required?.usd);
+    out2.push({
+      chainId: String(chainId),
+      tokenSymbol: String(symbol).toUpperCase(),
+      balanceUsd: Number.isFinite(balanceUsd) ? balanceUsd : null,
+      requiredUsd: Number.isFinite(requiredUsd) ? requiredUsd : null,
+      // The backend's own verdict wins when present; otherwise compare.
+      affordable: o?.disabledReason === void 0 || o?.disabledReason === null ? true : false,
+      disabledReason: o?.disabledReason ?? null
+    });
+  }
+  return out2;
+}
+function markPickerOptions(pickerOptions, { family = null, options = [] } = {}) {
+  const index2 = /* @__PURE__ */ new Map();
+  for (const o of options) index2.set(`${o.chainId}:${o.tokenSymbol}`, o);
+  const marked = pickerOptions.map((row) => {
+    if (!family || !familyCoversChain(family, row.chainId)) {
+      return { ...row, mark: "unchecked", balanceUsd: null, note: null };
+    }
+    const hit = index2.get(`${row.chainId}:${row.tokenSymbol}`);
+    if (!hit) {
+      return { ...row, mark: "insufficient", balanceUsd: 0, note: "no balance found" };
+    }
+    return {
+      ...row,
+      mark: hit.affordable ? "affordable" : "insufficient",
+      balanceUsd: hit.balanceUsd,
+      note: hit.disabledReason
+    };
+  });
+  const rank = { affordable: 0, unchecked: 1, insufficient: 2 };
+  return marked.map((row, i) => ({ row, i })).sort((a, b) => rank[a.row.mark] - rank[b.row.mark] || a.i - b.i).map(({ row }) => row);
+}
+async function fetchWalletOptions({ address, usdRequired, timeoutMs = BALANCE_TIMEOUT_MS }) {
+  const family = detectAddressFamily(address);
+  if (!family) return { ok: false, family: null, options: [], reason: "unrecognised address format" };
+  let url;
+  try {
+    url = buildBalanceRequest({ family, address, usdRequired });
+  } catch (err) {
+    return { ok: false, family, options: [], reason: err.message };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      headers: { accept: "application/json" },
+      signal: controller.signal
+    });
+    if (!res.ok) {
+      return { ok: false, family, options: [], reason: `balance service returned HTTP ${res.status}` };
+    }
+    const json = await res.json();
+    return { ok: true, family, options: parsePaymentOptions(json), reason: null };
+  } catch (err) {
+    const reason = err?.name === "AbortError" ? "balance check timed out" : "balance service unreachable";
+    return { ok: false, family, options: [], reason };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function isProvablyShort({ chainId, tokenSymbol }, { ok, family, options }) {
+  if (!ok || !family) return false;
+  if (!familyCoversChain(family, chainId)) return false;
+  const hit = options.find(
+    (o) => o.chainId === String(chainId) && o.tokenSymbol === String(tokenSymbol).toUpperCase()
+  );
+  if (!hit) return false;
+  return hit.affordable === false;
+}
+
+// scripts/src/lib/prefs.mjs
+import fs2 from "node:fs";
+import path2 from "node:path";
+import os2 from "node:os";
+
+// scripts/src/lib/state.mjs
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import crypto2 from "node:crypto";
+var LOCK_STALE_MS = 6e4;
+var LOCK_WAIT_MS = 1e4;
+var LOCK_POLL_MS = 25;
+function lockPath() {
+  return path.join(stateRoot(), ".send.lock");
+}
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function tryAcquire(file) {
+  try {
+    const fd = fs.openSync(file, "wx", 384);
+    fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, at: (/* @__PURE__ */ new Date()).toISOString() }));
+    fs.closeSync(fd);
+    return true;
+  } catch (err) {
+    if (err.code !== "EEXIST") throw err;
+    return false;
+  }
+}
+function withLock(fn) {
+  const file = lockPath();
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 448 });
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (; ; ) {
+    if (tryAcquire(file)) break;
+    try {
+      const age = Date.now() - fs.statSync(file).mtimeMs;
+      if (age > LOCK_STALE_MS) {
+        const stolen = `${file}.stale.${crypto2.randomBytes(4).toString("hex")}`;
+        try {
+          fs.renameSync(file, stolen);
+          fs.unlinkSync(stolen);
+        } catch {
+        }
+        continue;
+      }
+    } catch (err) {
+      if (err.code !== "ENOENT") throw err;
+      continue;
+    }
+    if (Date.now() > deadline) {
+      throw new SkillError(
+        "LOCK_TIMEOUT",
+        "Another rozo-checkout process is holding the send lock. Refusing to proceed rather than risk a concurrent second send."
+      );
+    }
+    sleepSync(LOCK_POLL_MS);
+  }
+  try {
+    return fn();
+  } finally {
+    try {
+      fs.unlinkSync(file);
+    } catch {
+    }
+  }
+}
+function stateRoot() {
+  return process.env.ROZO_CHECKOUT_STATE_DIR || path.join(os.homedir(), ".rozo-checkout", "state");
+}
+function statePath(rozoPaymentId) {
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(String(rozoPaymentId || ""))) {
+    throw new SkillError("BAD_ROZO_PAYMENT_ID", "Refusing to build a state path from that id.");
+  }
+  return path.join(stateRoot(), `${rozoPaymentId}.json`);
+}
+function writeAtomic(file, data) {
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true, mode: 448 });
+  const tmp = path.join(dir, `.${path.basename(file)}.${crypto2.randomBytes(6).toString("hex")}.tmp`);
+  const fd = fs.openSync(tmp, "wx", 384);
+  try {
+    fs.writeFileSync(fd, JSON.stringify(data, null, 2) + "\n", "utf8");
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmp, file);
+}
+function readState(rozoPaymentId) {
+  const file = statePath(rozoPaymentId);
+  let raw;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return null;
+    throw new SkillError("STATE_UNREADABLE", `Cannot read local state: ${err.code}`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new SkillError(
+      "STATE_CORRUPT",
+      "The local state file for this order is corrupt. Refusing to act; inspect it manually."
+    );
+  }
+}
+function createOrderRecord(record) {
+  return withLock(() => createOrderRecordUnlocked(record));
+}
+function createOrderRecordUnlocked(record) {
+  const { rozoPaymentId } = record;
+  const existing = readState(rozoPaymentId);
+  const next = {
+    version: 1,
+    rozoPaymentId,
+    linkId: record.linkId,
+    paymentLink: record.paymentLink ?? null,
+    merchant: record.merchant ?? null,
+    invoiceAmount: record.invoiceAmount ?? null,
+    source: record.source,
+    receiverAddress: record.receiverAddress,
+    receiverMemo: record.receiverMemo ?? null,
+    amount: record.amount,
+    amountUnit: record.amountUnit ?? null,
+    expiresAt: record.expiresAt ?? null,
+    createdAt: existing?.createdAt ?? (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    confirmation: existing?.confirmation ?? null,
+    send: existing?.send ?? null
+  };
+  writeAtomic(statePath(rozoPaymentId), next);
+  return next;
+}
+function depositDigest(source) {
+  const canonical = JSON.stringify({
+    chainId: String(source?.chainId ?? ""),
+    tokenSymbol: String(source?.tokenSymbol ?? "").toUpperCase(),
+    tokenAddress: String(source?.tokenAddress ?? ""),
+    receiverAddress: String(source?.receiverAddress ?? ""),
+    receiverMemo: source?.receiverMemo ?? null,
+    amount: String(source?.amount ?? ""),
+    amountUnit: source?.amountUnit ?? null,
+    lnInvoice: source?.lnInvoice ?? null
+  });
+  return crypto2.createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+function recordConfirmation(rozoPaymentId, { source, invoiceAmount, tier }) {
+  return withLock(() => {
+    const state = readState(rozoPaymentId);
+    if (!state) {
+      throw new SkillError("NO_ORDER_STATE", "Cannot confirm an order with no local record.");
+    }
+    const next = {
+      ...state,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      confirmation: {
+        confirmedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        depositDigest: depositDigest(source),
+        invoiceAmount: invoiceAmount ?? state.invoiceAmount ?? null,
+        tier: tier ?? null
+      }
+    };
+    writeAtomic(statePath(rozoPaymentId), next);
+    return next;
+  });
+}
+function claimSend(rozoPaymentId, intent, { skipCaps = false } = {}) {
+  return withLock(() => {
+    const state = readState(rozoPaymentId);
+    if (!state) {
+      throw new SkillError(
+        "NO_ORDER_STATE",
+        "No local record for this order. Run create-order.js in this same session first."
+      );
+    }
+    if (state.send) {
+      throw new SkillError(
+        "ALREADY_SENT",
+        `A send was already recorded for this order at ${state.send.claimedAt} (status: ${state.send.status}). Refusing to send twice. Check the backend for the pay-in before doing anything else.`,
+        { send: state.send }
+      );
+    }
+    const caps = skipCaps ? null : assertPaymentLimit(state.invoiceAmount);
+    const next = {
+      ...state,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      send: {
+        status: "claimed",
+        claimedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        chainId: intent.chainId,
+        tokenSymbol: intent.tokenSymbol,
+        from: intent.from,
+        to: intent.to,
+        amountAtomic: intent.amountAtomic,
+        memo: intent.memo ?? null,
+        nonceBefore: intent.nonceBefore ?? null,
+        expectedTxHash: intent.expectedTxHash ?? null,
+        txHash: null
+      }
+    };
+    writeAtomic(statePath(rozoPaymentId), next);
+    return { state: next, caps };
+  });
+}
+function recordSendResult(rozoPaymentId, { status, txHash = null, note = null }) {
+  return withLock(() => {
+    const state = readState(rozoPaymentId);
+    if (!state || !state.send) {
+      throw new SkillError("NO_SEND_CLAIM", "No send claim to update for this order.");
+    }
+    const next = {
+      ...state,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      send: {
+        ...state.send,
+        status,
+        txHash: txHash ?? state.send.txHash,
+        note,
+        resolvedAt: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    };
+    writeAtomic(statePath(rozoPaymentId), next);
+    return next;
+  });
+}
+function findByLinkId(linkId) {
+  const dir = stateRoot();
+  let files = [];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
+  } catch {
+    return null;
+  }
+  let best = null;
+  for (const f of files) {
+    try {
+      const s = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+      if (s?.linkId !== linkId) continue;
+      if (!best || String(s.createdAt) > String(best.createdAt)) best = s;
+    } catch {
+    }
+  }
+  return best;
+}
+var MAX_PAYMENT_USD = 1100;
+function assertPaymentLimit(invoiceUsd) {
+  if (invoiceUsd === null || invoiceUsd === void 0 || String(invoiceUsd).trim() === "") {
+    throw new SkillError("BAD_INVOICE_AMOUNT", "Cannot evaluate the payment limit without a USD amount.");
+  }
+  const usd = Number(invoiceUsd);
+  if (!Number.isFinite(usd) || usd < 0) {
+    throw new SkillError("BAD_INVOICE_AMOUNT", "Cannot evaluate the payment limit without a USD amount.");
+  }
+  if (usd > MAX_PAYMENT_USD) {
+    throw new SkillError(
+      "CAP_PER_TX",
+      `$${usd} is above the $${MAX_PAYMENT_USD} per-payment limit for automated sending. This limit has no override. Pay this invoice from a wallet you control instead \u2014 that path needs no key and has no limit.`
+    );
+  }
+  return { usd, limitUsd: MAX_PAYMENT_USD };
+}
+
+// scripts/src/lib/prefs.mjs
+function prefsPath() {
+  const root = process.env.ROZO_CHECKOUT_STATE_DIR ? path2.dirname(stateRoot()) : path2.join(os2.homedir(), ".rozo-checkout");
+  return path2.join(root, "prefs.json");
+}
+var ALLOWED = ["lastPayerAddress", "lastAddressFamily", "lastPreset", "updatedAt"];
+function readPrefs() {
+  let raw;
+  try {
+    raw = fs2.readFileSync(prefsPath(), "utf8");
+  } catch {
+    return null;
+  }
+  let doc;
+  try {
+    doc = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return null;
+  const out2 = {};
+  for (const k of ALLOWED) {
+    const v = doc[k];
+    if (typeof v === "string" && v.trim()) out2[k] = v.trim();
+  }
+  return Object.keys(out2).length ? out2 : null;
+}
+function savePrefs(update) {
+  const existing = readPrefs() || {};
+  const next = { ...existing };
+  for (const k of ALLOWED) {
+    if (k === "updatedAt") continue;
+    const v = update?.[k];
+    if (typeof v === "string" && v.trim()) next[k] = v.trim();
+  }
+  next.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+  try {
+    writeAtomic(prefsPath(), next);
+  } catch {
+    return null;
+  }
+  return next;
+}
+
+// scripts/src/lib/blacklist.mjs
+import fs3 from "node:fs";
+import path3 from "node:path";
+import crypto3 from "node:crypto";
+import { fileURLToPath } from "node:url";
+var BlacklistError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+};
+function normalizeAddress(address, family) {
+  if (typeof address !== "string") return null;
+  const trimmed = address.trim();
+  if (!trimmed) return null;
+  if (family === "evm" || /^0x[0-9a-fA-F]{40}$/.test(trimmed)) {
+    return trimmed.toLowerCase();
+  }
+  return trimmed;
+}
+function parseBlacklist(doc) {
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist document is not an object.");
+  }
+  const { provenance, entries } = doc;
+  if (!provenance || typeof provenance !== "object") {
+    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist provenance header is missing.");
+  }
+  if (!Array.isArray(entries) || entries.length === 0) {
+    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist is empty or not an array.");
+  }
+  const addresses = [];
+  for (const e of entries) {
+    if (!e || typeof e !== "object" || typeof e.address !== "string" || !e.address.trim()) {
+      throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist entry has no address.");
+    }
+    addresses.push(e.address);
+  }
+  const digest = crypto3.createHash("sha256").update(JSON.stringify(addresses), "utf8").digest("hex");
+  if (typeof provenance.addressesSha256 !== "string" || !provenance.addressesSha256) {
+    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist provenance digest is missing.");
+  }
+  if (digest !== provenance.addressesSha256) {
+    throw new BlacklistError(
+      "BLACKLIST_UNAVAILABLE",
+      "Blacklist digest mismatch \u2014 the vendored address list was modified without re-signing."
+    );
+  }
+  if (provenance.addressCount !== void 0 && provenance.addressCount !== entries.length) {
+    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist addressCount does not match entries.");
+  }
+  const index2 = /* @__PURE__ */ new Map();
+  for (const e of entries) {
+    const key = normalizeAddress(e.address, e.family);
+    if (key) index2.set(key, e);
+    const lower = e.address.trim().toLowerCase();
+    if (/^0x[0-9a-f]{40}$/.test(lower)) index2.set(lower, e);
+  }
+  return { entries, index: index2, provenance, digest };
+}
+function candidatePaths(moduleUrl) {
+  const here = path3.dirname(fileURLToPath(moduleUrl));
+  return [
+    path3.join(here, "blacklist.json"),
+    path3.join(here, "..", "src", "lib", "blacklist.json"),
+    path3.join(here, "..", "..", "src", "lib", "blacklist.json")
+  ];
+}
+var cached = null;
+function loadBlacklist(explicitPath) {
+  if (!explicitPath && cached) return cached;
+  const paths = explicitPath ? [explicitPath] : candidatePaths(import.meta.url);
+  let lastErr = null;
+  for (const p of paths) {
+    let raw;
+    try {
+      raw = fs3.readFileSync(p, "utf8");
+    } catch (err) {
+      lastErr = err;
+      continue;
+    }
+    let doc;
+    try {
+      doc = JSON.parse(raw);
+    } catch {
+      throw new BlacklistError("BLACKLIST_UNAVAILABLE", `Blacklist file is not valid JSON: ${p}`);
+    }
+    const parsed = parseBlacklist(doc);
+    parsed.sourceFile = p;
+    if (!explicitPath) cached = parsed;
+    return parsed;
+  }
+  throw new BlacklistError(
+    "BLACKLIST_UNAVAILABLE",
+    `Blacklist file not found (looked in ${paths.length} locations). Refusing to proceed.` + (lastErr ? ` Last error: ${lastErr.code || lastErr.message}` : "")
+  );
+}
+function checkAddress(address, family, blacklist) {
+  const bl = blacklist || loadBlacklist();
+  const normalized = normalizeAddress(address, family);
+  if (!normalized) {
+    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Cannot check an empty address.");
+  }
+  const entry = bl.index.get(normalized) || bl.index.get(normalized.toLowerCase()) || null;
+  return { hit: Boolean(entry), entry, normalized };
+}
+function assertNotBlacklisted(targets, blacklist) {
+  const bl = blacklist || loadBlacklist();
+  for (const t of targets) {
+    if (!t || !t.address) continue;
+    const { hit, entry } = checkAddress(t.address, t.family, bl);
+    if (hit) {
+      const err = new BlacklistError(
+        "BLACKLIST_HIT",
+        `${t.role || "address"} is on the compromised-wallet blacklist (reported ${entry.reportedOn}: ${entry.note}). Refusing.`
+      );
+      err.role = t.role || "address";
+      throw err;
+    }
+  }
+  return true;
+}
 
 // scripts/src/lib/ids.mjs
 var IdError = class extends Error {
@@ -41937,7 +42553,7 @@ function assertRozoPaymentId(value) {
 function isRozoPaymentId(value) {
   return UUID_RE.test(String(value || "").trim());
 }
-function maskAddress(address) {
+function maskAddress2(address) {
   const s = String(address ?? "").trim();
   if (!s) return "(none)";
   if (s.length <= 12) return s;
@@ -42666,388 +43282,6 @@ async function run(argv = process.argv.slice(2)) {
   return main(argv);
 }
 
-// scripts/src/lib/blacklist.mjs
-import fs from "node:fs";
-import path from "node:path";
-import crypto2 from "node:crypto";
-import { fileURLToPath } from "node:url";
-var BlacklistError = class extends Error {
-  constructor(code, message) {
-    super(message);
-    this.code = code;
-  }
-};
-function normalizeAddress(address, family) {
-  if (typeof address !== "string") return null;
-  const trimmed = address.trim();
-  if (!trimmed) return null;
-  if (family === "evm" || /^0x[0-9a-fA-F]{40}$/.test(trimmed)) {
-    return trimmed.toLowerCase();
-  }
-  return trimmed;
-}
-function parseBlacklist(doc) {
-  if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
-    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist document is not an object.");
-  }
-  const { provenance, entries } = doc;
-  if (!provenance || typeof provenance !== "object") {
-    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist provenance header is missing.");
-  }
-  if (!Array.isArray(entries) || entries.length === 0) {
-    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist is empty or not an array.");
-  }
-  const addresses = [];
-  for (const e of entries) {
-    if (!e || typeof e !== "object" || typeof e.address !== "string" || !e.address.trim()) {
-      throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist entry has no address.");
-    }
-    addresses.push(e.address);
-  }
-  const digest = crypto2.createHash("sha256").update(JSON.stringify(addresses), "utf8").digest("hex");
-  if (typeof provenance.addressesSha256 !== "string" || !provenance.addressesSha256) {
-    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist provenance digest is missing.");
-  }
-  if (digest !== provenance.addressesSha256) {
-    throw new BlacklistError(
-      "BLACKLIST_UNAVAILABLE",
-      "Blacklist digest mismatch \u2014 the vendored address list was modified without re-signing."
-    );
-  }
-  if (provenance.addressCount !== void 0 && provenance.addressCount !== entries.length) {
-    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist addressCount does not match entries.");
-  }
-  const index2 = /* @__PURE__ */ new Map();
-  for (const e of entries) {
-    const key = normalizeAddress(e.address, e.family);
-    if (key) index2.set(key, e);
-    const lower = e.address.trim().toLowerCase();
-    if (/^0x[0-9a-f]{40}$/.test(lower)) index2.set(lower, e);
-  }
-  return { entries, index: index2, provenance, digest };
-}
-function candidatePaths(moduleUrl) {
-  const here = path.dirname(fileURLToPath(moduleUrl));
-  return [
-    path.join(here, "blacklist.json"),
-    path.join(here, "..", "src", "lib", "blacklist.json"),
-    path.join(here, "..", "..", "src", "lib", "blacklist.json")
-  ];
-}
-var cached = null;
-function loadBlacklist(explicitPath) {
-  if (!explicitPath && cached) return cached;
-  const paths = explicitPath ? [explicitPath] : candidatePaths(import.meta.url);
-  let lastErr = null;
-  for (const p of paths) {
-    let raw;
-    try {
-      raw = fs.readFileSync(p, "utf8");
-    } catch (err) {
-      lastErr = err;
-      continue;
-    }
-    let doc;
-    try {
-      doc = JSON.parse(raw);
-    } catch {
-      throw new BlacklistError("BLACKLIST_UNAVAILABLE", `Blacklist file is not valid JSON: ${p}`);
-    }
-    const parsed = parseBlacklist(doc);
-    parsed.sourceFile = p;
-    if (!explicitPath) cached = parsed;
-    return parsed;
-  }
-  throw new BlacklistError(
-    "BLACKLIST_UNAVAILABLE",
-    `Blacklist file not found (looked in ${paths.length} locations). Refusing to proceed.` + (lastErr ? ` Last error: ${lastErr.code || lastErr.message}` : "")
-  );
-}
-function checkAddress(address, family, blacklist) {
-  const bl = blacklist || loadBlacklist();
-  const normalized = normalizeAddress(address, family);
-  if (!normalized) {
-    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Cannot check an empty address.");
-  }
-  const entry = bl.index.get(normalized) || bl.index.get(normalized.toLowerCase()) || null;
-  return { hit: Boolean(entry), entry, normalized };
-}
-function assertNotBlacklisted(targets, blacklist) {
-  const bl = blacklist || loadBlacklist();
-  for (const t of targets) {
-    if (!t || !t.address) continue;
-    const { hit, entry } = checkAddress(t.address, t.family, bl);
-    if (hit) {
-      const err = new BlacklistError(
-        "BLACKLIST_HIT",
-        `${t.role || "address"} is on the compromised-wallet blacklist (reported ${entry.reportedOn}: ${entry.note}). Refusing.`
-      );
-      err.role = t.role || "address";
-      throw err;
-    }
-  }
-  return true;
-}
-
-// scripts/src/lib/state.mjs
-import fs2 from "node:fs";
-import path2 from "node:path";
-import os from "node:os";
-import crypto3 from "node:crypto";
-var LOCK_STALE_MS = 6e4;
-var LOCK_WAIT_MS = 1e4;
-var LOCK_POLL_MS = 25;
-function lockPath() {
-  return path2.join(stateRoot(), ".send.lock");
-}
-function sleepSync(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-function tryAcquire(file) {
-  try {
-    const fd = fs2.openSync(file, "wx", 384);
-    fs2.writeFileSync(fd, JSON.stringify({ pid: process.pid, at: (/* @__PURE__ */ new Date()).toISOString() }));
-    fs2.closeSync(fd);
-    return true;
-  } catch (err) {
-    if (err.code !== "EEXIST") throw err;
-    return false;
-  }
-}
-function withLock(fn) {
-  const file = lockPath();
-  fs2.mkdirSync(path2.dirname(file), { recursive: true, mode: 448 });
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  for (; ; ) {
-    if (tryAcquire(file)) break;
-    try {
-      const age = Date.now() - fs2.statSync(file).mtimeMs;
-      if (age > LOCK_STALE_MS) {
-        const stolen = `${file}.stale.${crypto3.randomBytes(4).toString("hex")}`;
-        try {
-          fs2.renameSync(file, stolen);
-          fs2.unlinkSync(stolen);
-        } catch {
-        }
-        continue;
-      }
-    } catch (err) {
-      if (err.code !== "ENOENT") throw err;
-      continue;
-    }
-    if (Date.now() > deadline) {
-      throw new SkillError(
-        "LOCK_TIMEOUT",
-        "Another rozo-checkout process is holding the send lock. Refusing to proceed rather than risk a concurrent second send."
-      );
-    }
-    sleepSync(LOCK_POLL_MS);
-  }
-  try {
-    return fn();
-  } finally {
-    try {
-      fs2.unlinkSync(file);
-    } catch {
-    }
-  }
-}
-function stateRoot() {
-  return process.env.ROZO_CHECKOUT_STATE_DIR || path2.join(os.homedir(), ".rozo-checkout", "state");
-}
-function statePath(rozoPaymentId) {
-  if (!/^[A-Za-z0-9-]{8,64}$/.test(String(rozoPaymentId || ""))) {
-    throw new SkillError("BAD_ROZO_PAYMENT_ID", "Refusing to build a state path from that id.");
-  }
-  return path2.join(stateRoot(), `${rozoPaymentId}.json`);
-}
-function writeAtomic(file, data) {
-  const dir = path2.dirname(file);
-  fs2.mkdirSync(dir, { recursive: true, mode: 448 });
-  const tmp = path2.join(dir, `.${path2.basename(file)}.${crypto3.randomBytes(6).toString("hex")}.tmp`);
-  const fd = fs2.openSync(tmp, "wx", 384);
-  try {
-    fs2.writeFileSync(fd, JSON.stringify(data, null, 2) + "\n", "utf8");
-    fs2.fsyncSync(fd);
-  } finally {
-    fs2.closeSync(fd);
-  }
-  fs2.renameSync(tmp, file);
-}
-function readState(rozoPaymentId) {
-  const file = statePath(rozoPaymentId);
-  let raw;
-  try {
-    raw = fs2.readFileSync(file, "utf8");
-  } catch (err) {
-    if (err.code === "ENOENT") return null;
-    throw new SkillError("STATE_UNREADABLE", `Cannot read local state: ${err.code}`);
-  }
-  try {
-    return JSON.parse(raw);
-  } catch {
-    throw new SkillError(
-      "STATE_CORRUPT",
-      "The local state file for this order is corrupt. Refusing to act; inspect it manually."
-    );
-  }
-}
-function createOrderRecord(record) {
-  return withLock(() => createOrderRecordUnlocked(record));
-}
-function createOrderRecordUnlocked(record) {
-  const { rozoPaymentId } = record;
-  const existing = readState(rozoPaymentId);
-  const next = {
-    version: 1,
-    rozoPaymentId,
-    linkId: record.linkId,
-    paymentLink: record.paymentLink ?? null,
-    merchant: record.merchant ?? null,
-    invoiceAmount: record.invoiceAmount ?? null,
-    source: record.source,
-    receiverAddress: record.receiverAddress,
-    receiverMemo: record.receiverMemo ?? null,
-    amount: record.amount,
-    amountUnit: record.amountUnit ?? null,
-    expiresAt: record.expiresAt ?? null,
-    createdAt: existing?.createdAt ?? (/* @__PURE__ */ new Date()).toISOString(),
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-    confirmation: existing?.confirmation ?? null,
-    send: existing?.send ?? null
-  };
-  writeAtomic(statePath(rozoPaymentId), next);
-  return next;
-}
-function depositDigest(source) {
-  const canonical = JSON.stringify({
-    chainId: String(source?.chainId ?? ""),
-    tokenSymbol: String(source?.tokenSymbol ?? "").toUpperCase(),
-    tokenAddress: String(source?.tokenAddress ?? ""),
-    receiverAddress: String(source?.receiverAddress ?? ""),
-    receiverMemo: source?.receiverMemo ?? null,
-    amount: String(source?.amount ?? ""),
-    amountUnit: source?.amountUnit ?? null,
-    lnInvoice: source?.lnInvoice ?? null
-  });
-  return crypto3.createHash("sha256").update(canonical, "utf8").digest("hex");
-}
-function recordConfirmation(rozoPaymentId, { source, invoiceAmount, tier }) {
-  return withLock(() => {
-    const state = readState(rozoPaymentId);
-    if (!state) {
-      throw new SkillError("NO_ORDER_STATE", "Cannot confirm an order with no local record.");
-    }
-    const next = {
-      ...state,
-      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      confirmation: {
-        confirmedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        depositDigest: depositDigest(source),
-        invoiceAmount: invoiceAmount ?? state.invoiceAmount ?? null,
-        tier: tier ?? null
-      }
-    };
-    writeAtomic(statePath(rozoPaymentId), next);
-    return next;
-  });
-}
-function claimSend(rozoPaymentId, intent, { skipCaps = false } = {}) {
-  return withLock(() => {
-    const state = readState(rozoPaymentId);
-    if (!state) {
-      throw new SkillError(
-        "NO_ORDER_STATE",
-        "No local record for this order. Run create-order.js in this same session first."
-      );
-    }
-    if (state.send) {
-      throw new SkillError(
-        "ALREADY_SENT",
-        `A send was already recorded for this order at ${state.send.claimedAt} (status: ${state.send.status}). Refusing to send twice. Check the backend for the pay-in before doing anything else.`,
-        { send: state.send }
-      );
-    }
-    const caps = skipCaps ? null : assertPaymentLimit(state.invoiceAmount);
-    const next = {
-      ...state,
-      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      send: {
-        status: "claimed",
-        claimedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        chainId: intent.chainId,
-        tokenSymbol: intent.tokenSymbol,
-        from: intent.from,
-        to: intent.to,
-        amountAtomic: intent.amountAtomic,
-        memo: intent.memo ?? null,
-        nonceBefore: intent.nonceBefore ?? null,
-        expectedTxHash: intent.expectedTxHash ?? null,
-        txHash: null
-      }
-    };
-    writeAtomic(statePath(rozoPaymentId), next);
-    return { state: next, caps };
-  });
-}
-function recordSendResult(rozoPaymentId, { status, txHash = null, note = null }) {
-  return withLock(() => {
-    const state = readState(rozoPaymentId);
-    if (!state || !state.send) {
-      throw new SkillError("NO_SEND_CLAIM", "No send claim to update for this order.");
-    }
-    const next = {
-      ...state,
-      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      send: {
-        ...state.send,
-        status,
-        txHash: txHash ?? state.send.txHash,
-        note,
-        resolvedAt: (/* @__PURE__ */ new Date()).toISOString()
-      }
-    };
-    writeAtomic(statePath(rozoPaymentId), next);
-    return next;
-  });
-}
-function findByLinkId(linkId) {
-  const dir = stateRoot();
-  let files = [];
-  try {
-    files = fs2.readdirSync(dir).filter((f) => f.endsWith(".json"));
-  } catch {
-    return null;
-  }
-  let best = null;
-  for (const f of files) {
-    try {
-      const s = JSON.parse(fs2.readFileSync(path2.join(dir, f), "utf8"));
-      if (s?.linkId !== linkId) continue;
-      if (!best || String(s.createdAt) > String(best.createdAt)) best = s;
-    } catch {
-    }
-  }
-  return best;
-}
-var MAX_PAYMENT_USD = 1100;
-function assertPaymentLimit(invoiceUsd) {
-  if (invoiceUsd === null || invoiceUsd === void 0 || String(invoiceUsd).trim() === "") {
-    throw new SkillError("BAD_INVOICE_AMOUNT", "Cannot evaluate the payment limit without a USD amount.");
-  }
-  const usd = Number(invoiceUsd);
-  if (!Number.isFinite(usd) || usd < 0) {
-    throw new SkillError("BAD_INVOICE_AMOUNT", "Cannot evaluate the payment limit without a USD amount.");
-  }
-  if (usd > MAX_PAYMENT_USD) {
-    throw new SkillError(
-      "CAP_PER_TX",
-      `$${usd} is above the $${MAX_PAYMENT_USD} per-payment limit for automated sending. This limit has no override. Pay this invoice from a wallet you control instead \u2014 that path needs no key and has no limit.`
-    );
-  }
-  return { usd, limitUsd: MAX_PAYMENT_USD };
-}
-
 // scripts/src/create-order.mjs
 function confirmTier(usdAmount) {
   const usd = Number(usdAmount);
@@ -43253,7 +43487,7 @@ async function main2(argv) {
       token: source.tokenSymbol,
       amount: formatAmount(source),
       isSats: isSatsUnit(source.amountUnit),
-      payToMasked: maskAddress(depositInfo.payTo),
+      payToMasked: maskAddress2(depositInfo.payTo),
       receiverMemoMasked: maskMemo(source.receiverMemo),
       hasMemo: Boolean(source.receiverMemo),
       memoRequirement
@@ -43354,7 +43588,7 @@ async function snapshot({ rozoPaymentId, linkId }) {
       receipt: verdict.receipt,
       txHash: source.txHash ?? null,
       confirmedAt: source.confirmedAt ?? null,
-      senderAddressMasked: source.senderAddress ? maskAddress(source.senderAddress) : null,
+      senderAddressMasked: source.senderAddress ? maskAddress2(source.senderAddress) : null,
       chain: source.chainId ? chainName(source.chainId) : null
     },
     payout: {
@@ -43402,7 +43636,7 @@ async function run3(argv = process.argv.slice(2)) {
 }
 
 // scripts/src/lib/keys.mjs
-import fs3 from "node:fs";
+import fs4 from "node:fs";
 import { execFileSync } from "node:child_process";
 var EVM_KEY_ENV = "ROZO_CHECKOUT_EVM_KEY";
 var SOL_KEY_ENV = "ROZO_CHECKOUT_SOL_KEY";
@@ -43421,7 +43655,7 @@ var PUBLIC_ENV_RE = /^\.env\.(example|sample|template)$/;
 function assertNoTrackedDotEnv(cwd = process.cwd()) {
   let candidates = [];
   try {
-    candidates = fs3.readdirSync(cwd).filter((f) => ENV_FILE_RE.test(f) && !PUBLIC_ENV_RE.test(f));
+    candidates = fs4.readdirSync(cwd).filter((f) => ENV_FILE_RE.test(f) && !PUBLIC_ENV_RE.test(f));
   } catch (err) {
     throw new SkillError(
       "TRACKED_DOTENV_UNVERIFIABLE",
@@ -54881,8 +55115,8 @@ async function main4(argv) {
         tokenSymbol: source.tokenSymbol,
         amountAtomic: amountAtomic.toString(),
         amount: source.amount,
-        toMasked: maskAddress(to),
-        fromMasked: maskAddress(sender)
+        toMasked: maskAddress2(to),
+        fromMasked: maskAddress2(sender)
       },
       confirmedAt: state.confirmation?.confirmedAt ?? null,
       minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4),
@@ -55003,8 +55237,8 @@ async function main4(argv) {
         chain: chainName(chainId),
         tokenSymbol: source.tokenSymbol,
         amount: source.amount,
-        toMasked: maskAddress(to),
-        fromMasked: maskAddress(sender)
+        toMasked: maskAddress2(to),
+        fromMasked: maskAddress2(sender)
       },
       nextStep: `status.js --rozo-payment-id ${rozoPaymentId} --watch`,
       guidance: succeeded ? "On-chain confirmation is not settlement. Poll status.js until the state is `settled`." : "The transfer reverted, so no funds moved \u2014 but this order stays locked against a second automated send. Investigate before retrying anything."
@@ -56880,8 +57114,8 @@ async function main5(argv) {
         tokenSymbol: source.tokenSymbol,
         amountAtomic: amountAtomic.toString(),
         amount: source.amount,
-        toMasked: maskAddress(source.receiverAddress),
-        fromMasked: maskAddress(sender),
+        toMasked: maskAddress2(source.receiverAddress),
+        fromMasked: maskAddress2(sender),
         toIsTokenAccount,
         withMemo: Boolean(source.receiverMemo)
       },
@@ -57039,8 +57273,8 @@ async function main5(argv) {
       chain: chainName(900),
       tokenSymbol: source.tokenSymbol,
       amount: source.amount,
-      toMasked: maskAddress(source.receiverAddress),
-      fromMasked: maskAddress(sender),
+      toMasked: maskAddress2(source.receiverAddress),
+      fromMasked: maskAddress2(sender),
       withMemo: Boolean(source.receiverMemo)
     },
     nextStep: `status.js --rozo-payment-id ${rozoPaymentId} --watch`,
@@ -57066,6 +57300,12 @@ async function run5(argv = process.argv.slice(2)) {
 }
 
 // scripts/src/cli.mjs
+var SkillErrorLike = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+};
 var VERSION = (() => {
   try {
     return createRequire(import.meta.url)("../../package.json").version;
@@ -57108,6 +57348,95 @@ function targetToArgs(target) {
   if (isRozoPaymentId(target)) return ["--rozo-payment-id", target];
   const { linkId } = extractLinkId(target);
   return ["--link-id", linkId];
+}
+async function ask(question) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await new Promise((resolve) => rl.question(question, resolve));
+  } finally {
+    rl.close();
+  }
+}
+function vetPayerAddress(address) {
+  const family = detectAddressFamily(address);
+  if (!family) {
+    out(`  ${yellow("That does not look like an EVM, Solana or Stellar address. Skipping the check.")}`);
+    return null;
+  }
+  try {
+    assertNotBlacklisted([{ address, family, role: "wallet address" }], loadBlacklist());
+  } catch (err) {
+    out(`  ${red("\u2717")} ${err.message}`);
+    return null;
+  }
+  return family;
+}
+async function askPayerAddress(saved) {
+  const savedMask = saved?.lastPayerAddress ? maskAddress(saved.lastPayerAddress) : null;
+  const prompt = savedMask ? `  Wallet address [${savedMask}, Enter to reuse, 'n' for none]: ` : "  Wallet address you'll pay from (optional \u2014 checks balances; Enter to skip): ";
+  const answer = String(await ask(prompt)).trim();
+  if (/^n(o)?$/i.test(answer)) return null;
+  const address = answer || saved?.lastPayerAddress || null;
+  if (!address) return null;
+  const family = vetPayerAddress(address);
+  return family ? { address, family } : null;
+}
+async function pickSource({ invoiceUsd, saved, fresh }) {
+  const payer = await askPayerAddress(fresh ? null : saved);
+  let marked = PICKER_OPTIONS.map((o) => ({ ...o, mark: "unchecked", balanceUsd: null }));
+  let checked = null;
+  if (payer) {
+    out(dim("  Checking balances\u2026"));
+    const result = await fetchWalletOptions({ address: payer.address, usdRequired: invoiceUsd });
+    if (result.ok) {
+      marked = markPickerOptions(PICKER_OPTIONS, result);
+      checked = result;
+    } else {
+      out(`  ${yellow(`Could not check balances (${result.reason}). Showing all coins.`)}`);
+    }
+  }
+  out();
+  out(`  ${bold("Which coin do you want to pay with?")}`);
+  const savedPreset = fresh ? null : saved?.lastPreset ?? null;
+  let group = null;
+  for (const o of marked) {
+    if (o.token !== group) {
+      group = o.token;
+      out();
+      out(`  ${dim(o.token)}`);
+    }
+    const badge = o.mark === "affordable" ? green(`\u2713 $${Number(o.balanceUsd ?? 0).toFixed(2)} available`) : o.mark === "insufficient" ? dim("\u2717 insufficient") : dim("\u2014 not checked");
+    const star = savedPreset === o.preset ? bold(" (last used)") : "";
+    out(`    ${String(o.number).padStart(2)}. ${o.chain.padEnd(12)} ${badge}${star}`);
+  }
+  out();
+  const defaultChoice = savedPreset ? ` [Enter for ${savedPreset}]` : "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const answer = String(await ask(`  Number 1-${PICKER_OPTIONS.length}${defaultChoice}: `)).trim();
+    const raw = answer || savedPreset;
+    if (!raw) {
+      out(`  ${yellow("Type the number of a coin.")}`);
+      continue;
+    }
+    try {
+      const choice = resolvePickerChoice(raw);
+      if (checked && isProvablyShort(choice, checked)) {
+        out(`  ${yellow("That wallet appears not to hold enough for this invoice.")}`);
+        out(`  ${dim("You can still choose it \u2014 you may be paying from a different wallet.")}`);
+      }
+      out(`  ${dim(`\u2192 same as: --with ${choice.preset}`)}`);
+      out();
+      return {
+        chainId: choice.chainId,
+        tokenSymbol: choice.tokenSymbol,
+        preset: choice.preset,
+        payer
+      };
+    } catch (err) {
+      out(`  ${yellow(err.message)}`);
+    }
+  }
+  throw new CliError("BAD_CHOICE", "No valid choice after three attempts.");
 }
 async function askYesNo(question) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -57159,6 +57488,12 @@ async function cmdStatus(opts) {
   out();
   return exitCode;
 }
+function presetFor(chainId, tokenSymbol) {
+  const hit = PICKER_OPTIONS.find(
+    (o) => o.chainId === String(chainId) && o.tokenSymbol === String(tokenSymbol).toUpperCase()
+  );
+  return hit ? hit.preset : null;
+}
 function stateLabel(state) {
   if (state === "settled") return green(bold(state));
   if (["underpaid", "stuck_after_payment", "unknown"].includes(state)) return red(bold(state));
@@ -57167,6 +57502,48 @@ function stateLabel(state) {
 }
 async function cmdPay(opts) {
   let sendResult = null;
+  const saved = opts.fresh ? null : readPrefs();
+  let chosenPreset = null;
+  let payer = null;
+  let invoiceUsd = null;
+  if (!opts.source || opts.payer) {
+    const q = await step(run, ["--url", opts.target]);
+    if (!q.payload.success) {
+      if (opts.json) printJson(q.payload);
+      else printError(q.payload);
+      return q.exitCode;
+    }
+    invoiceUsd = Number(q.payload.invoice?.amount);
+  }
+  if (!opts.source) {
+    if (!process.stdin.isTTY || opts.json) {
+      throw new CliError(
+        "MISSING_PRESET",
+        "No coin specified. Pass --with (e.g. --with usdt-solana), or run this on a terminal to choose from a list. There is no default."
+      );
+    }
+    const picked = await pickSource({ invoiceUsd, saved, fresh: opts.fresh });
+    opts.source = { chainId: picked.chainId, tokenSymbol: picked.tokenSymbol };
+    chosenPreset = picked.preset;
+    payer = picked.payer;
+  } else if (opts.payer) {
+    const family = detectAddressFamily(opts.payer);
+    if (!family) {
+      throw new CliError("BAD_PAYER_ADDRESS", "That is not a recognisable EVM, Solana or Stellar address.");
+    }
+    assertNotBlacklisted([{ address: opts.payer, family, role: "wallet address" }], loadBlacklist());
+    const result = await fetchWalletOptions({ address: opts.payer, usdRequired: invoiceUsd });
+    if (isProvablyShort(opts.source, result)) {
+      throw new SkillErrorLike(
+        "INSUFFICIENT_BALANCE",
+        `${opts.payer.slice(0, 6)}\u2026${opts.payer.slice(-4)} does not appear to hold enough ${opts.source.tokenSymbol} for a $${invoiceUsd} invoice. Choose another coin, or omit --payer to proceed anyway from a different wallet.`
+      );
+    }
+    if (!result.ok && !opts.json) {
+      out(`  ${yellow(`Could not check balances (${result.reason}). Continuing.`)}`);
+    }
+    payer = { address: opts.payer, family };
+  }
   const { chainId, tokenSymbol } = opts.source;
   const baseArgs = ["--url", opts.target, "--chain", chainId, "--token", tokenSymbol];
   const created = await step(run2, baseArgs);
@@ -57180,6 +57557,11 @@ async function cmdPay(opts) {
   }
   const p = created.payload;
   const rozoPaymentId = p.rozoPaymentId;
+  savePrefs({
+    lastPayerAddress: payer?.address,
+    lastAddressFamily: payer?.family,
+    lastPreset: chosenPreset || presetFor(chainId, tokenSymbol)
+  });
   if (!opts.json) {
     out();
     out(`  ${bold(p.merchant ?? "Unknown merchant")}`);
@@ -57260,6 +57642,7 @@ async function cmdPay(opts) {
     } else {
       out(`  ${green("\u2713")} Sent. tx ${sent.payload.txHash}`);
       out();
+      savePrefs({ lastPreset: chosenPreset || presetFor(chainId, tokenSymbol) });
     }
     if (sent.exitCode !== EXIT_OK && sent.exitCode !== 3) return sent.exitCode;
   } else if (!opts.json) {
@@ -57313,6 +57696,11 @@ function printDeposit(deposit, opts) {
     if (deposit.receiverMemo) out(`    Memo     ${bold(deposit.receiverMemo)} ${red("(required)")}`);
   }
   out();
+  const unit = isSatsUnit(deposit.amountUnit) ? "sats" : deposit.tokenSymbol;
+  const where = deposit.lnInvoice ? "over Lightning" : `on ${deposit.chain}`;
+  out(
+    `  Make sure the wallet you pay from holds at least ${bold(`${deposit.amount} ${unit}`)} ${where}.`
+  );
   out(dim("  Copy the address from this block; do not retype it."));
   out(dim("  Send it exactly once."));
   out();
@@ -57347,7 +57735,20 @@ async function main6() {
     case "status":
       return cmdStatus(opts);
     case "pay":
-      return cmdPay(opts);
+      try {
+        return await cmdPay(opts);
+      } catch (err) {
+        if (err instanceof CliError) {
+          const payload = formatFailure(err);
+          if (opts.json) printJson(payload);
+          else {
+            printError(payload);
+            out(dim("\n  rozo-checkout --help for usage."));
+          }
+          return EXIT_USAGE;
+        }
+        throw err;
+      }
     default:
       out(HELP);
       return EXIT_USAGE;

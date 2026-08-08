@@ -1,0 +1,51 @@
+[
+  {
+    "result": {
+      "data": [
+        {
+          "required": {
+            "token": { "chainId": 8453, "symbol": "USDC", "decimals": 6 },
+            "amount": "1050000000",
+            "usd": 1050
+          },
+          "balance": {
+            "token": { "chainId": 8453, "symbol": "USDC", "decimals": 6 },
+            "amount": "2500000000",
+            "usd": 2500
+          },
+          "minimumRequired": { "usd": 1 },
+          "fees": { "usd": 0 }
+        },
+        {
+          "required": {
+            "token": { "chainId": 56, "symbol": "USDT", "decimals": 18 },
+            "amount": "1050000000000000000000",
+            "usd": 1050
+          },
+          "balance": {
+            "token": { "chainId": 56, "symbol": "USDT", "decimals": 18 },
+            "amount": "12000000000000000000",
+            "usd": 12
+          },
+          "minimumRequired": { "usd": 1 },
+          "fees": { "usd": 0 },
+          "disabledReason": "Balance too low: $12.00"
+        },
+        {
+          "required": {
+            "token": { "chainId": 1, "symbol": "USDC", "decimals": 6 },
+            "amount": "1050000000",
+            "usd": 1050
+          },
+          "balance": {
+            "token": { "chainId": 1, "symbol": "USDC", "decimals": 6 },
+            "amount": "1100000000",
+            "usd": 1100
+          },
+          "minimumRequired": { "usd": 1 },
+          "fees": { "usd": 0 }
+        }
+      ]
+    }
+  }
+]

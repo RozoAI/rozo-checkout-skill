@@ -15,6 +15,8 @@ import {
   CliError,
   CHAIN_ALIASES,
   HELP,
+  PICKER_OPTIONS,
+  resolvePickerChoice,
 } from '../scripts/src/lib/cli-args.mjs';
 import { isSupportedSource } from '../scripts/src/lib/amounts.mjs';
 
@@ -157,11 +159,109 @@ test('pay: raw --chain/--token instead of a preset', () => {
   );
 });
 
-test('pay: a missing target or coin is a usage error', () => {
+test('pay: a missing target is a usage error; a missing coin defers to the caller', () => {
   assert.throws(() => parseCliArgs(['pay']), (e) => e.code === 'MISSING_TARGET');
-  assert.throws(() => parseCliArgs(['pay', 'pl_01ABC']), (e) => e.code === 'MISSING_PRESET');
   assert.throws(
     () => parseCliArgs(['pay', 'pl_01ABC', '--with']),
+    (e) => e.code === 'MISSING_VALUE',
+  );
+  // No coin is no longer a parse error: parsing reports "none chosen" and the
+  // CLI decides — picker on a terminal, hard refusal for a script.
+  const r = parseCliArgs(['pay', 'pl_01ABC']);
+  assert.equal(r.command, 'pay');
+  assert.equal(r.source, null);
+});
+
+test('picker: the menu covers every supported combo exactly once', () => {
+  assert.equal(PICKER_OPTIONS.length, listPresets().length);
+  const seen = new Set();
+  for (const o of PICKER_OPTIONS) {
+    const key = `${o.chainId}:${o.tokenSymbol}`;
+    assert.ok(!seen.has(key), `duplicate entry for ${key}`);
+    seen.add(key);
+    // Every menu entry must resolve through the normal preset path too, so the
+    // echoed "--with" shortcut is always one the user could have typed.
+    assert.deepEqual(resolvePreset(o.preset), {
+      chainId: o.chainId,
+      tokenSymbol: o.tokenSymbol,
+    }, o.preset);
+  }
+  // Numbering is 1..n, contiguous and in order.
+  assert.deepEqual(
+    PICKER_OPTIONS.map((o) => o.number),
+    PICKER_OPTIONS.map((_, i) => i + 1),
+  );
+  // Grouped by coin: USDT block, then USDC, then BTC.
+  assert.deepEqual([...new Set(PICKER_OPTIONS.map((o) => o.token))], ['USDT', 'USDC', 'BTC']);
+});
+
+test('picker: numbers map to the right chain and token', () => {
+  const expected = {
+    1: { chainId: '900', tokenSymbol: 'USDT', preset: 'usdt-solana' },
+    2: { chainId: '56', tokenSymbol: 'USDT', preset: 'usdt-bnb' },
+    3: { chainId: '1', tokenSymbol: 'USDT', preset: 'usdt-ethereum' },
+    4: { chainId: '137', tokenSymbol: 'USDT', preset: 'usdt-polygon' },
+    5: { chainId: '900', tokenSymbol: 'USDC', preset: 'usdc-solana' },
+    6: { chainId: '56', tokenSymbol: 'USDC', preset: 'usdc-bnb' },
+    7: { chainId: '1', tokenSymbol: 'USDC', preset: 'usdc-ethereum' },
+    8: { chainId: '137', tokenSymbol: 'USDC', preset: 'usdc-polygon' },
+    9: { chainId: '8453', tokenSymbol: 'USDC', preset: 'usdc-base' },
+    10: { chainId: '1500', tokenSymbol: 'USDC', preset: 'usdc-stellar' },
+    11: { chainId: 'lightning', tokenSymbol: 'BTC', preset: 'btc-lightning' },
+  };
+  for (const [n, want] of Object.entries(expected)) {
+    assert.deepEqual(resolvePickerChoice(n), want, `choice ${n}`);
+    assert.deepEqual(resolvePickerChoice(Number(n)), want, `choice ${n} as a number`);
+  }
+  // Whitespace is forgiven; the meaning is not changed.
+  assert.deepEqual(resolvePickerChoice('  1  '), expected[1]);
+});
+
+test('picker: out-of-range and junk input are refused, never guessed', () => {
+  for (const bad of ['0', '12', '99', '-1', '', '   ', null, undefined]) {
+    assert.throws(() => resolvePickerChoice(bad), CliError, JSON.stringify(bad));
+  }
+  assert.throws(() => resolvePickerChoice('0'), (e) => e.code === 'BAD_CHOICE');
+  assert.throws(() => resolvePickerChoice('12'), (e) => e.code === 'BAD_CHOICE');
+  // A typed preset name still works, for anyone who knows it already.
+  assert.deepEqual(resolvePickerChoice('usdt-solana'), {
+    chainId: '900',
+    tokenSymbol: 'USDT',
+    preset: 'usdt-solana',
+  });
+  // But an unsupported one is refused with the normal preset error.
+  assert.throws(() => resolvePickerChoice('usdt-base'), (e) => e.code === 'UNSUPPORTED_SOURCE');
+});
+
+test('picker: no numeric choice silently maps to Base USDC', () => {
+  // Guard against the specific failure mode of defaulting to the settlement
+  // chain: only choice 9 is usdc-base, and nothing else may resolve to it.
+  for (const o of PICKER_OPTIONS) {
+    if (o.preset === 'usdc-base') continue;
+    const r = resolvePickerChoice(String(o.number));
+    assert.ok(
+      !(r.chainId === '8453' && r.tokenSymbol === 'USDC'),
+      `choice ${o.number} must not resolve to Base USDC`,
+    );
+  }
+});
+
+test('pay: --payer and --fresh', () => {
+  const r = parseCliArgs([
+    'pay', 'pl_01ABC', '--with', 'usdt-solana',
+    '--payer', '0xdC4313EfB37836615d820F38A6016EE76598887B',
+    '--fresh',
+  ]);
+  assert.equal(r.payer, '0xdC4313EfB37836615d820F38A6016EE76598887B');
+  assert.equal(r.fresh, true);
+
+  // Both are optional and default to off.
+  const plain = parseCliArgs(['pay', 'pl_01ABC', '--with', 'usdt-solana']);
+  assert.equal(plain.payer, undefined);
+  assert.equal(plain.fresh, false);
+
+  assert.throws(
+    () => parseCliArgs(['pay', 'pl_01ABC', '--with', 'usdt-solana', '--payer']),
     (e) => e.code === 'MISSING_VALUE',
   );
 });

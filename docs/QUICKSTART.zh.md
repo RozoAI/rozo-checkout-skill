@@ -4,15 +4,23 @@
 
 用 Solana、BNB Chain、Ethereum、Polygon、Base 或 Stellar 上的 USDT/USDC，或者用走
 Lightning 的 BTC，去支付一个 OpenRouter Coinbase 收款链接 (Payment Link)。五分钟搞定。
-工作原理与设计理由见 [README.md](README.md)。
+工作原理与设计理由见 [README.md](../README.md)。
 
 ## 一行命令搞定
+
+```bash
+npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLINKID
+```
+
+这一条命令会替你跑完下面的每一步：选币、报价、创建订单、核对、确认、充值指令，然后一直轮询到结清。在选币那一步，你可以粘贴自己的钱包地址，它会去查余额并标出哪些币你付得起 —— 这是可选的，而且不会改变任何实际签名的内容。
+
+如果你已经知道要用哪种币，直接指定就能跳过这一问：
 
 ```bash
 npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLINKID --with usdt-solana
 ```
 
-这一条命令会替你跑完下面的每一步：报价、创建订单、核对、确认、充值指令，然后一直轮询到结清。`--with` 可选的币种有：`usdt-solana`、`usdc-solana`、`usdt-bnb`、`usdc-bnb`、`usdt-ethereum`、`usdc-ethereum`、`usdt-polygon`、`usdc-polygon`、`usdc-base`、`usdc-stellar`、`btc-lightning`。
+`--with` 可选的币种有：`usdt-solana`、`usdc-solana`、`usdt-bnb`、`usdc-bnb`、`usdt-ethereum`、`usdc-ethereum`、`usdt-polygon`、`usdc-polygon`、`usdc-base`、`usdc-stellar`、`btc-lightning`。脚本和 agent 必须显式传 `--with`：交互式选择只在终端里出现，而且没有默认币种。
 
 默认情况下它只是打印一个地址，让你用任意钱包去付 —— 不需要私钥，也不需要任何配置。只有当你想让 CLI 改从热钱包签名时才加 `--send`；加 `--json` 输出机器可读格式。
 
@@ -46,8 +54,8 @@ node scripts/dist/quote.js --url "$LINK"
 {
   "success": true,
   "merchant": "OpenRouter, Inc.",
-  "invoice": { "amount": "5.00", "fiat": { "amount": "5.00", "currency": "USD" } },
-  "callerPays": "5.00",
+  "invoice": { "amount": "1050.00", "fiat": { "amount": "1050.00", "currency": "USD" } },
+  "callerPays": "1050.00",
   "coinbaseExpiryIso": "2026-08-09T10:00:00.000Z"
 }
 ```
@@ -68,17 +76,20 @@ node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT
 {
   "success": true,
   "rozoPaymentId": "11111111-2222-4333-8444-555555555555",
-  "invoice": { "amount": "5.000000", "currency": "USD" },
+  "invoice": { "amount": "1050.000000", "currency": "USD" },
   "deposit": null,
   "depositWithheld": true,
   "display": {
     "chain": "Solana",
-    "amount": "5.021000 USDT",
+    "amount": "1054.410000 USDT",
     "payToMasked": "9WzDXw...AWWM"
   },
   "expiry": { "effectiveDeadlineIso": "2026-08-08T11:00:00.000Z", "minutesOfSlack": 55 }
 }
 ```
+
+本例即旗舰场景：一张 **$1,050.00** 的账单，用于购买 $1,000 的 OpenRouter 额度。
+任何不超过 **$1,100** 的账单都可以这样支付。
 
 **继续之前务必核对 `display.amount`。** 它通常大于账单金额 —— 因为它包含了跨桥费用和
 网络费用。记下 `rozoPaymentId`；后面每一条命令都要用它。
@@ -102,7 +113,7 @@ node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT --confi
     "tokenSymbol": "USDT",
     "receiverAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
     "receiverMemo": "rozo-901",
-    "amount": "5.021000",
+    "amount": "1054.410000",
     "payTo": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
   }
 }
@@ -187,4 +198,4 @@ node scripts/dist/status.js --rozo-payment-id <rozoPaymentId> --watch --timeout 
 `rozoPaymentId` 和每一个交易 hash，找人来做对账。向一个一次性充值地址付第二笔款，
 并不保证会被入账。
 
-完整的错误码表在 [README.md](README.md)，面向 agent 的指令在 [SKILL.md](SKILL.md)。
+完整的错误码表在 [README.md](../README.md)，面向 agent 的指令在 [SKILL.md](../SKILL.md)。

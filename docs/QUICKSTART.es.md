@@ -5,19 +5,30 @@
 Pagar un enlace de pago de Coinbase (Coinbase Payment Link) de OpenRouter con
 USDT/USDC en Solana, BNB Chain, Ethereum, Polygon, Base o Stellar, o con BTC por
 Lightning. Cinco minutos. Para saber cómo funciona y por qué, ver
-[README.md](README.md).
+[README.md](../README.md).
 
 ## El comando de una sola línea
+
+```bash
+npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLINKID
+```
+
+Eso ejecuta por uno todos los pasos de abajo: elegir moneda, cotizar, crear,
+revisar, confirmar, instrucciones de depósito y luego consultar hasta la
+liquidación. En el paso de elegir moneda se puede pegar la dirección de la
+billetera y el selector consultará los saldos y marcará cuáles se pueden pagar
+—es opcional y nunca cambia lo que se firma—.
+
+Si ya se sabe qué moneda usar, se puede indicar y omitir la pregunta:
 
 ```bash
 npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLINKID --with usdt-solana
 ```
 
-Eso ejecuta por uno todos los pasos de abajo: cotizar, crear, revisar, confirmar,
-instrucciones de depósito y luego consultar hasta la liquidación. Monedas para
-`--with`: `usdt-solana`, `usdc-solana`, `usdt-bnb`, `usdc-bnb`, `usdt-ethereum`,
+Monedas para `--with`: `usdt-solana`, `usdc-solana`, `usdt-bnb`, `usdc-bnb`, `usdt-ethereum`,
 `usdc-ethereum`, `usdt-polygon`, `usdc-polygon`, `usdc-base`, `usdc-stellar`,
-`btc-lightning`.
+`btc-lightning`. Los scripts y los agentes deben pasar siempre `--with`: el
+selector solo aparece en una terminal y no hay moneda por defecto.
 
 Por defecto solo imprime una dirección para pagar desde cualquier billetera: sin
 clave privada y sin configuración. Añadir `--send` únicamente si se quiere que la
@@ -56,8 +67,8 @@ node scripts/dist/quote.js --url "$LINK"
 {
   "success": true,
   "merchant": "OpenRouter, Inc.",
-  "invoice": { "amount": "5.00", "fiat": { "amount": "5.00", "currency": "USD" } },
-  "callerPays": "5.00",
+  "invoice": { "amount": "1050.00", "fiat": { "amount": "1050.00", "currency": "USD" } },
+  "callerPays": "1050.00",
   "coinbaseExpiryIso": "2026-08-09T10:00:00.000Z"
 }
 ```
@@ -79,17 +90,20 @@ resumen enmascarado para revisarlo primero.
 {
   "success": true,
   "rozoPaymentId": "11111111-2222-4333-8444-555555555555",
-  "invoice": { "amount": "5.000000", "currency": "USD" },
+  "invoice": { "amount": "1050.000000", "currency": "USD" },
   "deposit": null,
   "depositWithheld": true,
   "display": {
     "chain": "Solana",
-    "amount": "5.021000 USDT",
+    "amount": "1054.410000 USDT",
     "payToMasked": "9WzDXw...AWWM"
   },
   "expiry": { "effectiveDeadlineIso": "2026-08-08T11:00:00.000Z", "minutesOfSlack": 55 }
 }
 ```
+
+Este ejemplo es el caso insignia: una factura de **$1,050.00** por $1,000 de
+créditos de OpenRouter. Cualquier factura de hasta **$1,100** se puede pagar así.
 
 **Revisar `display.amount` antes de continuar.** Normalmente es mayor que la
 factura: incluye las comisiones del puente (bridge) y de la red. Anotar el
@@ -115,7 +129,7 @@ exigen los scripts de envío.
     "tokenSymbol": "USDT",
     "receiverAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
     "receiverMemo": "rozo-901",
-    "amount": "5.021000",
+    "amount": "1054.410000",
     "payTo": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
   }
 }
@@ -205,5 +219,5 @@ el `linkId`, el `rozoPaymentId` y todos los hashes de transacción, y pedir a un
 persona que lo concilie. No hay garantía de que un segundo pago a una dirección
 de depósito de un solo uso sea acreditado.
 
-La tabla completa de errores está en [README.md](README.md), y las instrucciones
-dirigidas al agente están en [SKILL.md](SKILL.md).
+La tabla completa de errores está en [README.md](../README.md), y las instrucciones
+dirigidas al agente están en [SKILL.md](../SKILL.md).

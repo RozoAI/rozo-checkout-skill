@@ -8,7 +8,7 @@
 > deposit normally carries a small bridge/source-chain fee on top.
 
 This file teaches the whole flow to any agent or script. Repo (scripts, safety rails,
-full docs): https://github.com/RozoAI/rozo-checkout-skill — see QUICKSTART.md.
+full docs): https://github.com/RozoAI/rozo-checkout-skill — see docs/QUICKSTART.md.
 
 ## Fastest path: the CLI (npm @rozoai/checkout)
 

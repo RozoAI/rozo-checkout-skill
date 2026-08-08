@@ -1,0 +1,255 @@
+# rozo-checkout
+
+[English](../README.md) | [简体中文](README.zh.md) | **日本語** | [Español](README.es.md)
+
+**OpenRouter の Coinbase 決済リンク (Payment Link)** を、そのリンクが直接受け取れない
+通貨で支払います — Lightning 経由の BTC、または Solana、BNB Chain、Ethereum、
+Polygon、Base、Stellar 上の USDT/USDC です。Coinbase の決済リンクは Base 上の USDC しか
+受け付けません。本ツールは、あなたが実際に保有している通貨をブリッジ経由で中継し、
+資金提供ウォレット (funder wallet) があなたに代わってインボイスを決済します。
+アカウントも API キーもブラウザーも不要です。
+
+```bash
+npx @rozoai/checkout pay <coinbase-link>
+```
+
+どの通貨で支払うかを最初に尋ねます。プロンプトでウォレットアドレスを貼り付けると、
+どの通貨なら残高が足りるかを表示します。そのあと、任意のウォレットから支払うための
+入金アドレスが表示されます — **秘密鍵も環境変数も設定も一切不要です**。あとは
+インボイスが決済完了するまで待つだけです。
+
+使う通貨が決まっている場合は、この質問を省略できます:
+
+```bash
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
+## 支払いに使える通貨
+
+| チェーン | `--with` | チェーン id | 備考 |
+|---|---|---|---|
+| Ethereum | `usdt-ethereum` `usdc-ethereum` | `1` | 小数点以下 6 桁 |
+| BNB Chain | `usdt-bnb` `usdc-bnb` | `56` | 小数点以下 18 桁 |
+| Polygon | `usdt-polygon` `usdc-polygon` | `137` | 小数点以下 6 桁 |
+| Base | `usdc-base` | `8453` | 小数点以下 6 桁 |
+| Solana | `usdt-solana` `usdc-solana` | `900` | SPL。ネイティブの SOL は非対応 |
+| Stellar | `usdc-stellar` | `1500` | メモが必須 — 入金ブロックに表示されます |
+| Bitcoin Lightning | `btc-lightning` | `lightning` | BOLT11。金額は satoshi 単位 |
+
+ネイティブのガス通貨（SOL、BNB、ETH、MATIC）およびオンチェーンの BTC は受け付けません。
+
+## エージェントから使う
+
+渡す内容はどこでも同じです。上のワンライナーそのものか、エージェントに
+[llms.txt](../llms.txt) を読ませるかのどちらかです。**自分のウォレットから支払う場合、
+鍵は一切不要です。** ローカルで署名するのは任意の `--send` フラグだけで、
+`ROZO_CHECKOUT_EVM_KEY` / `ROZO_CHECKOUT_SOL_KEY` を読むのもそのフラグだけです。
+エージェントやスクリプトでは必ず `--with` を渡してください。対話式の選択は端末でのみ
+表示され、既定の通貨は意図的にありません。
+
+<details>
+<summary><b>Claude Code</b> — スキルをインストールするか、ワンライナーを貼り付ける</summary>
+
+このリポジトリは Claude Code のスキルです。`SKILL.md` と `scripts/dist/` 内の実行可能
+ファイルが同梱されています。スキルディレクトリにクローンすれば、Claude Code が自動的に
+認識します。
+
+```bash
+git clone https://github.com/RozoAI/rozo-checkout-skill ~/.claude/skills/rozo-checkout
+```
+
+インストールせずに、実行を依頼するだけでも構いません:
+
+```
+この OpenRouter のリンクを Solana の USDT で支払ってください:
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** Claude にホットウォレット
+から署名させたい場合にだけ `--send` を追加してください。その場合は環境変数の鍵が必要です。
+</details>
+
+<details>
+<summary><b>Codex CLI</b> — AGENTS.md に書くか、そのまま実行する</summary>
+
+Codex はプロジェクトルートの `AGENTS.md` を読みます。毎回説明しなくても支払い方が
+分かるように、常設の指示を追加しておきましょう:
+
+```
+OpenRouter / Coinbase の決済リンクを支払うには、次を実行してください:
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** `--send` を使う場合だけ
+環境変数の鍵が必要です。
+</details>
+
+<details>
+<summary><b>OpenCode</b> — AGENTS.md に書くか、そのまま実行する</summary>
+
+OpenCode もプロジェクトルートの `AGENTS.md` を読むため、上の Codex 用のスニペットが
+そのまま使えます。最短経路はやはりコマンドそのものです:
+
+```bash
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** `--send` を使う場合だけ
+環境変数の鍵が必要です。
+</details>
+
+<details>
+<summary><b>Cline</b> — .clinerules に書くか、そのまま実行する</summary>
+
+Cline はプロジェクトルートの `.clinerules` から常設の指示を読み込みます:
+
+```
+OpenRouter / Coinbase の決済リンクを支払うには、次を実行してください:
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** `--send` を使う場合だけ
+環境変数の鍵が必要です。
+</details>
+
+<details>
+<summary><b>Cursor</b> — .cursor/rules に書くか、そのまま実行する</summary>
+
+`.cursor/rules/rozo-checkout.mdc` にプロジェクトルールを追加します:
+
+```
+OpenRouter / Coinbase の決済リンクを支払うには、次を実行してください:
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** `--send` を使う場合だけ
+環境変数の鍵が必要です。
+</details>
+
+<details>
+<summary><b>Hermes Agent</b> — セッション内でワンライナーを実行する</summary>
+
+Hermes Agent（Nous Research）はシェルにアクセスでき、独自のスキルシステムを持っています。
+`hermes` で起動して、こう依頼してください:
+
+```
+https://checkout.rozo.ai/llms.txt を取得したうえで、この OpenRouter のリンクを支払ってください:
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** `--send` を使う場合だけ
+環境変数の鍵が必要です。
+</details>
+
+<details>
+<summary><b>OpenClaw</b> — openclaw agent exec</summary>
+
+OpenClaw のヘッドレス入口は単発のタスクを実行するため、スクリプトやチャットチャンネル
+から起動する支払いに向いています:
+
+```bash
+openclaw agent exec "Pay this OpenRouter link with USDT on Solana by running: npx @rozoai/checkout pay <coinbase-link> --with usdt-solana"
+```
+
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** `--send` を使う場合だけ
+環境変数の鍵が必要です。
+</details>
+
+<details>
+<summary><b>Pi</b> — セッション内でワンライナーを実行する</summary>
+
+Pi は BYOK のターミナルエージェントで、組み込みツールに `bash` を含むため、コマンドを
+直接実行できます。`pi` で起動して、こう依頼してください:
+
+```
+この OpenRouter のリンクを Solana の USDT で支払ってください。次を実行します:
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** `--send` を使う場合だけ
+環境変数の鍵が必要です。
+</details>
+
+<details>
+<summary><b>ターミナル — エージェントなし</b> — スクリプトを 1 ステップずつ実行する</summary>
+
+各ステップを自分で進めます。バンドルは自己完結型なので、Node 18 以降のほかに
+インストールするものはありません。
+
+```bash
+git clone https://github.com/RozoAI/rozo-checkout-skill && cd rozo-checkout-skill
+LINK="https://payments.coinbase.com/payment-links/pl_01YOURLINKID"
+
+# 読み取り専用の見積もり。費用はかかりません
+node scripts/dist/quote.js --url "$LINK"
+
+# 注文を作成します。ここでは完全な入金アドレスは伏せられ、まず確認用の
+# マスクされた要約が返ります。
+node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT
+
+# 支払うと決めたら、--confirm を付けて再実行し、アドレスを開示します
+node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT --confirm
+
+# 入金ブロックの内容を任意のウォレットから支払い、決済完了を見守ります
+node scripts/dist/status.js --rozo-payment-id <uuid> --watch
+```
+
+各スクリプトは標準出力にちょうど 1 個の JSON オブジェクトを出力します。終了コードは
+`0` が成功、`1` が拒否/失敗（`error.code` を参照）、`2` が使い方の誤り、`3` が送信済みだが
+未確認です。詳しい手順: [クイックスタート](QUICKSTART.ja.md)。
+
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** ホットウォレットからの送金
+については、`ROZO_CHECKOUT_EVM_KEY` / `ROZO_CHECKOUT_SOL_KEY` を読む `send-evm.js` /
+`send-sol.js` を参照してください。
+</details>
+
+<details>
+<summary><b>その他のあらゆるエージェント</b> — llms.txt を読ませる</summary>
+
+URL を取得してコマンドを実行できるエージェントであれば、どれでもこれができます:
+
+```
+https://checkout.rozo.ai/llms.txt を自分のコンテキストに読み込み、それを使って
+この OpenRouter のリンクを支払ってください: <coinbase-link>
+```
+
+シェルを持たないエージェントでも、HTTP リクエストが可能なら 4 つの公開エンドポイントを
+直接操作できます — [仕組み](how-it-works.md) を参照してください。
+
+ウォレット: どのウォレットでも構いません。**鍵は不要です。** `--send` を使う場合だけ
+環境変数の鍵が必要です。
+</details>
+
+## 知っておく価値のある 3 つのルール
+
+- **入金アドレスは使い捨てです。** 古い注文、キャッシュされたレスポンス、スクリーンショット
+  から得たアドレスを再利用しては決していけません。
+- **表示された金額をそのとおりに送金してください。** 通常はインボイス金額より大きくなります
+  — ブリッジ手数料とネットワーク手数料が含まれるためです。
+- **入金済みの注文に二重に支払っては決していけません。** すでに支払いが検知されている場合は
+  中止し、人間に照合を依頼してください。使い捨てアドレスへの 2 回目の支払いは、入金として
+  反映される保証がありません。
+
+本ツールが何を拒否するのか、そしてその理由の完全な一覧は
+[safety.md](safety.md) にあります。
+
+## リンク
+
+- [クイックスタート](QUICKSTART.ja.md) — 5 つのコマンドと、期待される出力
+- [仕組み](how-it-works.md) — フロー、エンドポイント、識別子
+- [安全性の設計](safety.md) — すべての安全機構の詳細
+- [SKILL.md](../SKILL.md) — エージェント向けの指示書 · [llms.txt](../llms.txt) — 1 ファイルの要約
+- [checkout.rozo.ai/agent](https://checkout.rozo.ai/agent.html) — 同じものを Web で
+- [Issues](https://github.com/RozoAI/rozo-checkout-skill/issues) — バグと要望
+
+## 変更履歴
+
+- **0.1.1** — 支出上限を 2 つから 1 つに変更しました。1 回の支払いは $1,100 を超えられず
+  （$1,000 のクレジット購入とその 5% の手数料に合わせた値です）、セッション累計の上限と
+  `--yes-large` による上書きは削除されました。自分のウォレットから支払う場合は鍵も設定も
+  不要であることを、ドキュメントで明示しました。
+- **0.1.0** — 最初のリリース: `npx @rozoai/checkout`。
+
+## ライセンス
+
+MIT.
