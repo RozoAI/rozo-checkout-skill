@@ -4,6 +4,10 @@
 
 **[快速开始 →](QUICKSTART.zh.md)** —— 五分钟付掉一个链接，无需读完本文。
 
+```bash
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
 用一种 **OpenRouter Coinbase 收款链接 (Payment Link)** 本身无法直接接受的币种去付款 —— 走闪电网络的 BTC，或者 Solana、BNB Chain、Ethereum、Polygon、Base、Stellar 上的 USDT/USDC。
 
 Coinbase 收款链接只接受 Base 上的 USDC。本仓库是一个 agent skill（以及背后的 Node 脚本），它把上面这些币种通过一座桥 (bridge) 路由过去：你会拿到一个针对你实际持有的币种的一次性充值地址 (deposit address)，等你的充值到账后，一个出资钱包会代你结清这张 Coinbase 账单。
@@ -11,6 +15,7 @@ Coinbase 收款链接只接受 Base 上的 USDC。本仓库是一个 agent skill
 在账单本身上**没有折扣**：`callerPays` 等于账单金额。你要发送的**充值金额**是另一个数字，而且通常更大 —— 它包含了把账单金额以 Base USDC 形式送达所需的跨桥费用和源链费用。永远严格按后端返回的 `deposit.amount` 发送；绝不要假定它等于账单金额。
 
 - `SKILL.md` —— 面向 agent 的指令（Claude Code skill 格式）。
+- `llms.txt` —— 给只读一个文件的 agent 准备的精简摘要。
 - `scripts/` —— Node 实现；`src/` 是源码，`dist/` 存放可以用纯 `node` 直接运行的自包含打包产物。
 - `test/` —— 针对资金处理与安全逻辑的离线单元测试。
 - `PLAN.md` —— 实现所遵循的设计文档。
@@ -104,7 +109,21 @@ curl -s "$MPP/invoice-status?payment_id=pl_01YOURLINKID"
 
 `create-invoice` 按 IP 限流（约每小时 30 次）；读取类端点不限流。
 
-### 2. 使用脚本
+### 2. 使用 CLI
+
+无需安装任何东西 —— `npx` 会自动拉取并运行它：
+
+```bash
+npx @rozoai/checkout quote <coinbase-link>
+npx @rozoai/checkout pay   <coinbase-link> --with usdt-solana
+npx @rozoai/checkout status <rozoPaymentId>
+```
+
+`pay` 会把整个流程走完：报价、创建订单、展示打码后的核对信息、等你确认，然后打印充值指令并轮询直到结清。加 `--send` 就用热钱包付款而不是用你自己的钱包，加 `--json` 输出机器可读格式，其余选项看 `--help`。
+
+### 3. 或者直接运行脚本
+
+克隆本仓库后，你会拿到同样的流程，只不过是一个个独立脚本 —— agent skill 用的就是它们，CLI 底层调用的也是它们。
 
 每个脚本在 stdout 上只打印一个 JSON 对象。退出码 `0` 表示成功，`1` 表示被拒绝/失败（读 `error.code`），`2` 表示用法错误，`3` 表示已提交但未确认。
 
@@ -132,7 +151,7 @@ ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
   node scripts/dist/send-sol.js --rozo-payment-id <uuid> --dry-run
 ```
 
-`scripts/dist/*.js` 是自包含的打包产物 —— 在调用现场无需 `npm install`。
+`scripts/dist/*.js` 是自包含的打包产物 —— 在调用现场无需 `npm install`。上面那个 CLI 就是同一份代码，只是外层更友好：它是导入这些流程，而不是重新实现一遍，所以下面列出的每一项检查，不管你从哪个入口进来都同样生效。
 
 ## 构建与测试
 

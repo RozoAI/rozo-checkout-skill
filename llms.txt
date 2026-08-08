@@ -10,6 +10,26 @@
 This file teaches the whole flow to any agent or script. Repo (scripts, safety rails,
 full docs): https://github.com/RozoAI/rozo-checkout-skill — see QUICKSTART.md.
 
+## Fastest path: the CLI (npm @rozoai/checkout)
+
+If you can run commands, skip the raw HTTP below — the CLI performs the same four
+calls with every safety rule already enforced:
+
+  npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+  npx @rozoai/checkout quote <coinbase-link>
+  npx @rozoai/checkout status <rozoPaymentId | coinbase-link>
+
+--with accepts usdt-solana, usdc-solana, usdt-bnb, usdc-bnb, usdt-ethereum,
+usdc-ethereum, usdt-polygon, usdc-polygon, usdc-base, usdc-stellar, btc-lightning
+(or raw: --chain 900 --token USDT). Flags: --send (pay from a hot wallet, keys from
+ROZO_CHECKOUT_EVM_KEY / ROZO_CHECKOUT_SOL_KEY, never from argv), --yes (skip the
+interactive confirm; required when stdin is not a TTY), --dry-run, --json (exactly
+one JSON object on stdout), --no-watch, --timeout <s>. Exit codes: 0 success,
+1 refused/failed (read error.code), 2 usage, 3 submitted but unconfirmed.
+
+`pay` withholds the full deposit address until you confirm, then prints it as a
+copy-pastable block. Creating an order moves no money; an unfunded order expires.
+
 ## Supported sources
 
 chainId "1" Ethereum (USDC, USDT) · "56" BNB Chain (USDC, USDT; 18-decimals) ·

@@ -4,6 +4,10 @@
 
 **[クイックスタート →](QUICKSTART.ja.md)** — 本文を読まずに、5 分でリンクを支払う。
 
+```bash
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
 **OpenRouter の Coinbase 決済リンク (Payment Link)** を、そのリンクが直接受け取れない
 通貨で支払うためのものです — Lightning 経由の BTC、あるいは Solana、BNB Chain、Ethereum、
 Polygon、Base、Stellar 上の USDT/USDC が使えます。
@@ -21,6 +25,7 @@ Coinbase の決済リンクは Base 上の USDC しか受け付けません。�
 インボイス金額と等しいと決して思い込まないでください。
 
 - `SKILL.md` — エージェント向けの指示書（Claude Code のスキル形式）。
+- `llms.txt` — 1 ファイルだけ読むエージェント向けの簡潔な要約。
 - `scripts/` — Node による実装。`src/` がソースで、`dist/` には素の `node` で実行できる
   自己完結型のバンドルが入っています。
 - `test/` — 資金処理と安全性ロジックのオフライン単体テスト。
@@ -118,7 +123,25 @@ curl -s "$MPP/invoice-status?payment_id=pl_01YOURLINKID"
 `create-invoice` は IP 単位でレート制限されています（およそ 30 回/時）。読み取り系
 エンドポイントには制限はありません。
 
-### 2. スクリプトを使う
+### 2. CLI を使う
+
+インストールは不要です。`npx` が取得して実行します:
+
+```bash
+npx @rozoai/checkout quote <coinbase-link>
+npx @rozoai/checkout pay   <coinbase-link> --with usdt-solana
+npx @rozoai/checkout status <rozoPaymentId>
+```
+
+`pay` はフロー全体を進めます。見積もりを取り、注文を作成し、マスクされた確認内容を表示し、
+承認を求め、そのうえで入金手順を出力して決済完了までポーリングします。自分のウォレット
+ではなくホットウォレットから支払う場合は `--send` を、機械可読な出力が必要な場合は
+`--json` を、それ以外については `--help` を追加してください。
+
+### 3. あるいはスクリプトを直接実行する
+
+リポジトリをクローンすると、同じフローが個別のスクリプトとして手に入ります。エージェント
+スキルが使っているのはこちらで、CLI も内部ではこれを呼び出しています。
 
 各スクリプトは標準出力にちょうど 1 個の JSON オブジェクトを出力します。終了コードは
 `0` が成功、`1` が拒否/失敗（`error.code` を参照）、`2` が使い方の誤り、`3` が送信済みだが
@@ -150,7 +173,9 @@ ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
 ```
 
 `scripts/dist/*.js` は自己完結型のバンドルです。呼び出し側で `npm install` を実行する
-必要はありません。
+必要はありません。上記の CLI は同じコードにより扱いやすい入り口を付けたもので、これらの
+フローを再実装するのではなくインポートしています。したがって、以下に挙げるチェックは
+どちらの入り口を使っても等しく適用されます。
 
 ## ビルドとテスト
 

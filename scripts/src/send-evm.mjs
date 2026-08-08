@@ -105,8 +105,8 @@ function chainDef(chainId, rpcUrl) {
   });
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+async function main(argv) {
+  const args = parseArgs(argv);
   const rozoPaymentId = assertRozoPaymentId(args['rozo-payment-id'] || args._[0]);
 
   assertNoTrackedDotEnv();
@@ -372,4 +372,11 @@ async function main() {
   );
 }
 
-main().catch((err) => fail(err));
+/**
+ * Entry point for both the standalone script and the CLI. The standalone
+ * bundle (scripts/bin) calls this and lets emit() exit; the CLI calls it
+ * inside capture() and gets the payload back. Same flow, same checks.
+ */
+export async function run(argv = process.argv.slice(2)) {
+  return main(argv);
+}

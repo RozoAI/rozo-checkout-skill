@@ -1,21 +1,60 @@
 {
-  "name": "rozo-checkout",
-  "version": "1.0.0",
-  "private": true,
+  "name": "@rozoai/checkout",
+  "version": "0.1.0",
   "type": "module",
-  "description": "Agent skill: pay a Coinbase Payment Link with BTC Lightning or USDT/USDC on Solana, BNB Chain, Ethereum, Polygon, Base or Stellar.",
+  "description": "Pay an OpenRouter Coinbase Payment Link with BTC Lightning, or USDT/USDC on Solana, BNB Chain, Ethereum, Polygon, Base or Stellar.",
   "license": "MIT",
+  "author": "Rozo AI",
+  "homepage": "https://github.com/RozoAI/rozo-checkout-skill#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RozoAI/rozo-checkout-skill.git"
+  },
+  "bugs": {
+    "url": "https://github.com/RozoAI/rozo-checkout-skill/issues"
+  },
+  "keywords": [
+    "openrouter",
+    "coinbase",
+    "x402",
+    "lightning",
+    "solana",
+    "usdt",
+    "usdc",
+    "crypto-payments"
+  ],
+  "bin": {
+    "rozo-checkout": "scripts/dist/cli.js"
+  },
+  "files": [
+    "scripts/dist",
+    "llms.txt",
+    "README.md",
+    "README.zh.md",
+    "README.ja.md",
+    "README.es.md",
+    "QUICKSTART.md",
+    "QUICKSTART.zh.md",
+    "QUICKSTART.ja.md",
+    "QUICKSTART.es.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node --test test/*.test.mjs",
-    "check": "npm run build && npm test"
-  },
-  "dependencies": {
-    "@solana/spl-token": "^0.4.9",
-    "@solana/web3.js": "^1.95.0",
-    "viem": "^2.21.0"
+    "check": "npm run build && npm test",
+    "prepack": "npm run build"
   },
   "devDependencies": {
-    "esbuild": "^0.24.0"
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.95.0",
+    "esbuild": "^0.24.0",
+    "viem": "^2.21.0"
   }
 }

@@ -6,10 +6,27 @@ Pay an OpenRouter Coinbase Payment Link with USDT/USDC on Solana, BNB Chain,
 Ethereum, Polygon, Base or Stellar, or with BTC over Lightning. Five minutes.
 For how it works and why, see [README.md](README.md).
 
+## The one-liner
+
+```bash
+npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLINKID --with usdt-solana
+```
+
+That runs every step below for you: quote, create, review, confirm, deposit
+instructions, then polling until settlement. Coins for `--with`: `usdt-solana`,
+`usdc-solana`, `usdt-bnb`, `usdc-bnb`, `usdt-ethereum`, `usdc-ethereum`,
+`usdt-polygon`, `usdc-polygon`, `usdc-base`, `usdc-stellar`, `btc-lightning`.
+
+Add `--send` to pay from a hot wallet rather than your own, and `--json` for
+machine-readable output.
+
+The rest of this page is the same flow run one step at a time, which is what
+you want if something goes wrong or you are scripting it yourself.
+
 ## Before you start
 
-- **Node 18 or newer** (`node -v`). Nothing to install: `scripts/dist/*.js` are
-  self-contained bundles.
+- **Node 18 or newer** (`node -v`). Nothing else to install — `npx` fetches the
+  CLI, and the cloned `scripts/dist/*.js` are self-contained bundles.
 - **A wallet** holding the coin you want to pay with, on the chain you pick.
 - **The Coinbase link**, e.g.
   `https://payments.coinbase.com/payment-links/pl_01YOURLINKID`.

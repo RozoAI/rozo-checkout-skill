@@ -68,8 +68,8 @@ function confirmTier(usdAmount) {
   return 'explicit';
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+async function main(argv) {
+  const args = parseArgs(argv);
   const url = args.url || args._[0];
   if (!url || url === true) usage('Required: --url "<coinbase payment link url or id>"');
   const chainId = String(args.chain ?? '').trim();
@@ -366,4 +366,11 @@ async function main() {
   });
 }
 
-main().catch((err) => fail(err));
+/**
+ * Entry point for both the standalone script and the CLI. The standalone
+ * bundle (scripts/bin) calls this and lets emit() exit; the CLI calls it
+ * inside capture() and gets the payload back. Same flow, same checks.
+ */
+export async function run(argv = process.argv.slice(2)) {
+  return main(argv);
+}

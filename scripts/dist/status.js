@@ -43,18 +43,30 @@ function redactDeep(value) {
   }
   return value;
 }
+var capturing = false;
+var EmitSignal = class extends Error {
+  constructor(payload, exitCode) {
+    super("emit");
+    this.payload = payload;
+    this.exitCode = exitCode;
+  }
+};
+function formatFailure(err, fallbackCode = "RUNTIME_ERROR") {
+  const code = err && err.code || fallbackCode;
+  const message = redact(err && err.message || String(err));
+  const payload = { success: false, error: { code, message } };
+  if (err && err.details) payload.error.details = redactDeep(err.details);
+  return payload;
+}
 function emit(payload, exitCode = EXIT_OK) {
-  process.stdout.write(JSON.stringify(redactDeep(payload), null, 2) + "\n");
+  const redacted = redactDeep(payload);
+  if (capturing) throw new EmitSignal(redacted, exitCode);
+  process.stdout.write(JSON.stringify(redacted, null, 2) + "\n");
   process.exit(exitCode);
 }
 function fail(err, fallbackCode = "RUNTIME_ERROR", exitCode = EXIT_ERROR) {
-  const code = err && err.code || fallbackCode;
-  const message = redact(err && err.message || String(err));
-  const payload = {
-    success: false,
-    error: { code, message }
-  };
-  if (err && err.details) payload.error.details = redactDeep(err.details);
+  const payload = formatFailure(err, fallbackCode);
+  if (capturing) throw new EmitSignal(payload, exitCode);
   process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
   process.exit(exitCode);
 }
@@ -514,8 +526,8 @@ async function snapshot({ rozoPaymentId, linkId }) {
     errors: [statusError, paymentError].filter(Boolean)
   };
 }
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+async function main(argv) {
+  const args = parseArgs(argv);
   const rozoPaymentId = args["rozo-payment-id"] || (isRozoPaymentId(args._[0]) ? args._[0] : null);
   const linkId = args["link-id"] || (!rozoPaymentId ? args._[0] : null);
   if (!rozoPaymentId && !linkId) {
@@ -547,4 +559,9 @@ async function main() {
     failed ? EXIT_ERROR : unresolved ? EXIT_UNCONFIRMED : 0
   );
 }
-main().catch((err) => fail(err));
+async function run(argv = process.argv.slice(2)) {
+  return main(argv);
+}
+
+// scripts/src/bin/status.mjs
+run().catch((err) => fail(err));

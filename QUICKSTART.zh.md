@@ -6,10 +6,22 @@
 Lightning 的 BTC，去支付一个 OpenRouter Coinbase 收款链接 (Payment Link)。五分钟搞定。
 工作原理与设计理由见 [README.md](README.md)。
 
+## 一行命令搞定
+
+```bash
+npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLINKID --with usdt-solana
+```
+
+这一条命令会替你跑完下面的每一步：报价、创建订单、核对、确认、充值指令，然后一直轮询到结清。`--with` 可选的币种有：`usdt-solana`、`usdc-solana`、`usdt-bnb`、`usdc-bnb`、`usdt-ethereum`、`usdc-ethereum`、`usdt-polygon`、`usdc-polygon`、`usdc-base`、`usdc-stellar`、`btc-lightning`。
+
+加 `--send` 就用热钱包付款而不是用你自己的钱包，加 `--json` 输出机器可读格式。
+
+本页剩下的内容就是同一套流程，只不过一步一步来 —— 如果出了问题，或者你想自己写脚本，那才需要看它们。
+
 ## 开始之前
 
-- **Node 18 或更高版本**（`node -v`）。无需安装任何依赖：`scripts/dist/*.js` 都是
-  自包含的打包产物。
+- **Node 18 或更高版本**（`node -v`）。别的什么都不用装 —— `npx` 会去拉取 CLI，而克隆下来的
+  `scripts/dist/*.js` 都是自包含的打包产物。
 - **一个钱包**，在你选的链上持有你想用来付款的币种。
 - **那个 Coinbase 链接**，例如
   `https://payments.coinbase.com/payment-links/pl_01YOURLINKID`。

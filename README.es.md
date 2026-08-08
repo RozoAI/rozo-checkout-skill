@@ -4,6 +4,10 @@
 
 **[Inicio rápido →](QUICKSTART.es.md)** — pagar un enlace en cinco minutos, sin leer todo esto.
 
+```bash
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
 Pagar un **enlace de pago de Coinbase (Coinbase Payment Link) de OpenRouter** con
 una moneda que ese enlace no puede aceptar directamente: BTC por Lightning, o
 USDT/USDC en Solana, BNB Chain, Ethereum, Polygon, Base o Stellar.
@@ -23,6 +27,7 @@ el `deposit.amount` que devuelve el backend; nunca suponer que es igual a la
 factura.
 
 - `SKILL.md` — las instrucciones dirigidas al agente (formato de skill de Claude Code).
+- `llms.txt` — un resumen compacto para agentes que leen un solo archivo.
 - `scripts/` — la implementación en Node; `src/` es el código fuente y `dist/`
   contiene paquetes autocontenidos que se pueden ejecutar con `node` a secas.
 - `test/` — pruebas unitarias offline de la lógica de manejo de dinero y de seguridad.
@@ -120,7 +125,26 @@ curl -s "$MPP/invoice-status?payment_id=pl_01YOURLINKID"
 `create-invoice` tiene límite de tasa por IP (unas 30/hora); los endpoints de
 lectura no.
 
-### 2. Usar los scripts
+### 2. Usar la CLI
+
+No hay nada que instalar: `npx` la descarga y la ejecuta:
+
+```bash
+npx @rozoai/checkout quote <coinbase-link>
+npx @rozoai/checkout pay   <coinbase-link> --with usdt-solana
+npx @rozoai/checkout status <rozoPaymentId>
+```
+
+`pay` recorre todo el flujo: cotizar, crear la orden, mostrar una revisión
+enmascarada, pedir un sí, y luego imprimir las instrucciones de depósito y
+consultar hasta la liquidación. Añadir `--send` para pagar desde una billetera
+caliente en lugar de la propia, `--json` para salida de máquina y `--help` para
+todo lo demás.
+
+### 3. O ejecutar los scripts directamente
+
+Clonar el repositorio da los mismos flujos como scripts individuales: es lo que
+usa la habilidad de agente, y lo que la CLI invoca por debajo.
 
 Cada script imprime exactamente un objeto JSON en stdout. Código de salida `0`
 éxito, `1` rechazado/fallido (leer `error.code`), `2` uso incorrecto, `3` enviado
@@ -152,7 +176,10 @@ ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
 ```
 
 Los `scripts/dist/*.js` son paquetes autocontenidos: no hace falta `npm install`
-en el lugar de la llamada.
+en el lugar de la llamada. La CLI anterior es el mismo código con una superficie
+más amable: importa estos flujos en lugar de reimplementarlos, así que todas las
+comprobaciones de abajo aplican igual sea cual sea el punto de entrada que se
+use.
 
 ## Compilación y pruebas
 

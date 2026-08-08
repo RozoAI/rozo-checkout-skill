@@ -17,12 +17,19 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const srcDir = path.join(here, 'src');
 const distDir = path.join(here, 'dist');
 
-const ENTRIES = ['quote', 'create-order', 'status', 'send-evm', 'send-sol'];
+// Standalone scripts are built from their thin bin/ wrappers; the flows they
+// import are shared with the CLI, so no guard logic is duplicated.
+const SCRIPTS = ['quote', 'create-order', 'status', 'send-evm', 'send-sol'];
 
 fs.mkdirSync(distDir, { recursive: true });
 
 await build({
-  entryPoints: ENTRIES.map((n) => path.join(srcDir, `${n}.mjs`)),
+  // Explicit out names keep the documented dist/<name>.js paths, regardless of
+  // where the entry file lives in src/.
+  entryPoints: [
+    ...SCRIPTS.map((n) => ({ in: path.join(srcDir, 'bin', `${n}.mjs`), out: n })),
+    { in: path.join(srcDir, 'cli.mjs'), out: 'cli' },
+  ],
   outdir: distDir,
   outExtension: { '.js': '.js' },
   bundle: true,
@@ -45,4 +52,7 @@ fs.copyFileSync(
   path.join(distDir, 'blacklist.json'),
 );
 
-console.log(`built ${ENTRIES.length} bundles + blacklist.json into scripts/dist`);
+// The published CLI is executed directly by npx.
+fs.chmodSync(path.join(distDir, 'cli.js'), 0o755);
+
+console.log(`built ${SCRIPTS.length + 1} bundles + blacklist.json into scripts/dist`);

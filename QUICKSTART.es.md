@@ -7,10 +7,29 @@ USDT/USDC en Solana, BNB Chain, Ethereum, Polygon, Base o Stellar, o con BTC por
 Lightning. Cinco minutos. Para saber cómo funciona y por qué, ver
 [README.md](README.md).
 
+## El comando de una sola línea
+
+```bash
+npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLINKID --with usdt-solana
+```
+
+Eso ejecuta por uno todos los pasos de abajo: cotizar, crear, revisar, confirmar,
+instrucciones de depósito y luego consultar hasta la liquidación. Monedas para
+`--with`: `usdt-solana`, `usdc-solana`, `usdt-bnb`, `usdc-bnb`, `usdt-ethereum`,
+`usdc-ethereum`, `usdt-polygon`, `usdc-polygon`, `usdc-base`, `usdc-stellar`,
+`btc-lightning`.
+
+Añadir `--send` para pagar desde una billetera caliente en lugar de la propia, y
+`--json` para obtener una salida legible por máquina.
+
+El resto de esta página es el mismo flujo ejecutado paso a paso, que es lo que
+conviene si algo sale mal o si se quiere automatizar por cuenta propia.
+
 ## Antes de empezar
 
-- **Node 18 o posterior** (`node -v`). No hay nada que instalar: los
-  `scripts/dist/*.js` son paquetes autocontenidos.
+- **Node 18 o posterior** (`node -v`). No hay nada más que instalar: `npx`
+  descarga la CLI, y los `scripts/dist/*.js` del repositorio clonado son
+  paquetes autocontenidos.
 - **Una billetera** que tenga la moneda con la que se quiere pagar, en la cadena elegida.
 - **El enlace de Coinbase**, por ejemplo
   `https://payments.coinbase.com/payment-links/pl_01YOURLINKID`.

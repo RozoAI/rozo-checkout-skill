@@ -6,10 +6,27 @@ OpenRouter の Coinbase 決済リンク (Payment Link) を、Solana、BNB Chain�
 Ethereum、Polygon、Base、Stellar 上の USDT/USDC、または Lightning 経由の BTC で支払います。所要 5 分。
 仕組みと設計意図については [README.md](README.md) を参照してください。
 
+## ワンライナー
+
+```bash
+npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLINKID --with usdt-solana
+```
+
+これ 1 つで、以下の全ステップを実行します。見積もり、注文作成、確認、承認、入金手順の
+表示、そして決済完了までのポーリングです。`--with` に指定できる通貨: `usdt-solana`、
+`usdc-solana`、`usdt-bnb`、`usdc-bnb`、`usdt-ethereum`、`usdc-ethereum`、
+`usdt-polygon`、`usdc-polygon`、`usdc-base`、`usdc-stellar`、`btc-lightning`。
+
+自分のウォレットではなくホットウォレットから支払う場合は `--send` を、機械可読な出力が
+必要な場合は `--json` を追加してください。
+
+このページの残りは、同じフローを 1 ステップずつ実行するものです。うまくいかないときや、
+自分でスクリプトを書くときは、こちらが必要になります。
+
 ## 始める前に
 
-- **Node 18 以降**（`node -v`）。インストールは不要です。`scripts/dist/*.js` は
-  自己完結型のバンドルです。
+- **Node 18 以降**（`node -v`）。ほかにインストールするものはありません — `npx` が CLI を
+  取得しますし、クローンした `scripts/dist/*.js` は自己完結型のバンドルです。
 - 選んだチェーン上で、支払いたい通貨を保有している**ウォレット**。
 - **Coinbase のリンク**。例:
   `https://payments.coinbase.com/payment-links/pl_01YOURLINKID`。

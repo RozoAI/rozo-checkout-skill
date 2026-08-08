@@ -76,21 +76,72 @@ export function redactDeep(value) {
   return value;
 }
 
+/**
+ * Capture mode.
+ *
+ * Each script's flow signals completion by calling emit()/fail(), which
+ * normally writes to stdout and exits the process. The CLI needs to run those
+ * same flows back to back inside one process — so under capture() the same
+ * calls throw an EmitSignal carrying the payload instead of exiting.
+ *
+ * This exists so the CLI can reuse the audited flows verbatim. It must never
+ * be used to skip one: capture changes only how a result is delivered, never
+ * which checks ran.
+ */
+let capturing = false;
+
+export class EmitSignal extends Error {
+  constructor(payload, exitCode) {
+    super('emit');
+    this.payload = payload;
+    this.exitCode = exitCode;
+  }
+}
+
+/** Build the failure payload shared by fail() and capture(). */
+export function formatFailure(err, fallbackCode = 'RUNTIME_ERROR') {
+  const code = (err && err.code) || fallbackCode;
+  const message = redact((err && err.message) || String(err));
+  const payload = { success: false, error: { code, message } };
+  if (err && err.details) payload.error.details = redactDeep(err.details);
+  return payload;
+}
+
+/**
+ * Run a flow and return { payload, exitCode } instead of exiting.
+ * Any error the flow throws is formatted exactly as fail() would have.
+ */
+export async function capture(fn) {
+  const previous = capturing;
+  capturing = true;
+  try {
+    await fn();
+    return {
+      payload: formatFailure(
+        { code: 'NO_RESULT', message: 'The flow finished without producing a result.' },
+      ),
+      exitCode: EXIT_ERROR,
+    };
+  } catch (err) {
+    if (err instanceof EmitSignal) return { payload: err.payload, exitCode: err.exitCode };
+    return { payload: formatFailure(err), exitCode: EXIT_ERROR };
+  } finally {
+    capturing = previous;
+  }
+}
+
 /** Print one JSON object and exit. */
 export function emit(payload, exitCode = EXIT_OK) {
-  process.stdout.write(JSON.stringify(redactDeep(payload), null, 2) + '\n');
+  const redacted = redactDeep(payload);
+  if (capturing) throw new EmitSignal(redacted, exitCode);
+  process.stdout.write(JSON.stringify(redacted, null, 2) + '\n');
   process.exit(exitCode);
 }
 
 /** Print a structured failure and exit. */
 export function fail(err, fallbackCode = 'RUNTIME_ERROR', exitCode = EXIT_ERROR) {
-  const code = (err && err.code) || fallbackCode;
-  const message = redact((err && err.message) || String(err));
-  const payload = {
-    success: false,
-    error: { code, message },
-  };
-  if (err && err.details) payload.error.details = redactDeep(err.details);
+  const payload = formatFailure(err, fallbackCode);
+  if (capturing) throw new EmitSignal(payload, exitCode);
   process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
   process.exit(exitCode);
 }

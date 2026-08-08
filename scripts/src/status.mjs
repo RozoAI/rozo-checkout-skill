@@ -107,8 +107,8 @@ async function snapshot({ rozoPaymentId, linkId }) {
   };
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+async function main(argv) {
+  const args = parseArgs(argv);
   const rozoPaymentId = args['rozo-payment-id'] || (isRozoPaymentId(args._[0]) ? args._[0] : null);
   const linkId = args['link-id'] || (!rozoPaymentId ? args._[0] : null);
   if (!rozoPaymentId && !linkId) {
@@ -162,4 +162,11 @@ async function main() {
   );
 }
 
-main().catch((err) => fail(err));
+/**
+ * Entry point for both the standalone script and the CLI. The standalone
+ * bundle (scripts/bin) calls this and lets emit() exit; the CLI calls it
+ * inside capture() and gets the payload back. Same flow, same checks.
+ */
+export async function run(argv = process.argv.slice(2)) {
+  return main(argv);
+}

@@ -4,6 +4,10 @@
 
 **[Quick start →](QUICKSTART.md)** — pay a link in five minutes, without reading any of this.
 
+```bash
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+```
+
 Pay an **OpenRouter Coinbase Payment Link** with a coin that link cannot take
 directly — BTC over Lightning, or USDT/USDC on Solana, BNB Chain, Ethereum,
 Polygon, Base or Stellar.
@@ -21,6 +25,7 @@ invoice amount in Base USDC. Always send exactly the `deposit.amount` the
 backend returns; never assume it equals the invoice.
 
 - `SKILL.md` — the agent-facing instructions (Claude Code skill format).
+- `llms.txt` — a compact summary for agents that read one file.
 - `scripts/` — the Node implementation; `src/` is the source, `dist/` holds
   self-contained bundles you can run with plain `node`.
 - `test/` — offline unit tests for the money-handling and safety logic.
@@ -118,7 +123,25 @@ curl -s "$MPP/invoice-status?payment_id=pl_01YOURLINKID"
 `create-invoice` is rate-limited per IP (about 30/hour); the read endpoints are
 not.
 
-### 2. Use the scripts
+### 2. Use the CLI
+
+Nothing to install — `npx` fetches and runs it:
+
+```bash
+npx @rozoai/checkout quote <coinbase-link>
+npx @rozoai/checkout pay   <coinbase-link> --with usdt-solana
+npx @rozoai/checkout status <rozoPaymentId>
+```
+
+`pay` walks the whole flow: quote, create the order, show a masked review, ask
+for a yes, then print the deposit instructions and poll until settlement. Add
+`--send` to pay from a hot wallet instead of your own, `--json` for machine
+output, and `--help` for everything else.
+
+### 3. Or run the scripts directly
+
+Cloning the repo gives you the same flows as individual scripts — this is what
+the agent skill uses, and what the CLI calls underneath.
 
 Each script prints exactly one JSON object on stdout. Exit `0` success, `1`
 refused/failed (read `error.code`), `2` usage, `3` submitted but unconfirmed.
@@ -149,7 +172,9 @@ ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
 ```
 
 `scripts/dist/*.js` are self-contained bundles — no `npm install` is needed at
-the call site.
+the call site. The CLI above is the same code with a friendlier surface: it
+imports these flows rather than reimplementing them, so every check below
+applies identically whichever entry point you use.
 
 ## Build and test
 

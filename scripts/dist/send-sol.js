@@ -10576,7 +10576,7 @@ var require_dist = __commonJS({
           }
         }
       }
-      function* run(value, struct6, options = {}) {
+      function* run2(value, struct6, options = {}) {
         const { path: path3 = [], branch = [value], coerce: coerce2 = false, mask: mask2 = false } = options;
         const ctx = { path: path3, branch, mask: mask2 };
         if (coerce2) {
@@ -10589,7 +10589,7 @@ var require_dist = __commonJS({
           yield [failure, void 0];
         }
         for (let [k, v, s] of struct6.entries(value, ctx)) {
-          const ts = run(v, s, {
+          const ts = run2(v, s, {
             path: k === void 0 ? path3 : [...path3, k],
             branch: k === void 0 ? branch : [...branch, v],
             coerce: coerce2,
@@ -10717,7 +10717,7 @@ var require_dist = __commonJS({
         return !result[0];
       }
       function validate3(value, struct6, options = {}) {
-        const tuples = run(value, struct6, options);
+        const tuples = run2(value, struct6, options);
         const tuple2 = shiftIterator(tuples);
         if (tuple2[0]) {
           const error = new StructError(tuple2[0], function* () {
@@ -11130,7 +11130,7 @@ var require_dist = __commonJS({
           validator(value, ctx) {
             const failures = [];
             for (const S of Structs) {
-              const [...tuples] = run(value, S, ctx);
+              const [...tuples] = run2(value, S, ctx);
               const [first] = tuples;
               if (!first[0]) {
                 return [];
@@ -31474,18 +31474,30 @@ function redactDeep(value) {
   }
   return value;
 }
+var capturing = false;
+var EmitSignal = class extends Error {
+  constructor(payload, exitCode) {
+    super("emit");
+    this.payload = payload;
+    this.exitCode = exitCode;
+  }
+};
+function formatFailure(err, fallbackCode = "RUNTIME_ERROR") {
+  const code = err && err.code || fallbackCode;
+  const message = redact(err && err.message || String(err));
+  const payload = { success: false, error: { code, message } };
+  if (err && err.details) payload.error.details = redactDeep(err.details);
+  return payload;
+}
 function emit(payload, exitCode = EXIT_OK) {
-  process.stdout.write(JSON.stringify(redactDeep(payload), null, 2) + "\n");
+  const redacted = redactDeep(payload);
+  if (capturing) throw new EmitSignal(redacted, exitCode);
+  process.stdout.write(JSON.stringify(redacted, null, 2) + "\n");
   process.exit(exitCode);
 }
 function fail(err, fallbackCode = "RUNTIME_ERROR", exitCode = EXIT_ERROR) {
-  const code = err && err.code || fallbackCode;
-  const message = redact(err && err.message || String(err));
-  const payload = {
-    success: false,
-    error: { code, message }
-  };
-  if (err && err.details) payload.error.details = redactDeep(err.details);
+  const payload = formatFailure(err, fallbackCode);
+  if (capturing) throw new EmitSignal(payload, exitCode);
   process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
   process.exit(exitCode);
 }
@@ -34393,8 +34405,8 @@ function base58Decode(str) {
   }
   return Uint8Array.from(bytes);
 }
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
+async function main(argv) {
+  const args = parseArgs(argv);
   const rozoPaymentId = assertRozoPaymentId(args["rozo-payment-id"] || args._[0]);
   assertNoTrackedDotEnv();
   const secret = decodeSecretKey(readKey(SOL_KEY_ENV));
@@ -34675,4 +34687,9 @@ function base58Encode(buf) {
   }
   return out;
 }
-main().catch((err) => fail(err));
+async function run(argv = process.argv.slice(2)) {
+  return main(argv);
+}
+
+// scripts/src/bin/send-sol.mjs
+run().catch((err) => fail(err));
