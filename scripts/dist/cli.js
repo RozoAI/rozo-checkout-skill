@@ -42579,1229 +42579,6 @@ function maskMemo(memo) {
   return `${s.slice(0, 4)}...${s.slice(-3)}`;
 }
 
-// scripts/src/lib/http.mjs
-var DEFAULT_TIMEOUT_MS = 2e4;
-var USER_AGENT = "rozo-checkout-skill/1.0";
-async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let res;
-  try {
-    res = await fetch(url, {
-      method,
-      headers: {
-        accept: "application/json",
-        "user-agent": USER_AGENT,
-        ...body !== void 0 ? { "content-type": "application/json" } : {}
-      },
-      body: body !== void 0 ? JSON.stringify(body) : void 0,
-      signal: controller.signal
-    });
-  } catch (err) {
-    throw new SkillError(
-      err?.name === "AbortError" ? "HTTP_TIMEOUT" : "HTTP_UNREACHABLE",
-      `${method} request failed: ${redact(err?.message || String(err))}`,
-      { url: redactUrl(url) }
-    );
-  } finally {
-    clearTimeout(timer);
-  }
-  const text = await res.text();
-  let json = null;
-  if (text) {
-    try {
-      json = JSON.parse(text);
-    } catch {
-      json = null;
-    }
-  }
-  if (!res.ok) {
-    const code = json?.code || json?.error?.code || (typeof json?.error === "string" ? null : null) || `HTTP_${res.status}`;
-    const message = json?.message || (typeof json?.error === "string" ? json.error : json?.error?.message) || `HTTP ${res.status}`;
-    throw new SkillError(code, redact(String(message)), {
-      httpStatus: res.status,
-      url: redactUrl(url),
-      body: json ?? redact(text).slice(0, 800)
-    });
-  }
-  if (json === null) {
-    throw new SkillError("HTTP_BAD_JSON", "Endpoint returned a non-JSON body.", {
-      url: redactUrl(url),
-      snippet: redact(text).slice(0, 400)
-    });
-  }
-  return json;
-}
-function redactUrl(url) {
-  try {
-    const u = new URL(url);
-    return `${u.origin}${u.pathname}`;
-  } catch {
-    return String(url);
-  }
-}
-function getJson(url, opts) {
-  return request("GET", url, opts);
-}
-function postJson(url, body, opts) {
-  return request("POST", url, { ...opts, body });
-}
-
-// scripts/src/lib/api.mjs
-var MPP_BASE = process.env.ROZO_CHECKOUT_MPP_BASE || "https://apiserver.mpprouter.dev/v1/services/rozo-agent-api";
-var INTENTS_BASE = process.env.ROZO_CHECKOUT_INTENTS_BASE || "https://intentapiv4.rozo.ai/functions/v1/payment-api";
-async function quoteInvoice({ url, linkId }) {
-  const body = url ? { url } : { payment_id: linkId };
-  return postJson(`${MPP_BASE}/quote-invoice`, body);
-}
-async function createInvoice({ url, linkId, source, quoteReceipt }) {
-  const body = {
-    ...url ? { url } : { payment_id: linkId },
-    source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
-    ...quoteReceipt ? { quoteReceipt } : {}
-  };
-  return postJson(`${MPP_BASE}/create-invoice`, body);
-}
-async function invoiceStatus({ linkId, rozoPaymentId }) {
-  const qs = new URLSearchParams();
-  if (linkId) qs.set("payment_id", linkId);
-  if (rozoPaymentId) qs.set("rozo_payment_id", rozoPaymentId);
-  if (![...qs.keys()].length) {
-    throw new SkillError("USAGE", "invoiceStatus needs linkId or rozoPaymentId.");
-  }
-  return getJson(`${MPP_BASE}/invoice-status?${qs.toString()}`);
-}
-async function getPayment(rozoPaymentId) {
-  return getJson(`${INTENTS_BASE}/payments/${encodeURIComponent(rozoPaymentId)}`);
-}
-function snapshotFromQuote(quote) {
-  const cb = quote?.coinbasePayment || quote?.paymentLink || null;
-  return {
-    linkId: quote?.linkId ?? quote?.paymentId ?? null,
-    protocolVersion: quote?.protocolVersion ?? null,
-    merchant: quote?.merchant ?? null,
-    original: quote?.invoice?.amount ?? null,
-    callerPays: quote?.quote?.callerPays ?? null,
-    fiat: quote?.invoice?.fiat ?? null,
-    coinbase: cb ? {
-      id: cb.id ?? null,
-      status: cb.status ?? null,
-      usageCount: cb.usageCount ?? null,
-      maxUsage: cb.maxUsage ?? null,
-      preApprovalExpiry: cb.preApprovalExpiry ?? cb.expiresAt ?? null
-    } : null
-  };
-}
-
-// scripts/src/lib/expiry.mjs
-var MINUTE = 6e4;
-var MARGINS_MS = {
-  1: 10 * MINUTE,
-  56: 10 * MINUTE,
-  137: 10 * MINUTE,
-  8453: 10 * MINUTE,
-  900: 5 * MINUTE,
-  1500: 10 * MINUTE,
-  lightning: 10 * MINUTE
-};
-var BOLT11_MIN_VALIDITY_MS = 10 * MINUTE;
-var DEFAULT_MARGIN_MS = 10 * MINUTE;
-function formatRemaining(ms) {
-  if (!Number.isFinite(ms)) return "unknown";
-  if (ms <= 0) return "expired";
-  const totalMinutes = Math.floor(ms / 6e4);
-  if (totalMinutes < 1) return `${Math.floor(ms / 1e3)}s`;
-  if (totalMinutes < 60) return `${totalMinutes}m`;
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-  return m ? `${h}h ${m}m` : `${h}h`;
-}
-function marginFor(chainId) {
-  const key = String(chainId);
-  return MARGINS_MS[key] ?? MARGINS_MS[chainId] ?? DEFAULT_MARGIN_MS;
-}
-function parseDeadline(value) {
-  if (value === null || value === void 0 || value === "") return null;
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value < 1e12 ? Math.round(value * 1e3) : Math.round(value);
-  }
-  const s = String(value).trim();
-  if (/^\d+$/.test(s)) {
-    const n = Number(s);
-    return n < 1e12 ? n * 1e3 : n;
-  }
-  const t = Date.parse(s);
-  return Number.isFinite(t) ? t : null;
-}
-function checkExpiry({
-  now,
-  chainId,
-  intentExpiresAt,
-  coinbaseExpiry,
-  bolt11ExpiresAt = void 0
-}) {
-  const marginMs = marginFor(chainId);
-  const intentMs = parseDeadline(intentExpiresAt);
-  const coinbaseMs = parseDeadline(coinbaseExpiry);
-  const bolt11Ms = bolt11ExpiresAt === void 0 ? void 0 : parseDeadline(bolt11ExpiresAt);
-  const deadlines = { intentMs, coinbaseMs, bolt11Ms: bolt11Ms ?? null };
-  const base = {
-    marginMs,
-    effectiveDeadlineMs: null,
-    msRemaining: null,
-    msOfSlack: null,
-    deadlines
-  };
-  if (intentMs === null) {
-    return {
-      ...base,
-      ok: false,
-      code: "EXPIRY_UNPARSABLE",
-      reason: "Intent expiresAt is missing or unparsable."
-    };
-  }
-  if (coinbaseMs === null) {
-    return {
-      ...base,
-      ok: false,
-      code: "EXPIRY_UNPARSABLE",
-      reason: "Coinbase preApprovalExpiry is missing or unparsable."
-    };
-  }
-  const effective = Math.min(intentMs, coinbaseMs);
-  const msRemaining = effective - now;
-  const msOfSlack = msRemaining - marginMs;
-  const withDeadline = {
-    ...base,
-    effectiveDeadlineMs: effective,
-    msRemaining,
-    msOfSlack
-  };
-  if (msRemaining <= 0) {
-    return {
-      ...withDeadline,
-      ok: false,
-      code: "EXPIRED",
-      reason: "The order or the Coinbase link has already expired."
-    };
-  }
-  if (msOfSlack <= 0) {
-    return {
-      ...withDeadline,
-      ok: false,
-      code: "EXPIRY_MARGIN",
-      reason: `Only ${Math.floor(msRemaining / 1e3)}s left before the earliest deadline; this chain needs a ${Math.floor(marginMs / 6e4)} min safety margin.`
-    };
-  }
-  if (bolt11ExpiresAt !== void 0) {
-    if (bolt11Ms === null) {
-      return {
-        ...withDeadline,
-        ok: false,
-        code: "EXPIRY_UNPARSABLE",
-        reason: "BOLT11 invoice expiry is missing or unparsable."
-      };
-    }
-    const bolt11Remaining = bolt11Ms - now;
-    if (bolt11Remaining < BOLT11_MIN_VALIDITY_MS) {
-      return {
-        ...withDeadline,
-        ok: false,
-        code: "BOLT11_TOO_SHORT",
-        reason: `BOLT11 invoice has ${Math.max(0, Math.floor(bolt11Remaining / 1e3))}s of validity left; at least 10 min is required. Request a fresh invoice.`
-      };
-    }
-  }
-  return { ...withDeadline, ok: true, code: null, reason: null };
-}
-
-// scripts/src/lib/guards.mjs
-var UNPAID_STATUS = "payment_unpaid";
-function receiptSignal(source) {
-  const raw = source?.amountReceived;
-  if (raw === null || raw === void 0 || raw === "") {
-    return { money: false, receipt: null, unparsable: false };
-  }
-  try {
-    const receipt = comparePayment(source);
-    return { money: receipt.state !== "none", receipt, unparsable: false };
-  } catch {
-    return { money: true, receipt: null, unparsable: true };
-  }
-}
-function validateDepositInstructions(source) {
-  const family = chainFamily(source?.chainId);
-  const address = typeof source?.receiverAddress === "string" ? source.receiverAddress.trim() : "";
-  const memo = typeof source?.receiverMemo === "string" ? source.receiverMemo.trim() : "";
-  const bolt11 = typeof source?.lnInvoice === "string" && source.lnInvoice.trim() ? source.lnInvoice.trim() : "";
-  let amountAtomic;
-  try {
-    amountAtomic = sourceAtomic(source, "amount");
-  } catch (err) {
-    return {
-      ok: false,
-      code: "DEPOSIT_INCOMPLETE",
-      reason: `The deposit amount is unusable: ${err.message}`
-    };
-  }
-  if (amountAtomic === null || amountAtomic <= 0n) {
-    return {
-      ok: false,
-      code: "DEPOSIT_INCOMPLETE",
-      reason: "The order carries no positive deposit amount."
-    };
-  }
-  if (family === "lightning") {
-    if (!bolt11) {
-      return {
-        ok: false,
-        code: "DEPOSIT_INCOMPLETE",
-        reason: "The Lightning order has no BOLT11 invoice yet (the swap may still be being created). Nothing is payable until it appears."
-      };
-    }
-    return { ok: true, code: null, reason: null, family, amountAtomic, payTo: bolt11, memo: null };
-  }
-  if (!address) {
-    return {
-      ok: false,
-      code: "DEPOSIT_NOT_LIVE",
-      reason: "The live payments response returned no deposit address."
-    };
-  }
-  if (family === "stellar" && !memo) {
-    return {
-      ok: false,
-      code: "DEPOSIT_MEMO_REQUIRED",
-      reason: "A Stellar deposit requires a memo, and this order did not supply one. Sending without it would very likely lose the funds. Refusing to display it as payable."
-    };
-  }
-  return {
-    ok: true,
-    code: null,
-    reason: null,
-    family,
-    amountAtomic,
-    payTo: address,
-    memo: memo || null
-  };
-}
-function reuseGuard({ payment, requested, reused = false }) {
-  const source = payment?.source || {};
-  const evidence = {
-    reused: Boolean(reused),
-    status: payment?.status ?? null,
-    txHash: source.txHash ?? null,
-    amountReceived: source.amountReceived ?? null,
-    confirmedAt: source.confirmedAt ?? null,
-    chainId: source.chainId ?? null,
-    tokenSymbol: source.tokenSymbol ?? null,
-    senderAddress: source.senderAddress ?? null
-  };
-  const hasTx = source.txHash !== null && source.txHash !== void 0 && source.txHash !== "";
-  const signal = receiptSignal(source);
-  const hasConfirm = source.confirmedAt !== null && source.confirmedAt !== void 0 && source.confirmedAt !== "";
-  if (hasTx || signal.money || hasConfirm) {
-    return {
-      ok: false,
-      code: "ORDER_ALREADY_FUNDED",
-      reason: signal.unparsable ? "This order reports an amountReceived that cannot be read. It is treated as funded until a human confirms otherwise \u2014 do NOT pay again." : "This Coinbase link already has a funded Rozo order (it may have been paid elsewhere). Do NOT pay again \u2014 escalate for manual reconciliation.",
-      moneyDetected: true,
-      evidence: { ...evidence, receipt: signal.receipt, receiptUnparsable: signal.unparsable }
-    };
-  }
-  if (payment?.status !== UNPAID_STATUS) {
-    const terminal = ["payment_expired", "payment_bounced", "payment_refunded"].includes(
-      payment?.status
-    );
-    return {
-      ok: false,
-      code: terminal ? "ORDER_NOT_PAYABLE" : "ORDER_ALREADY_FUNDED",
-      reason: `Existing order status is "${payment?.status ?? "unknown"}", not "${UNPAID_STATUS}".`,
-      moneyDetected: !terminal,
-      evidence
-    };
-  }
-  const wantChain = String(requested?.chainId ?? "").trim();
-  const wantToken = String(requested?.tokenSymbol ?? "").trim().toUpperCase();
-  const gotChain = String(source.chainId ?? "").trim();
-  const gotToken = String(source.tokenSymbol ?? "").trim().toUpperCase();
-  if (!gotChain || !gotToken || gotChain !== wantChain || gotToken !== wantToken) {
-    return {
-      ok: false,
-      code: "REUSED_SOURCE_MISMATCH",
-      reason: `The order expects ${gotToken || "?"} on chain ${gotChain || "?"}, but you chose ${wantToken} on chain ${wantChain}. Paying the wrong asset or network is usually unrecoverable.`,
-      moneyDetected: false,
-      evidence
-    };
-  }
-  const deposit = validateDepositInstructions(source);
-  if (!deposit.ok) {
-    return {
-      ok: false,
-      code: deposit.code,
-      reason: deposit.reason,
-      moneyDetected: false,
-      evidence
-    };
-  }
-  return { ok: true, code: null, reason: null, moneyDetected: false, evidence, deposit };
-}
-function verifyCreateAgainstQuote({ snapshot: snapshot2, created, requested }) {
-  const drift = [];
-  const require2 = (field, a, b, normalize = defaultNormalize) => {
-    const na = normalize(a);
-    const nb = normalize(b);
-    if (na === null) {
-      drift.push({ field, quoted: null, created: nb, note: "missing in quote" });
-      return;
-    }
-    if (nb === null) {
-      drift.push({ field, quoted: na, created: null, note: "missing in create response" });
-      return;
-    }
-    if (na !== nb) drift.push({ field, quoted: na, created: nb });
-  };
-  require2("linkId", snapshot2?.linkId, created?.linkId);
-  require2("merchant", snapshot2?.merchant, created?.merchant, normalizeMerchant);
-  require2("original", snapshot2?.original, created?.original, normalizeDecimal);
-  require2("callerPays", snapshot2?.callerPays, created?.callerPays, normalizeDecimal);
-  const wantChain = String(requested?.chainId ?? "").trim();
-  const wantToken = String(requested?.tokenSymbol ?? "").trim().toUpperCase();
-  const gotChain = String(created?.source?.chainId ?? "").trim();
-  const gotToken = String(created?.source?.tokenSymbol ?? "").trim().toUpperCase();
-  if (!gotChain || gotChain !== wantChain) {
-    drift.push({ field: "source.chainId", quoted: wantChain, created: gotChain || null });
-  }
-  if (!gotToken || gotToken !== wantToken) {
-    drift.push({ field: "source.tokenSymbol", quoted: wantToken, created: gotToken || null });
-  }
-  if (drift.length) {
-    return {
-      ok: false,
-      code: "CREATE_DRIFT",
-      reason: "The created order does not match what was quoted. Refusing to continue.",
-      drift
-    };
-  }
-  const disc = created?.discount;
-  if (disc !== void 0 && disc !== null && normalizeDecimal(disc) !== "0") {
-    return {
-      ok: false,
-      code: "NO_DISCOUNT_VIOLATION",
-      reason: `Server reported a discount of "${disc}"; this flow must charge the full invoice.`,
-      drift: [{ field: "discount", quoted: "0", created: String(disc) }]
-    };
-  }
-  if (created?.callerPays !== void 0 && created?.original !== void 0 && normalizeDecimal(created.callerPays) !== normalizeDecimal(created.original)) {
-    return {
-      ok: false,
-      code: "NO_DISCOUNT_VIOLATION",
-      reason: `callerPays (${created.callerPays}) differs from the invoice amount (${created.original}).`,
-      drift: [
-        { field: "callerPays", quoted: String(created.original), created: String(created.callerPays) }
-      ]
-    };
-  }
-  return { ok: true, code: null, reason: null, drift: [] };
-}
-function defaultNormalize(v) {
-  if (v === null || v === void 0) return null;
-  const s = String(v).trim();
-  return s === "" ? null : s;
-}
-function normalizeMerchant(v) {
-  if (v === null || v === void 0) return null;
-  if (typeof v === "object") {
-    const name = v.name ?? v.merchantName ?? null;
-    return name ? String(name).trim() || null : null;
-  }
-  const s = String(v).trim();
-  return s === "" ? null : s;
-}
-function normalizeDecimal(v) {
-  if (v === null || v === void 0) return null;
-  const s = String(v).trim();
-  if (!/^\d+(\.\d+)?$/.test(s)) return s;
-  const [w, f = ""] = s.split(".");
-  const frac = f.replace(/0+$/, "");
-  const whole = w.replace(/^0+(?=\d)/, "");
-  return frac ? `${whole}.${frac}` : whole;
-}
-function checkPayable(statusResponse, now = Date.now()) {
-  const cb = statusResponse?.coinbase;
-  if (!cb) {
-    return {
-      ok: false,
-      code: "LINK_NO_LONGER_PAYABLE",
-      reason: "invoice-status returned no Coinbase state; cannot prove the link is still payable.",
-      derived: null
-    };
-  }
-  const protocolVersion = cb.protocolVersion ?? statusResponse?.protocolVersion ?? null;
-  const derived = {
-    protocolVersion,
-    status: cb.status ?? null,
-    settled: cb.settled ?? null,
-    usageCount: cb.usageCount ?? null,
-    maxUsage: cb.maxUsage ?? null,
-    preApprovalExpiry: cb.preApprovalExpiry ?? null
-  };
-  if (cb.settled === true) {
-    return {
-      ok: false,
-      code: "LINK_NO_LONGER_PAYABLE",
-      reason: "The Coinbase resource is already settled \u2014 someone has paid it.",
-      derived
-    };
-  }
-  if (protocolVersion === "v3") {
-    if (!cb.status) {
-      return {
-        ok: false,
-        code: "LINK_PAYABILITY_UNKNOWN",
-        reason: "The Payment Session response carries no status; cannot prove it is still payable.",
-        derived
-      };
-    }
-    if (cb.status !== "PAYMENT_SESSION_STATUS_CREATED") {
-      return {
-        ok: false,
-        code: "LINK_NO_LONGER_PAYABLE",
-        reason: `Payment Session status is ${cb.status}; only PAYMENT_SESSION_STATUS_CREATED is payable.`,
-        derived
-      };
-    }
-    return { ok: true, code: null, reason: null, derived };
-  }
-  const usage2 = Number(cb.usageCount);
-  const max = Number(cb.maxUsage);
-  if (cb.usageCount === null || cb.usageCount === void 0 || cb.maxUsage === null || cb.maxUsage === void 0 || !Number.isFinite(usage2) || !Number.isFinite(max)) {
-    return {
-      ok: false,
-      code: "LINK_PAYABILITY_UNKNOWN",
-      reason: "The payment link response is missing usageCount/maxUsage; cannot prove it has not already been used.",
-      derived
-    };
-  }
-  if (usage2 >= max) {
-    return {
-      ok: false,
-      code: "LINK_NO_LONGER_PAYABLE",
-      reason: `Payment link already used (${usage2}/${max}).`,
-      derived
-    };
-  }
-  return { ok: true, code: null, reason: null, derived };
-}
-function classifyStatus({ payment, routerState, coinbase, now = Date.now(), viewsFailed = false }) {
-  const source = payment?.source || {};
-  const hasTx = Boolean(source.txHash);
-  const confirmed = Boolean(source.confirmedAt);
-  const signal = receiptSignal(source);
-  const receipt = signal.receipt;
-  const moneyDetected = hasTx || confirmed || signal.money;
-  const routerStatus = routerState?.status ?? null;
-  const mk = (state, detail, opts = {}) => ({
-    state,
-    moneyDetected: Boolean(moneyDetected),
-    terminal: Boolean(opts.terminal),
-    escalate: Boolean(opts.escalate),
-    unknown: Boolean(opts.unknown),
-    detail,
-    receipt,
-    receiptUnparsable: signal.unparsable,
-    routerStatus
-  });
-  if (viewsFailed || !payment?.status && !routerStatus && !coinbase) {
-    return mk(
-      "unknown",
-      "Could not read the order state from the backend. This is NOT evidence that nothing has been paid \u2014 do not act on it.",
-      { unknown: true }
-    );
-  }
-  if (signal.unparsable) {
-    return mk(
-      "stuck_after_payment",
-      "The order reports an amountReceived that cannot be read. Treating it as funded until a human confirms otherwise.",
-      { escalate: true }
-    );
-  }
-  if (routerStatus === "paid" || coinbase?.settled === true) {
-    return mk("settled", "Coinbase invoice settled by the funder wallet.", { terminal: true });
-  }
-  if (routerStatus === "failed_pay_invoice" || routerStatus === "failed_insufficient_balance") {
-    return mk(
-      "stuck_after_payment",
-      `Fulfillment failed (${routerStatus}) after the pay-in. Do not pay again \u2014 escalate for manual reconciliation.`,
-      { terminal: false, escalate: true }
-    );
-  }
-  if (moneyDetected && receipt && receipt.state === "underpaid") {
-    return mk(
-      "underpaid",
-      "Less arrived than the order requires. Do NOT send a top-up to the same address \u2014 escalate.",
-      { escalate: true }
-    );
-  }
-  if (moneyDetected && receipt && receipt.state === "overpaid") {
-    return mk("payin_detected", "More arrived than required; escalate for operator follow-up.", {
-      escalate: true
-    });
-  }
-  switch (payment?.status) {
-    case "payment_unpaid": {
-      if (moneyDetected) {
-        return mk("payin_detected", "Pay-in seen on chain, waiting for confirmations.");
-      }
-      const exp = payment?.expiresAt ? Date.parse(payment.expiresAt) : NaN;
-      if (Number.isFinite(exp) && exp < now) {
-        return mk("expired_unfunded", "The order expired before any funds arrived. Safe to retry.", {
-          terminal: true
-        });
-      }
-      return mk("awaiting_deposit", "Waiting for the deposit.");
-    }
-    case "payment_started":
-      return mk("payin_detected", "Pay-in seen, waiting for confirmations.");
-    case "payment_payin_completed":
-      return mk("payin_confirmed", "Pay-in confirmed; fulfillment can start.");
-    case "payment_bridging":
-    case "payment_payout_started":
-      return mk("bridging", "Bridging the pay-in toward the funder.");
-    case "payment_payout_completed":
-      return mk(
-        routerStatus === "paying" ? "paying_coinbase" : "bridging",
-        routerStatus === "paying" ? "Funder is paying the Coinbase invoice." : "Payout landed; waiting on Coinbase settlement."
-      );
-    case "payment_completed":
-      return mk(
-        "paying_coinbase",
-        "The bridge leg completed, but Coinbase settlement is not yet confirmed. Keep polling."
-      );
-    case "payment_expired":
-      return moneyDetected ? mk("stuck_after_payment", "Order expired AFTER funds arrived \u2014 escalate immediately.", {
-        escalate: true
-      }) : mk("expired_unfunded", "Order expired unfunded. Safe to retry.", { terminal: true });
-    case "payment_bounced":
-    case "payment_refunded":
-      return mk("stuck_after_payment", `Order ended as ${payment.status} \u2014 escalate.`, {
-        escalate: true
-      });
-    default:
-      break;
-  }
-  if (routerStatus === "payin_seen") return mk("payin_confirmed", "Router saw the pay-in.");
-  if (routerStatus === "paying") return mk("paying_coinbase", "Funder is paying Coinbase.");
-  return mk(
-    moneyDetected ? "stuck_after_payment" : "unknown",
-    `Unrecognized backend status "${payment?.status ?? "unknown"}"; not assuming anything about it.`,
-    { escalate: Boolean(moneyDetected), unknown: !moneyDetected }
-  );
-}
-
-// scripts/src/quote.mjs
-function derivePayable(snapshot2, now) {
-  const cb = snapshot2.coinbase;
-  if (!cb) {
-    return { payable: false, code: "LINK_NO_LONGER_PAYABLE", reason: "No Coinbase state in the quote." };
-  }
-  if (snapshot2.protocolVersion === "v3" && cb.status && cb.status !== "PAYMENT_SESSION_STATUS_CREATED") {
-    return {
-      payable: false,
-      code: "LINK_NO_LONGER_PAYABLE",
-      reason: `Payment Session status is ${cb.status}; only PAYMENT_SESSION_STATUS_CREATED is payable.`
-    };
-  }
-  if (cb.usageCount !== null && cb.usageCount !== void 0) {
-    const max = cb.maxUsage ?? 1;
-    if (Number(cb.usageCount) >= Number(max)) {
-      return {
-        payable: false,
-        code: "LINK_NO_LONGER_PAYABLE",
-        reason: `This payment link has already been used (${cb.usageCount}/${max}).`
-      };
-    }
-  }
-  const exp = parseDeadline(cb.preApprovalExpiry);
-  if (exp === null) {
-    return {
-      payable: false,
-      code: "EXPIRY_UNPARSABLE",
-      reason: "The Coinbase expiry is missing or unparsable; refusing to treat it as payable."
-    };
-  }
-  if (exp <= now) {
-    return {
-      payable: false,
-      code: "LINK_NO_LONGER_PAYABLE",
-      reason: `This payment link expired at ${new Date(exp).toISOString()}. Ask for a fresh one.`
-    };
-  }
-  return { payable: true, code: null, reason: null, expiryMs: exp };
-}
-async function main(argv) {
-  const args = parseArgs(argv);
-  const url = args.url || args._[0];
-  if (!url || url === true) {
-    usage('Required: --url "<coinbase payment link or paymentSession url/id>"');
-  }
-  const { linkId, kind } = extractLinkId(String(url));
-  let chosenSource = null;
-  if (args.chain || args.token) {
-    const chainId = String(args.chain ?? "").trim();
-    const tokenSymbol = String(args.token ?? "").trim().toUpperCase();
-    if (!chainId || !tokenSymbol) {
-      usage("--chain and --token must be given together, e.g. --chain 900 --token USDT");
-    }
-    if (!isSupportedSource(chainId, tokenSymbol)) {
-      throw new SkillError(
-        "UNSUPPORTED_SOURCE",
-        `${tokenSymbol} on ${chainName(chainId)} is not a supported source.`,
-        { supported: SUPPORTED_SOURCES }
-      );
-    }
-    chosenSource = { chainId, tokenSymbol };
-  }
-  const now = Date.now();
-  const quote = await quoteInvoice({ url: String(url) });
-  const snapshot2 = snapshotFromQuote(quote);
-  const payability = derivePayable(snapshot2, now);
-  const payload = {
-    success: payability.payable,
-    step: "quote",
-    linkId: snapshot2.linkId ?? linkId,
-    linkKind: kind,
-    protocolVersion: snapshot2.protocolVersion,
-    merchant: snapshot2.merchant,
-    invoice: {
-      amount: snapshot2.original,
-      fiat: snapshot2.fiat
-    },
-    // No discount on this line: the caller pays the full invoice amount.
-    callerPays: snapshot2.callerPays,
-    discountPolicy: "none \u2014 callerPays equals the invoice amount",
-    coinbase: snapshot2.coinbase,
-    coinbaseExpiryIso: payability.expiryMs ? new Date(payability.expiryMs).toISOString() : null,
-    chosenSource,
-    supportedSources: SUPPORTED_SOURCES,
-    quoteReceipt: quote?.quoteReceipt ?? null,
-    quoteReceiptTtlSeconds: 60,
-    quoteReceiptNote: "Short-lived (~60s). create-order.js takes its own fresh quote; do not carry this over.",
-    snapshot: snapshot2,
-    nextStep: payability.payable ? "create-order.js --url <url> --chain <chainId> --token <SYMBOL>" : null
-  };
-  if (!payability.payable) {
-    payload.error = { code: payability.code, message: payability.reason };
-    emit(payload, EXIT_ERROR);
-  }
-  if (snapshot2.callerPays && snapshot2.original && normalizeDecimal(snapshot2.callerPays) !== normalizeDecimal(snapshot2.original)) {
-    payload.warnings = [
-      `callerPays (${snapshot2.callerPays}) differs from the invoice amount (${snapshot2.original}). This flow is supposed to charge the full invoice \u2014 do not proceed until that is explained.`
-    ];
-  }
-  emit(payload);
-}
-async function run(argv = process.argv.slice(2)) {
-  return main(argv);
-}
-
-// scripts/src/create-order.mjs
-function confirmTier(usdAmount) {
-  const usd = Number(usdAmount);
-  if (!Number.isFinite(usd)) return "explicit";
-  if (usd <= 1) return "silent";
-  if (usd <= 10) return "one-line";
-  return "explicit";
-}
-async function main2(argv) {
-  const args = parseArgs(argv);
-  const url = args.url || args._[0];
-  if (!url || url === true) usage('Required: --url "<coinbase payment link url or id>"');
-  const chainId = String(args.chain ?? "").trim();
-  const tokenSymbol = String(args.token ?? "").trim().toUpperCase();
-  if (!chainId || !tokenSymbol) {
-    usage("Required: --chain <chainId> --token <SYMBOL>. Run quote.js to see supported sources.");
-  }
-  if (!isSupportedSource(chainId, tokenSymbol)) {
-    throw new SkillError(
-      "UNSUPPORTED_SOURCE",
-      `${tokenSymbol} on ${chainName(chainId)} is not a supported source.`,
-      { supported: SUPPORTED_SOURCES }
-    );
-  }
-  const requested = { chainId, tokenSymbol };
-  const confirmed = Boolean(args.confirm);
-  let blacklist;
-  try {
-    blacklist = loadBlacklist();
-  } catch (err) {
-    throw new SkillError(
-      "BLACKLIST_UNAVAILABLE",
-      `Compromised-address list unusable: ${err.message} Refusing to proceed.`
-    );
-  }
-  const { linkId: parsedLinkId } = extractLinkId(String(url));
-  const quote = await quoteInvoice({ url: String(url) });
-  const snapshot2 = snapshotFromQuote(quote);
-  const quoteReceipt = quote?.quoteReceipt ?? null;
-  const created = await createInvoice({
-    url: String(url),
-    source: requested,
-    quoteReceipt
-  });
-  if (!created?.rozoPaymentId) {
-    throw new SkillError("CREATE_FAILED", "create-invoice returned no rozoPaymentId.", {
-      response: created
-    });
-  }
-  const rozoPaymentId = assertRozoPaymentId(created.rozoPaymentId);
-  const verify = verifyCreateAgainstQuote({ snapshot: snapshot2, created, requested });
-  if (!verify.ok) {
-    const onlySourceDrift = verify.drift.length > 0 && verify.drift.every((d) => d.field.startsWith("source."));
-    if (created.reused && onlySourceDrift) {
-      const existing = created.source || {};
-      const remainingMs = created.expiresAt ? Date.parse(created.expiresAt) - Date.now() : NaN;
-      emit(
-        {
-          success: false,
-          step: "reuse-source-mismatch",
-          error: {
-            code: "REUSED_SOURCE_MISMATCH",
-            message: `This link already has an unpaid order, created for ${existing.tokenSymbol ?? "?"} on chain ${existing.chainId ?? "?"}. You asked for ${tokenSymbol} on chain ${chainId}. Only one order exists per link at a time, so nothing new was created.`
-          },
-          linkId: created.linkId ?? parsedLinkId,
-          rozoPaymentId,
-          paymentLink: created.paymentLink ?? null,
-          existingOrder: {
-            rozoPaymentId,
-            chainId: existing.chainId ?? null,
-            tokenSymbol: existing.tokenSymbol ?? null,
-            expiresAt: created.expiresAt ?? null,
-            expiresIn: Number.isFinite(remainingMs) ? formatRemaining(remainingMs) : null
-          },
-          guidance: `Either pay the existing order with ${existing.tokenSymbol ?? "its own coin"} (re-run with --chain ${existing.chainId} --token ${existing.tokenSymbol}), or wait ${Number.isFinite(remainingMs) ? formatRemaining(remainingMs) : "for it to expire"} for it to expire and then create a new one. Unpaid orders cost nothing.`
-        },
-        EXIT_ERROR
-      );
-    }
-    emit(
-      {
-        success: false,
-        step: "verify-create",
-        error: { code: verify.code, message: verify.reason, details: { drift: verify.drift } },
-        linkId: created.linkId ?? parsedLinkId,
-        rozoPaymentId,
-        paymentLink: created.paymentLink ?? null,
-        guidance: "The order exists but was NOT validated. Do not fund it. Let it expire unfunded."
-      },
-      EXIT_ERROR
-    );
-  }
-  const payment = await getPayment(rozoPaymentId);
-  const source = payment?.source || {};
-  const guard = reuseGuard({ payment, requested, reused: created.reused });
-  if (!guard.ok) {
-    emit(
-      {
-        success: false,
-        step: "reuse-guard",
-        error: { code: guard.code, message: guard.reason, details: guard.evidence },
-        linkId: created.linkId ?? parsedLinkId,
-        rozoPaymentId,
-        paymentLink: created.paymentLink ?? null,
-        moneyDetected: guard.moneyDetected,
-        guidance: guard.moneyDetected ? "MONEY DETECTED. Do not pay again, do not retry into a new order. Preserve every id and tx hash above and escalate to the operator for manual reconciliation." : "Abort this run. Nothing was funded."
-      },
-      EXIT_ERROR
-    );
-  }
-  const lightning = String(source.chainId) === "lightning";
-  const bolt11 = source.lnInvoice ?? payment?.lnInvoice ?? null;
-  const expiry = checkExpiry({
-    now: Date.now(),
-    chainId: source.chainId ?? chainId,
-    intentExpiresAt: payment?.expiresAt,
-    coinbaseExpiry: snapshot2?.coinbase?.preApprovalExpiry,
-    // For Lightning the BOLT11's own validity is an extra gate. We only have a
-    // separate expiry if the backend exposes one; otherwise the intent expiry
-    // governs and we still require the 10-minute floor via the margin.
-    ...lightning ? { bolt11ExpiresAt: payment?.expiresAt } : {}
-  });
-  if (!expiry.ok) {
-    emit(
-      {
-        success: false,
-        step: "expiry-guard",
-        error: { code: expiry.code, message: expiry.reason, details: expiry },
-        linkId: created.linkId ?? parsedLinkId,
-        rozoPaymentId,
-        guidance: "Not enough time remains to fund, bridge and settle safely. Ask the merchant for a fresh link and start over. Do not fund this order."
-      },
-      EXIT_ERROR
-    );
-  }
-  try {
-    assertNotBlacklisted(
-      [
-        {
-          address: source.receiverAddress,
-          family: chainFamily(source.chainId),
-          role: "deposit address"
-        }
-      ],
-      blacklist
-    );
-  } catch (err) {
-    emit(
-      {
-        success: false,
-        step: "blacklist",
-        error: { code: err.code, message: err.message },
-        linkId: created.linkId ?? parsedLinkId,
-        rozoPaymentId,
-        guidance: "Do NOT send anything. Report this to the operator immediately."
-      },
-      EXIT_ERROR
-    );
-  }
-  const statusNow = await invoiceStatus({ linkId: created.linkId ?? parsedLinkId });
-  const payable = checkPayable(statusNow, Date.now());
-  if (!payable.ok) {
-    emit(
-      {
-        success: false,
-        step: "payability-revalidation",
-        error: { code: payable.code, message: payable.reason, details: payable.derived },
-        linkId: created.linkId ?? parsedLinkId,
-        rozoPaymentId,
-        guidance: "The Coinbase resource stopped being payable between quote and now (someone else may have paid it). Do NOT fund this order."
-      },
-      EXIT_ERROR
-    );
-  }
-  createOrderRecord({
-    rozoPaymentId,
-    linkId: created.linkId ?? parsedLinkId,
-    paymentLink: created.paymentLink ?? null,
-    merchant: created.merchant ?? snapshot2.merchant,
-    invoiceAmount: created.original ?? snapshot2.original,
-    source: { chainId: source.chainId, tokenSymbol: source.tokenSymbol },
-    receiverAddress: source.receiverAddress,
-    receiverMemo: source.receiverMemo ?? null,
-    amount: source.amount,
-    amountUnit: source.amountUnit ?? null,
-    expiresAt: payment?.expiresAt ?? null
-  });
-  const usd = created.original ?? snapshot2.original;
-  const family = chainFamily(source.chainId);
-  const tier = confirmTier(usd);
-  const depositInfo = guard.deposit;
-  if (confirmed) {
-    recordConfirmation(rozoPaymentId, { source, invoiceAmount: usd, tier });
-  }
-  const memoRequirement = lightning ? "Lightning invoices carry their own routing data; there is no separate memo." : source.receiverMemo ? "This deposit REQUIRES the memo/tag below. Sending without it will very likely lose the funds." : family === "stellar" ? "A Stellar deposit always requires a memo." : "This deposit does not use a memo. Leave the memo field empty.";
-  emit({
-    success: true,
-    step: "create-order",
-    confirmed,
-    reused: Boolean(created.reused),
-    reusedNote: created.reused ? `An existing unpaid order for this link was reused (${rozoPaymentId}), valid for another ${formatRemaining(expiry.msRemaining)}. Nothing new was created.` : null,
-    orderCost: "Creating an order moves no money. An order you never fund simply expires and costs nothing.",
-    linkId: created.linkId ?? parsedLinkId,
-    rozoPaymentId,
-    paymentLink: created.paymentLink ?? null,
-    merchant: normalizeMerchant(created.merchant ?? snapshot2.merchant),
-    invoice: { amount: usd, currency: snapshot2?.fiat?.currency ?? "USD" },
-    callerPays: created.callerPays ?? snapshot2.callerPays,
-    discount: created.discount ?? "0",
-    // Machine-readable, copy-pastable — and WITHHELD until --confirm. This is
-    // the only place the full address, memo and BOLT11 ever appear.
-    deposit: confirmed ? {
-      chainId: source.chainId,
-      chain: chainName(source.chainId),
-      tokenSymbol: source.tokenSymbol,
-      tokenAddress: source.tokenAddress || null,
-      // Lightning has no deposit address: the BOLT11 IS the instruction.
-      receiverAddress: lightning ? null : source.receiverAddress,
-      receiverMemo: source.receiverMemo ?? null,
-      // Stellar memos are TEXT even when they look numeric. Sending one as
-      // MEMO_ID produces a different memo and the payment will not match.
-      receiverMemoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
-      amount: source.amount,
-      amountUnit: source.amountUnit ?? null,
-      isSats: isSatsUnit(source.amountUnit),
-      lnInvoice: bolt11 || null,
-      payTo: depositInfo.payTo,
-      expiresAt: payment?.expiresAt ?? null,
-      expiresIn: formatRemaining(expiry.msRemaining)
-    } : null,
-    depositWithheld: !confirmed,
-    // Safe for prose / chat.
-    display: {
-      chain: chainName(source.chainId),
-      token: source.tokenSymbol,
-      amount: formatAmount(source),
-      isSats: isSatsUnit(source.amountUnit),
-      payToMasked: maskAddress2(depositInfo.payTo),
-      receiverMemoMasked: maskMemo(source.receiverMemo),
-      hasMemo: Boolean(source.receiverMemo),
-      memoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
-      memoRequirement
-    },
-    expiry: {
-      intentExpiresAt: payment?.expiresAt ?? null,
-      coinbaseExpiry: snapshot2?.coinbase?.preApprovalExpiry ?? null,
-      effectiveDeadlineIso: new Date(expiry.effectiveDeadlineMs).toISOString(),
-      // A duration, not just a timestamp: this is what a payer actually needs.
-      expiresIn: formatRemaining(expiry.msRemaining),
-      msRemaining: expiry.msRemaining,
-      marginMinutes: Math.round(expiry.marginMs / 6e4),
-      minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4)
-    },
-    confirmation: {
-      required: tier,
-      satisfied: confirmed,
-      note: confirmed ? "Confirmation recorded. The send scripts will verify it against the live deposit data." : "BINDING CONFIRMATION POINT. Present chain, token, exact amount, the masked address, the memo requirement, both expiries and the reused flag, and get an explicit yes. Then re-run this command with --confirm to release the full deposit details.",
-      warnings: [
-        "Wrong token, wrong network, or wrong amount is usually unrecoverable.",
-        memoRequirement,
-        "Send exactly once. A second send to the same one-time address is not guaranteed to be credited.",
-        "The deposit amount can exceed the invoice: it includes the bridge and network fees."
-      ]
-    },
-    blacklist: {
-      checked: true,
-      addressesInList: blacklist.entries.length,
-      digest: blacklist.provenance.addressesSha256
-    },
-    nextStep: confirmed ? {
-      modeA: "Give the user the `deposit` block, then poll: status.js --rozo-payment-id <id>",
-      modeB: family === "evm" ? `send-evm.js --rozo-payment-id ${rozoPaymentId} --send  (requires ROZO_CHECKOUT_EVM_KEY)` : family === "solana" ? `send-sol.js --rozo-payment-id ${rozoPaymentId} --send  (requires ROZO_CHECKOUT_SOL_KEY)` : "not available for this chain \u2014 pay from a wallet (Mode A)"
-    } : {
-      confirm: "Re-run this exact command with --confirm once the user has said yes."
-    }
-  });
-}
-async function run2(argv = process.argv.slice(2)) {
-  return main2(argv);
-}
-
-// scripts/src/status.mjs
-var POLL_INTERVAL_MS = 1e4;
-var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function snapshot({ rozoPaymentId, linkId }) {
-  let status = null;
-  let statusError = null;
-  try {
-    status = await invoiceStatus({ linkId, rozoPaymentId });
-  } catch (err) {
-    statusError = { code: err.code, message: err.message };
-  }
-  let id = rozoPaymentId || status?.rozo_payment_id || null;
-  let idSource = rozoPaymentId ? "argument" : status?.rozo_payment_id ? "invoice-status" : null;
-  if (!id && linkId) {
-    const local = findByLinkId(linkId);
-    if (local) {
-      id = local.rozoPaymentId;
-      idSource = "local state";
-    }
-  }
-  let payment = null;
-  let paymentError = null;
-  if (id && isRozoPaymentId(id)) {
-    try {
-      payment = await getPayment(id);
-    } catch (err) {
-      paymentError = { code: err.code, message: err.message };
-    }
-  }
-  const viewsFailed = Boolean(statusError) && !payment;
-  const verdict = classifyStatus({
-    payment: payment || status?.rozoPayment || {},
-    routerState: status?.routerState,
-    coinbase: status?.coinbase,
-    viewsFailed
-  });
-  const source = payment?.source || status?.rozoPayment?.source || {};
-  return {
-    rozoPaymentId: id,
-    rozoPaymentIdSource: idSource,
-    // Without the authoritative payment object we are reading a partial view.
-    authoritativeView: Boolean(payment),
-    linkId: linkId || status?.pl_id || null,
-    state: verdict.state,
-    unknown: verdict.unknown,
-    moneyDetected: verdict.moneyDetected,
-    terminal: verdict.terminal,
-    escalate: verdict.escalate,
-    detail: verdict.detail,
-    backend: {
-      paymentStatus: payment?.status ?? status?.rozoPayment?.status ?? null,
-      routerStatus: verdict.routerStatus,
-      coinbaseSettled: status?.coinbase?.settled ?? null,
-      coinbaseStatus: status?.coinbase?.status ?? null
-    },
-    payin: {
-      expected: source.amount ? formatAmount(source) : null,
-      received: source.amountReceived ?? null,
-      receipt: verdict.receipt,
-      txHash: source.txHash ?? null,
-      confirmedAt: source.confirmedAt ?? null,
-      senderAddressMasked: source.senderAddress ? maskAddress2(source.senderAddress) : null,
-      chain: source.chainId ? chainName(source.chainId) : null
-    },
-    expiry: (() => {
-      const iso = payment?.expiresAt ?? status?.rozoPayment?.expiresAt ?? null;
-      if (!iso) return { expiresAt: null, expiresIn: null, msRemaining: null };
-      const ms = Date.parse(iso) - Date.now();
-      return {
-        expiresAt: iso,
-        expiresIn: formatRemaining(ms),
-        msRemaining: Number.isFinite(ms) ? ms : null
-      };
-    })(),
-    payout: {
-      txHash: payment?.destination?.txHash ?? status?.rozoPayment?.destination?.txHash ?? null,
-      confirmedAt: payment?.destination?.confirmedAt ?? status?.rozoPayment?.destination?.confirmedAt ?? null
-    },
-    errors: [statusError, paymentError].filter(Boolean)
-  };
-}
-async function main3(argv) {
-  const args = parseArgs(argv);
-  const rozoPaymentId = args["rozo-payment-id"] || (isRozoPaymentId(args._[0]) ? args._[0] : null);
-  const linkId = args["link-id"] || (!rozoPaymentId ? args._[0] : null);
-  if (!rozoPaymentId && !linkId) {
-    usage("Required: --rozo-payment-id <uuid> and/or --link-id <pl_* | paymentSession_*>");
-  }
-  const watch = Boolean(args.watch);
-  const timeoutMs = Math.max(0, Number(args.timeout ?? 600) * 1e3);
-  const deadline = Date.now() + timeoutMs;
-  let result = await snapshot({ rozoPaymentId, linkId });
-  const history = [{ at: (/* @__PURE__ */ new Date()).toISOString(), state: result.state }];
-  while (watch && !result.terminal && !result.escalate && !result.unknown && Date.now() < deadline) {
-    await sleep(POLL_INTERVAL_MS);
-    const next = await snapshot({ rozoPaymentId: result.rozoPaymentId || rozoPaymentId, linkId });
-    if (next.state !== result.state) history.push({ at: (/* @__PURE__ */ new Date()).toISOString(), state: next.state });
-    result = next;
-  }
-  const guidance = result.escalate ? "MONEY DETECTED and the order is not on a healthy path. Do NOT pay again and do NOT create a new order for this link. Preserve linkId, rozoPaymentId and every tx hash, then escalate to the operator for manual reconciliation." : result.unknown ? "The order state could not be established. This is NOT evidence that nothing was paid \u2014 do not create a new order and do not send again on the strength of it. Retry, or pass --rozo-payment-id so the authoritative pay-in view can be read." : !result.authoritativeView ? "Only the fulfilment view was readable; the pay-in view is unavailable, so the money-detected rule cannot be enforced. Pass --rozo-payment-id for a complete answer." : result.state === "expired_unfunded" ? "Nothing was funded, so nothing was lost. Start a fresh order with: rozo-checkout pay <coinbase-link> --with <coin>  (or create-order.js --url <link> --chain <id> --token <SYMBOL>)" : result.terminal ? "Done." : "Still in flight. Poll again in ~10s.";
-  const unresolved = watch && !result.terminal && !result.escalate && !result.unknown;
-  const failed = result.escalate || result.unknown || !result.authoritativeView;
-  emit(
-    {
-      success: !failed,
-      step: "status",
-      ...result,
-      history,
-      guidance,
-      timedOut: unresolved
-    },
-    failed ? EXIT_ERROR : unresolved ? EXIT_UNCONFIRMED : 0
-  );
-}
-async function run3(argv = process.argv.slice(2)) {
-  return main3(argv);
-}
-
-// scripts/src/lib/keys.mjs
-import fs4 from "node:fs";
-import path4 from "node:path";
-import { execFileSync } from "node:child_process";
-var ENV_FILE_RE = /^\.env(\..+)?$/;
-var PUBLIC_ENV_RE = /^\.env\.(example|sample|template)$/;
-function insideGitWorkTree(dir, whatFor) {
-  try {
-    return execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
-      cwd: dir,
-      stdio: ["ignore", "pipe", "pipe"],
-      encoding: "utf8"
-    }).trim() === "true";
-  } catch (err) {
-    const stderr = String(err?.stderr || "");
-    if (/not a git repository|does not appear to be a git repository/i.test(stderr)) return false;
-    throw new SkillError(
-      "TRACKED_DOTENV_UNVERIFIABLE",
-      `git could not be consulted (${err?.code || "unknown error"}), so it cannot be proved that ${whatFor} is untracked. Refusing rather than assuming it is safe.`
-    );
-  }
-}
-function assertNotTrackedByGit(file) {
-  const dir = path4.dirname(path4.resolve(file));
-  const base = path4.basename(file);
-  if (!insideGitWorkTree(dir, "this key file")) return { checked: true, tracked: false };
-  let out2;
-  try {
-    out2 = execFileSync("git", ["ls-files", "-z", "--", base], {
-      cwd: dir,
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf8"
-    });
-  } catch {
-    throw new SkillError(
-      "TRACKED_DOTENV_UNVERIFIABLE",
-      "git could not report whether this key file is tracked. Refusing to use it."
-    );
-  }
-  if (out2.split("\0").filter(Boolean).length) {
-    throw new SkillError(
-      "TRACKED_KEYFILE",
-      `${base} is tracked by git. A committed key is one push from being public \u2014 untrack it (git rm --cached ${base}) and gitignore it before using it to sign.`
-    );
-  }
-  return { checked: true, tracked: false };
-}
-function assertNoTrackedDotEnv(cwd = process.cwd()) {
-  let candidates = [];
-  try {
-    candidates = fs4.readdirSync(cwd).filter((f) => ENV_FILE_RE.test(f) && !PUBLIC_ENV_RE.test(f));
-  } catch (err) {
-    throw new SkillError(
-      "TRACKED_DOTENV_UNVERIFIABLE",
-      `Could not list this directory (${err?.code || "unknown error"}), so it cannot be proved that no tracked .env file is present. Refusing to use hot-wallet keys here.`
-    );
-  }
-  if (candidates.length === 0) return { checked: true, tracked: false, candidates: [] };
-  let insideRepo;
-  try {
-    insideRepo = execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
-      cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      encoding: "utf8"
-    }).trim() === "true";
-  } catch (err) {
-    const stderr = String(err?.stderr || "");
-    const notARepo = /not a git repository|does not appear to be a git repository/i.test(stderr);
-    if (notARepo) return { checked: true, tracked: false, candidates };
-    throw new SkillError(
-      "TRACKED_DOTENV_UNVERIFIABLE",
-      `Found ${candidates.length} .env file(s) here, but git could not be consulted (${err?.code || "unknown error"}), so it cannot be proved they are untracked. Refusing to use hot-wallet keys in this directory.`
-    );
-  }
-  if (!insideRepo) return { checked: true, tracked: false, candidates };
-  let out2;
-  try {
-    out2 = execFileSync("git", ["ls-files", "-z", "--", ...candidates], {
-      cwd,
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf8"
-    });
-  } catch {
-    throw new SkillError(
-      "TRACKED_DOTENV_UNVERIFIABLE",
-      "git could not report whether the .env file(s) in this directory are tracked. Refusing to use hot-wallet keys rather than assuming they are safe."
-    );
-  }
-  const tracked = out2.split("\0").filter(Boolean);
-  if (tracked.length) {
-    throw new SkillError(
-      "TRACKED_DOTENV",
-      `These env file(s) are tracked by git: ${tracked.join(", ")}. Refusing to use hot-wallet keys here \u2014 untrack them (git rm --cached <file>) and gitignore them first.`
-    );
-  }
-  return { checked: true, tracked: false, candidates };
-}
-
 // scripts/src/lib/key-source.mjs
 import fs5 from "node:fs";
 import path5 from "node:path";
@@ -54771,6 +53548,104 @@ function http(url, config = {}) {
 init_encodeFunctionData();
 init_keccak256();
 
+// scripts/src/lib/keys.mjs
+import fs4 from "node:fs";
+import path4 from "node:path";
+import { execFileSync } from "node:child_process";
+var ENV_FILE_RE = /^\.env(\..+)?$/;
+var PUBLIC_ENV_RE = /^\.env\.(example|sample|template)$/;
+function insideGitWorkTree(dir, whatFor) {
+  try {
+    return execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
+      cwd: dir,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8"
+    }).trim() === "true";
+  } catch (err) {
+    const stderr = String(err?.stderr || "");
+    if (/not a git repository|does not appear to be a git repository/i.test(stderr)) return false;
+    throw new SkillError(
+      "TRACKED_DOTENV_UNVERIFIABLE",
+      `git could not be consulted (${err?.code || "unknown error"}), so it cannot be proved that ${whatFor} is untracked. Refusing rather than assuming it is safe.`
+    );
+  }
+}
+function assertNotTrackedByGit(file) {
+  const dir = path4.dirname(path4.resolve(file));
+  const base = path4.basename(file);
+  if (!insideGitWorkTree(dir, "this key file")) return { checked: true, tracked: false };
+  let out2;
+  try {
+    out2 = execFileSync("git", ["ls-files", "-z", "--", base], {
+      cwd: dir,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8"
+    });
+  } catch {
+    throw new SkillError(
+      "TRACKED_DOTENV_UNVERIFIABLE",
+      "git could not report whether this key file is tracked. Refusing to use it."
+    );
+  }
+  if (out2.split("\0").filter(Boolean).length) {
+    throw new SkillError(
+      "TRACKED_KEYFILE",
+      `${base} is tracked by git. A committed key is one push from being public \u2014 untrack it (git rm --cached ${base}) and gitignore it before using it to sign.`
+    );
+  }
+  return { checked: true, tracked: false };
+}
+function assertNoTrackedDotEnv(cwd = process.cwd()) {
+  let candidates = [];
+  try {
+    candidates = fs4.readdirSync(cwd).filter((f) => ENV_FILE_RE.test(f) && !PUBLIC_ENV_RE.test(f));
+  } catch (err) {
+    throw new SkillError(
+      "TRACKED_DOTENV_UNVERIFIABLE",
+      `Could not list this directory (${err?.code || "unknown error"}), so it cannot be proved that no tracked .env file is present. Refusing to use hot-wallet keys here.`
+    );
+  }
+  if (candidates.length === 0) return { checked: true, tracked: false, candidates: [] };
+  let insideRepo;
+  try {
+    insideRepo = execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8"
+    }).trim() === "true";
+  } catch (err) {
+    const stderr = String(err?.stderr || "");
+    const notARepo = /not a git repository|does not appear to be a git repository/i.test(stderr);
+    if (notARepo) return { checked: true, tracked: false, candidates };
+    throw new SkillError(
+      "TRACKED_DOTENV_UNVERIFIABLE",
+      `Found ${candidates.length} .env file(s) here, but git could not be consulted (${err?.code || "unknown error"}), so it cannot be proved they are untracked. Refusing to use hot-wallet keys in this directory.`
+    );
+  }
+  if (!insideRepo) return { checked: true, tracked: false, candidates };
+  let out2;
+  try {
+    out2 = execFileSync("git", ["ls-files", "-z", "--", ...candidates], {
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8"
+    });
+  } catch {
+    throw new SkillError(
+      "TRACKED_DOTENV_UNVERIFIABLE",
+      "git could not report whether the .env file(s) in this directory are tracked. Refusing to use hot-wallet keys rather than assuming they are safe."
+    );
+  }
+  const tracked = out2.split("\0").filter(Boolean);
+  if (tracked.length) {
+    throw new SkillError(
+      "TRACKED_DOTENV",
+      `These env file(s) are tracked by git: ${tracked.join(", ")}. Refusing to use hot-wallet keys here \u2014 untrack them (git rm --cached <file>) and gitignore them first.`
+    );
+  }
+  return { checked: true, tracked: false, candidates };
+}
+
 // scripts/src/lib/key-source.mjs
 var EVM_KEY_ENV = "ROZO_CHECKOUT_EVM_KEY";
 var SOL_KEY_ENV = "ROZO_CHECKOUT_SOL_KEY";
@@ -55041,6 +53916,18 @@ async function loadKeySource(plan, { family, env = process.env, askPassphrase } 
   const privateKey = decryptKeystoreV3(text, passphrase);
   return { privateKey, label: plan.label, kind: plan.kind };
 }
+function planSignability({
+  family,
+  keyfile,
+  envFile,
+  env = process.env,
+  cwd = process.cwd(),
+  applyEnvFile
+}) {
+  const probeEnv = { ...env };
+  if (applyEnvFile) applyEnvFile({ file: envFile, cwd, env: probeEnv });
+  return planKeySource({ family, keyfile, env: probeEnv });
+}
 function expandHome(p) {
   const s = String(p);
   if (s === "~") return os3.homedir();
@@ -55143,6 +54030,1131 @@ function applyDotenv({ file, cwd = process.cwd(), env = process.env } = {}) {
     applied,
     ignored: Object.keys(parsed).length - Object.keys(allowed).length
   };
+}
+
+// scripts/src/lib/http.mjs
+var DEFAULT_TIMEOUT_MS = 2e4;
+var USER_AGENT = "rozo-checkout-skill/1.0";
+async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: {
+        accept: "application/json",
+        "user-agent": USER_AGENT,
+        ...body !== void 0 ? { "content-type": "application/json" } : {}
+      },
+      body: body !== void 0 ? JSON.stringify(body) : void 0,
+      signal: controller.signal
+    });
+  } catch (err) {
+    throw new SkillError(
+      err?.name === "AbortError" ? "HTTP_TIMEOUT" : "HTTP_UNREACHABLE",
+      `${method} request failed: ${redact(err?.message || String(err))}`,
+      { url: redactUrl(url) }
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+  const text = await res.text();
+  let json = null;
+  if (text) {
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = null;
+    }
+  }
+  if (!res.ok) {
+    const code = json?.code || json?.error?.code || (typeof json?.error === "string" ? null : null) || `HTTP_${res.status}`;
+    const message = json?.message || (typeof json?.error === "string" ? json.error : json?.error?.message) || `HTTP ${res.status}`;
+    throw new SkillError(code, redact(String(message)), {
+      httpStatus: res.status,
+      url: redactUrl(url),
+      body: json ?? redact(text).slice(0, 800)
+    });
+  }
+  if (json === null) {
+    throw new SkillError("HTTP_BAD_JSON", "Endpoint returned a non-JSON body.", {
+      url: redactUrl(url),
+      snippet: redact(text).slice(0, 400)
+    });
+  }
+  return json;
+}
+function redactUrl(url) {
+  try {
+    const u = new URL(url);
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return String(url);
+  }
+}
+function getJson(url, opts) {
+  return request("GET", url, opts);
+}
+function postJson(url, body, opts) {
+  return request("POST", url, { ...opts, body });
+}
+
+// scripts/src/lib/api.mjs
+var MPP_BASE = process.env.ROZO_CHECKOUT_MPP_BASE || "https://apiserver.mpprouter.dev/v1/services/rozo-agent-api";
+var INTENTS_BASE = process.env.ROZO_CHECKOUT_INTENTS_BASE || "https://intentapiv4.rozo.ai/functions/v1/payment-api";
+async function quoteInvoice({ url, linkId }) {
+  const body = url ? { url } : { payment_id: linkId };
+  return postJson(`${MPP_BASE}/quote-invoice`, body);
+}
+async function createInvoice({ url, linkId, source, quoteReceipt }) {
+  const body = {
+    ...url ? { url } : { payment_id: linkId },
+    source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
+    ...quoteReceipt ? { quoteReceipt } : {}
+  };
+  return postJson(`${MPP_BASE}/create-invoice`, body);
+}
+async function invoiceStatus({ linkId, rozoPaymentId }) {
+  const qs = new URLSearchParams();
+  if (linkId) qs.set("payment_id", linkId);
+  if (rozoPaymentId) qs.set("rozo_payment_id", rozoPaymentId);
+  if (![...qs.keys()].length) {
+    throw new SkillError("USAGE", "invoiceStatus needs linkId or rozoPaymentId.");
+  }
+  return getJson(`${MPP_BASE}/invoice-status?${qs.toString()}`);
+}
+async function getPayment(rozoPaymentId) {
+  return getJson(`${INTENTS_BASE}/payments/${encodeURIComponent(rozoPaymentId)}`);
+}
+function snapshotFromQuote(quote) {
+  const cb = quote?.coinbasePayment || quote?.paymentLink || null;
+  return {
+    linkId: quote?.linkId ?? quote?.paymentId ?? null,
+    protocolVersion: quote?.protocolVersion ?? null,
+    merchant: quote?.merchant ?? null,
+    original: quote?.invoice?.amount ?? null,
+    callerPays: quote?.quote?.callerPays ?? null,
+    fiat: quote?.invoice?.fiat ?? null,
+    coinbase: cb ? {
+      id: cb.id ?? null,
+      status: cb.status ?? null,
+      usageCount: cb.usageCount ?? null,
+      maxUsage: cb.maxUsage ?? null,
+      preApprovalExpiry: cb.preApprovalExpiry ?? cb.expiresAt ?? null
+    } : null
+  };
+}
+
+// scripts/src/lib/expiry.mjs
+var MINUTE = 6e4;
+var MARGINS_MS = {
+  1: 10 * MINUTE,
+  56: 10 * MINUTE,
+  137: 10 * MINUTE,
+  8453: 10 * MINUTE,
+  900: 5 * MINUTE,
+  1500: 10 * MINUTE,
+  lightning: 10 * MINUTE
+};
+var BOLT11_MIN_VALIDITY_MS = 10 * MINUTE;
+var DEFAULT_MARGIN_MS = 10 * MINUTE;
+function formatRemaining(ms) {
+  if (!Number.isFinite(ms)) return "unknown";
+  if (ms <= 0) return "expired";
+  const totalMinutes = Math.floor(ms / 6e4);
+  if (totalMinutes < 1) return `${Math.floor(ms / 1e3)}s`;
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+function marginFor(chainId) {
+  const key = String(chainId);
+  return MARGINS_MS[key] ?? MARGINS_MS[chainId] ?? DEFAULT_MARGIN_MS;
+}
+function parseDeadline(value) {
+  if (value === null || value === void 0 || value === "") return null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value < 1e12 ? Math.round(value * 1e3) : Math.round(value);
+  }
+  const s = String(value).trim();
+  if (/^\d+$/.test(s)) {
+    const n = Number(s);
+    return n < 1e12 ? n * 1e3 : n;
+  }
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : null;
+}
+function checkExpiry({
+  now,
+  chainId,
+  intentExpiresAt,
+  coinbaseExpiry,
+  bolt11ExpiresAt = void 0
+}) {
+  const marginMs = marginFor(chainId);
+  const intentMs = parseDeadline(intentExpiresAt);
+  const coinbaseMs = parseDeadline(coinbaseExpiry);
+  const bolt11Ms = bolt11ExpiresAt === void 0 ? void 0 : parseDeadline(bolt11ExpiresAt);
+  const deadlines = { intentMs, coinbaseMs, bolt11Ms: bolt11Ms ?? null };
+  const base = {
+    marginMs,
+    effectiveDeadlineMs: null,
+    msRemaining: null,
+    msOfSlack: null,
+    deadlines
+  };
+  if (intentMs === null) {
+    return {
+      ...base,
+      ok: false,
+      code: "EXPIRY_UNPARSABLE",
+      reason: "Intent expiresAt is missing or unparsable."
+    };
+  }
+  if (coinbaseMs === null) {
+    return {
+      ...base,
+      ok: false,
+      code: "EXPIRY_UNPARSABLE",
+      reason: "Coinbase preApprovalExpiry is missing or unparsable."
+    };
+  }
+  const effective = Math.min(intentMs, coinbaseMs);
+  const msRemaining = effective - now;
+  const msOfSlack = msRemaining - marginMs;
+  const withDeadline = {
+    ...base,
+    effectiveDeadlineMs: effective,
+    msRemaining,
+    msOfSlack
+  };
+  if (msRemaining <= 0) {
+    return {
+      ...withDeadline,
+      ok: false,
+      code: "EXPIRED",
+      reason: "The order or the Coinbase link has already expired."
+    };
+  }
+  if (msOfSlack <= 0) {
+    return {
+      ...withDeadline,
+      ok: false,
+      code: "EXPIRY_MARGIN",
+      reason: `Only ${Math.floor(msRemaining / 1e3)}s left before the earliest deadline; this chain needs a ${Math.floor(marginMs / 6e4)} min safety margin.`
+    };
+  }
+  if (bolt11ExpiresAt !== void 0) {
+    if (bolt11Ms === null) {
+      return {
+        ...withDeadline,
+        ok: false,
+        code: "EXPIRY_UNPARSABLE",
+        reason: "BOLT11 invoice expiry is missing or unparsable."
+      };
+    }
+    const bolt11Remaining = bolt11Ms - now;
+    if (bolt11Remaining < BOLT11_MIN_VALIDITY_MS) {
+      return {
+        ...withDeadline,
+        ok: false,
+        code: "BOLT11_TOO_SHORT",
+        reason: `BOLT11 invoice has ${Math.max(0, Math.floor(bolt11Remaining / 1e3))}s of validity left; at least 10 min is required. Request a fresh invoice.`
+      };
+    }
+  }
+  return { ...withDeadline, ok: true, code: null, reason: null };
+}
+
+// scripts/src/lib/guards.mjs
+var UNPAID_STATUS = "payment_unpaid";
+function receiptSignal(source) {
+  const raw = source?.amountReceived;
+  if (raw === null || raw === void 0 || raw === "") {
+    return { money: false, receipt: null, unparsable: false };
+  }
+  try {
+    const receipt = comparePayment(source);
+    return { money: receipt.state !== "none", receipt, unparsable: false };
+  } catch {
+    return { money: true, receipt: null, unparsable: true };
+  }
+}
+function validateDepositInstructions(source) {
+  const family = chainFamily(source?.chainId);
+  const address = typeof source?.receiverAddress === "string" ? source.receiverAddress.trim() : "";
+  const memo = typeof source?.receiverMemo === "string" ? source.receiverMemo.trim() : "";
+  const bolt11 = typeof source?.lnInvoice === "string" && source.lnInvoice.trim() ? source.lnInvoice.trim() : "";
+  let amountAtomic;
+  try {
+    amountAtomic = sourceAtomic(source, "amount");
+  } catch (err) {
+    return {
+      ok: false,
+      code: "DEPOSIT_INCOMPLETE",
+      reason: `The deposit amount is unusable: ${err.message}`
+    };
+  }
+  if (amountAtomic === null || amountAtomic <= 0n) {
+    return {
+      ok: false,
+      code: "DEPOSIT_INCOMPLETE",
+      reason: "The order carries no positive deposit amount."
+    };
+  }
+  if (family === "lightning") {
+    if (!bolt11) {
+      return {
+        ok: false,
+        code: "DEPOSIT_INCOMPLETE",
+        reason: "The Lightning order has no BOLT11 invoice yet (the swap may still be being created). Nothing is payable until it appears."
+      };
+    }
+    return { ok: true, code: null, reason: null, family, amountAtomic, payTo: bolt11, memo: null };
+  }
+  if (!address) {
+    return {
+      ok: false,
+      code: "DEPOSIT_NOT_LIVE",
+      reason: "The live payments response returned no deposit address."
+    };
+  }
+  if (family === "stellar" && !memo) {
+    return {
+      ok: false,
+      code: "DEPOSIT_MEMO_REQUIRED",
+      reason: "A Stellar deposit requires a memo, and this order did not supply one. Sending without it would very likely lose the funds. Refusing to display it as payable."
+    };
+  }
+  return {
+    ok: true,
+    code: null,
+    reason: null,
+    family,
+    amountAtomic,
+    payTo: address,
+    memo: memo || null
+  };
+}
+function reuseGuard({ payment, requested, reused = false }) {
+  const source = payment?.source || {};
+  const evidence = {
+    reused: Boolean(reused),
+    status: payment?.status ?? null,
+    txHash: source.txHash ?? null,
+    amountReceived: source.amountReceived ?? null,
+    confirmedAt: source.confirmedAt ?? null,
+    chainId: source.chainId ?? null,
+    tokenSymbol: source.tokenSymbol ?? null,
+    senderAddress: source.senderAddress ?? null
+  };
+  const hasTx = source.txHash !== null && source.txHash !== void 0 && source.txHash !== "";
+  const signal = receiptSignal(source);
+  const hasConfirm = source.confirmedAt !== null && source.confirmedAt !== void 0 && source.confirmedAt !== "";
+  if (hasTx || signal.money || hasConfirm) {
+    return {
+      ok: false,
+      code: "ORDER_ALREADY_FUNDED",
+      reason: signal.unparsable ? "This order reports an amountReceived that cannot be read. It is treated as funded until a human confirms otherwise \u2014 do NOT pay again." : "This Coinbase link already has a funded Rozo order (it may have been paid elsewhere). Do NOT pay again \u2014 escalate for manual reconciliation.",
+      moneyDetected: true,
+      evidence: { ...evidence, receipt: signal.receipt, receiptUnparsable: signal.unparsable }
+    };
+  }
+  if (payment?.status !== UNPAID_STATUS) {
+    const terminal = ["payment_expired", "payment_bounced", "payment_refunded"].includes(
+      payment?.status
+    );
+    return {
+      ok: false,
+      code: terminal ? "ORDER_NOT_PAYABLE" : "ORDER_ALREADY_FUNDED",
+      reason: `Existing order status is "${payment?.status ?? "unknown"}", not "${UNPAID_STATUS}".`,
+      moneyDetected: !terminal,
+      evidence
+    };
+  }
+  const wantChain = String(requested?.chainId ?? "").trim();
+  const wantToken = String(requested?.tokenSymbol ?? "").trim().toUpperCase();
+  const gotChain = String(source.chainId ?? "").trim();
+  const gotToken = String(source.tokenSymbol ?? "").trim().toUpperCase();
+  if (!gotChain || !gotToken || gotChain !== wantChain || gotToken !== wantToken) {
+    return {
+      ok: false,
+      code: "REUSED_SOURCE_MISMATCH",
+      reason: `The order expects ${gotToken || "?"} on chain ${gotChain || "?"}, but you chose ${wantToken} on chain ${wantChain}. Paying the wrong asset or network is usually unrecoverable.`,
+      moneyDetected: false,
+      evidence
+    };
+  }
+  const deposit = validateDepositInstructions(source);
+  if (!deposit.ok) {
+    return {
+      ok: false,
+      code: deposit.code,
+      reason: deposit.reason,
+      moneyDetected: false,
+      evidence
+    };
+  }
+  return { ok: true, code: null, reason: null, moneyDetected: false, evidence, deposit };
+}
+function verifyCreateAgainstQuote({ snapshot: snapshot2, created, requested }) {
+  const drift = [];
+  const require2 = (field, a, b, normalize = defaultNormalize) => {
+    const na = normalize(a);
+    const nb = normalize(b);
+    if (na === null) {
+      drift.push({ field, quoted: null, created: nb, note: "missing in quote" });
+      return;
+    }
+    if (nb === null) {
+      drift.push({ field, quoted: na, created: null, note: "missing in create response" });
+      return;
+    }
+    if (na !== nb) drift.push({ field, quoted: na, created: nb });
+  };
+  require2("linkId", snapshot2?.linkId, created?.linkId);
+  require2("merchant", snapshot2?.merchant, created?.merchant, normalizeMerchant);
+  require2("original", snapshot2?.original, created?.original, normalizeDecimal);
+  require2("callerPays", snapshot2?.callerPays, created?.callerPays, normalizeDecimal);
+  const wantChain = String(requested?.chainId ?? "").trim();
+  const wantToken = String(requested?.tokenSymbol ?? "").trim().toUpperCase();
+  const gotChain = String(created?.source?.chainId ?? "").trim();
+  const gotToken = String(created?.source?.tokenSymbol ?? "").trim().toUpperCase();
+  if (!gotChain || gotChain !== wantChain) {
+    drift.push({ field: "source.chainId", quoted: wantChain, created: gotChain || null });
+  }
+  if (!gotToken || gotToken !== wantToken) {
+    drift.push({ field: "source.tokenSymbol", quoted: wantToken, created: gotToken || null });
+  }
+  if (drift.length) {
+    return {
+      ok: false,
+      code: "CREATE_DRIFT",
+      reason: "The created order does not match what was quoted. Refusing to continue.",
+      drift
+    };
+  }
+  const disc = created?.discount;
+  if (disc !== void 0 && disc !== null && normalizeDecimal(disc) !== "0") {
+    return {
+      ok: false,
+      code: "NO_DISCOUNT_VIOLATION",
+      reason: `Server reported a discount of "${disc}"; this flow must charge the full invoice.`,
+      drift: [{ field: "discount", quoted: "0", created: String(disc) }]
+    };
+  }
+  if (created?.callerPays !== void 0 && created?.original !== void 0 && normalizeDecimal(created.callerPays) !== normalizeDecimal(created.original)) {
+    return {
+      ok: false,
+      code: "NO_DISCOUNT_VIOLATION",
+      reason: `callerPays (${created.callerPays}) differs from the invoice amount (${created.original}).`,
+      drift: [
+        { field: "callerPays", quoted: String(created.original), created: String(created.callerPays) }
+      ]
+    };
+  }
+  return { ok: true, code: null, reason: null, drift: [] };
+}
+function defaultNormalize(v) {
+  if (v === null || v === void 0) return null;
+  const s = String(v).trim();
+  return s === "" ? null : s;
+}
+function normalizeMerchant(v) {
+  if (v === null || v === void 0) return null;
+  if (typeof v === "object") {
+    const name = v.name ?? v.merchantName ?? null;
+    return name ? String(name).trim() || null : null;
+  }
+  const s = String(v).trim();
+  return s === "" ? null : s;
+}
+function normalizeDecimal(v) {
+  if (v === null || v === void 0) return null;
+  const s = String(v).trim();
+  if (!/^\d+(\.\d+)?$/.test(s)) return s;
+  const [w, f = ""] = s.split(".");
+  const frac = f.replace(/0+$/, "");
+  const whole = w.replace(/^0+(?=\d)/, "");
+  return frac ? `${whole}.${frac}` : whole;
+}
+function checkPayable(statusResponse, now = Date.now()) {
+  const cb = statusResponse?.coinbase;
+  if (!cb) {
+    return {
+      ok: false,
+      code: "LINK_NO_LONGER_PAYABLE",
+      reason: "invoice-status returned no Coinbase state; cannot prove the link is still payable.",
+      derived: null
+    };
+  }
+  const protocolVersion = cb.protocolVersion ?? statusResponse?.protocolVersion ?? null;
+  const derived = {
+    protocolVersion,
+    status: cb.status ?? null,
+    settled: cb.settled ?? null,
+    usageCount: cb.usageCount ?? null,
+    maxUsage: cb.maxUsage ?? null,
+    preApprovalExpiry: cb.preApprovalExpiry ?? null
+  };
+  if (cb.settled === true) {
+    return {
+      ok: false,
+      code: "LINK_NO_LONGER_PAYABLE",
+      reason: "The Coinbase resource is already settled \u2014 someone has paid it.",
+      derived
+    };
+  }
+  if (protocolVersion === "v3") {
+    if (!cb.status) {
+      return {
+        ok: false,
+        code: "LINK_PAYABILITY_UNKNOWN",
+        reason: "The Payment Session response carries no status; cannot prove it is still payable.",
+        derived
+      };
+    }
+    if (cb.status !== "PAYMENT_SESSION_STATUS_CREATED") {
+      return {
+        ok: false,
+        code: "LINK_NO_LONGER_PAYABLE",
+        reason: `Payment Session status is ${cb.status}; only PAYMENT_SESSION_STATUS_CREATED is payable.`,
+        derived
+      };
+    }
+    return { ok: true, code: null, reason: null, derived };
+  }
+  const usage2 = Number(cb.usageCount);
+  const max = Number(cb.maxUsage);
+  if (cb.usageCount === null || cb.usageCount === void 0 || cb.maxUsage === null || cb.maxUsage === void 0 || !Number.isFinite(usage2) || !Number.isFinite(max)) {
+    return {
+      ok: false,
+      code: "LINK_PAYABILITY_UNKNOWN",
+      reason: "The payment link response is missing usageCount/maxUsage; cannot prove it has not already been used.",
+      derived
+    };
+  }
+  if (usage2 >= max) {
+    return {
+      ok: false,
+      code: "LINK_NO_LONGER_PAYABLE",
+      reason: `Payment link already used (${usage2}/${max}).`,
+      derived
+    };
+  }
+  return { ok: true, code: null, reason: null, derived };
+}
+function classifyStatus({ payment, routerState, coinbase, now = Date.now(), viewsFailed = false }) {
+  const source = payment?.source || {};
+  const hasTx = Boolean(source.txHash);
+  const confirmed = Boolean(source.confirmedAt);
+  const signal = receiptSignal(source);
+  const receipt = signal.receipt;
+  const moneyDetected = hasTx || confirmed || signal.money;
+  const routerStatus = routerState?.status ?? null;
+  const mk = (state, detail, opts = {}) => ({
+    state,
+    moneyDetected: Boolean(moneyDetected),
+    terminal: Boolean(opts.terminal),
+    escalate: Boolean(opts.escalate),
+    unknown: Boolean(opts.unknown),
+    detail,
+    receipt,
+    receiptUnparsable: signal.unparsable,
+    routerStatus
+  });
+  if (viewsFailed || !payment?.status && !routerStatus && !coinbase) {
+    return mk(
+      "unknown",
+      "Could not read the order state from the backend. This is NOT evidence that nothing has been paid \u2014 do not act on it.",
+      { unknown: true }
+    );
+  }
+  if (signal.unparsable) {
+    return mk(
+      "stuck_after_payment",
+      "The order reports an amountReceived that cannot be read. Treating it as funded until a human confirms otherwise.",
+      { escalate: true }
+    );
+  }
+  if (routerStatus === "paid" || coinbase?.settled === true) {
+    return mk("settled", "Coinbase invoice settled by the funder wallet.", { terminal: true });
+  }
+  if (routerStatus === "failed_pay_invoice" || routerStatus === "failed_insufficient_balance") {
+    return mk(
+      "stuck_after_payment",
+      `Fulfillment failed (${routerStatus}) after the pay-in. Do not pay again \u2014 escalate for manual reconciliation.`,
+      { terminal: false, escalate: true }
+    );
+  }
+  if (moneyDetected && receipt && receipt.state === "underpaid") {
+    return mk(
+      "underpaid",
+      "Less arrived than the order requires. Do NOT send a top-up to the same address \u2014 escalate.",
+      { escalate: true }
+    );
+  }
+  if (moneyDetected && receipt && receipt.state === "overpaid") {
+    return mk("payin_detected", "More arrived than required; escalate for operator follow-up.", {
+      escalate: true
+    });
+  }
+  switch (payment?.status) {
+    case "payment_unpaid": {
+      if (moneyDetected) {
+        return mk("payin_detected", "Pay-in seen on chain, waiting for confirmations.");
+      }
+      const exp = payment?.expiresAt ? Date.parse(payment.expiresAt) : NaN;
+      if (Number.isFinite(exp) && exp < now) {
+        return mk("expired_unfunded", "The order expired before any funds arrived. Safe to retry.", {
+          terminal: true
+        });
+      }
+      return mk("awaiting_deposit", "Waiting for the deposit.");
+    }
+    case "payment_started":
+      return mk("payin_detected", "Pay-in seen, waiting for confirmations.");
+    case "payment_payin_completed":
+      return mk("payin_confirmed", "Pay-in confirmed; fulfillment can start.");
+    case "payment_bridging":
+    case "payment_payout_started":
+      return mk("bridging", "Bridging the pay-in toward the funder.");
+    case "payment_payout_completed":
+      return mk(
+        routerStatus === "paying" ? "paying_coinbase" : "bridging",
+        routerStatus === "paying" ? "Funder is paying the Coinbase invoice." : "Payout landed; waiting on Coinbase settlement."
+      );
+    case "payment_completed":
+      return mk(
+        "paying_coinbase",
+        "The bridge leg completed, but Coinbase settlement is not yet confirmed. Keep polling."
+      );
+    case "payment_expired":
+      return moneyDetected ? mk("stuck_after_payment", "Order expired AFTER funds arrived \u2014 escalate immediately.", {
+        escalate: true
+      }) : mk("expired_unfunded", "Order expired unfunded. Safe to retry.", { terminal: true });
+    case "payment_bounced":
+    case "payment_refunded":
+      return mk("stuck_after_payment", `Order ended as ${payment.status} \u2014 escalate.`, {
+        escalate: true
+      });
+    default:
+      break;
+  }
+  if (routerStatus === "payin_seen") return mk("payin_confirmed", "Router saw the pay-in.");
+  if (routerStatus === "paying") return mk("paying_coinbase", "Funder is paying Coinbase.");
+  return mk(
+    moneyDetected ? "stuck_after_payment" : "unknown",
+    `Unrecognized backend status "${payment?.status ?? "unknown"}"; not assuming anything about it.`,
+    { escalate: Boolean(moneyDetected), unknown: !moneyDetected }
+  );
+}
+
+// scripts/src/quote.mjs
+function derivePayable(snapshot2, now) {
+  const cb = snapshot2.coinbase;
+  if (!cb) {
+    return { payable: false, code: "LINK_NO_LONGER_PAYABLE", reason: "No Coinbase state in the quote." };
+  }
+  if (snapshot2.protocolVersion === "v3" && cb.status && cb.status !== "PAYMENT_SESSION_STATUS_CREATED") {
+    return {
+      payable: false,
+      code: "LINK_NO_LONGER_PAYABLE",
+      reason: `Payment Session status is ${cb.status}; only PAYMENT_SESSION_STATUS_CREATED is payable.`
+    };
+  }
+  if (cb.usageCount !== null && cb.usageCount !== void 0) {
+    const max = cb.maxUsage ?? 1;
+    if (Number(cb.usageCount) >= Number(max)) {
+      return {
+        payable: false,
+        code: "LINK_NO_LONGER_PAYABLE",
+        reason: `This payment link has already been used (${cb.usageCount}/${max}).`
+      };
+    }
+  }
+  const exp = parseDeadline(cb.preApprovalExpiry);
+  if (exp === null) {
+    return {
+      payable: false,
+      code: "EXPIRY_UNPARSABLE",
+      reason: "The Coinbase expiry is missing or unparsable; refusing to treat it as payable."
+    };
+  }
+  if (exp <= now) {
+    return {
+      payable: false,
+      code: "LINK_NO_LONGER_PAYABLE",
+      reason: `This payment link expired at ${new Date(exp).toISOString()}. Ask for a fresh one.`
+    };
+  }
+  return { payable: true, code: null, reason: null, expiryMs: exp };
+}
+async function main(argv) {
+  const args = parseArgs(argv);
+  const url = args.url || args._[0];
+  if (!url || url === true) {
+    usage('Required: --url "<coinbase payment link or paymentSession url/id>"');
+  }
+  const { linkId, kind } = extractLinkId(String(url));
+  let chosenSource = null;
+  if (args.chain || args.token) {
+    const chainId = String(args.chain ?? "").trim();
+    const tokenSymbol = String(args.token ?? "").trim().toUpperCase();
+    if (!chainId || !tokenSymbol) {
+      usage("--chain and --token must be given together, e.g. --chain 900 --token USDT");
+    }
+    if (!isSupportedSource(chainId, tokenSymbol)) {
+      throw new SkillError(
+        "UNSUPPORTED_SOURCE",
+        `${tokenSymbol} on ${chainName(chainId)} is not a supported source.`,
+        { supported: SUPPORTED_SOURCES }
+      );
+    }
+    chosenSource = { chainId, tokenSymbol };
+  }
+  const now = Date.now();
+  const quote = await quoteInvoice({ url: String(url) });
+  const snapshot2 = snapshotFromQuote(quote);
+  const payability = derivePayable(snapshot2, now);
+  const payload = {
+    success: payability.payable,
+    step: "quote",
+    linkId: snapshot2.linkId ?? linkId,
+    linkKind: kind,
+    protocolVersion: snapshot2.protocolVersion,
+    merchant: snapshot2.merchant,
+    invoice: {
+      amount: snapshot2.original,
+      fiat: snapshot2.fiat
+    },
+    // No discount on this line: the caller pays the full invoice amount.
+    callerPays: snapshot2.callerPays,
+    discountPolicy: "none \u2014 callerPays equals the invoice amount",
+    coinbase: snapshot2.coinbase,
+    coinbaseExpiryIso: payability.expiryMs ? new Date(payability.expiryMs).toISOString() : null,
+    chosenSource,
+    supportedSources: SUPPORTED_SOURCES,
+    quoteReceipt: quote?.quoteReceipt ?? null,
+    quoteReceiptTtlSeconds: 60,
+    quoteReceiptNote: "Short-lived (~60s). create-order.js takes its own fresh quote; do not carry this over.",
+    snapshot: snapshot2,
+    nextStep: payability.payable ? "create-order.js --url <url> --chain <chainId> --token <SYMBOL>" : null
+  };
+  if (!payability.payable) {
+    payload.error = { code: payability.code, message: payability.reason };
+    emit(payload, EXIT_ERROR);
+  }
+  if (snapshot2.callerPays && snapshot2.original && normalizeDecimal(snapshot2.callerPays) !== normalizeDecimal(snapshot2.original)) {
+    payload.warnings = [
+      `callerPays (${snapshot2.callerPays}) differs from the invoice amount (${snapshot2.original}). This flow is supposed to charge the full invoice \u2014 do not proceed until that is explained.`
+    ];
+  }
+  emit(payload);
+}
+async function run(argv = process.argv.slice(2)) {
+  return main(argv);
+}
+
+// scripts/src/create-order.mjs
+function confirmTier(usdAmount) {
+  const usd = Number(usdAmount);
+  if (!Number.isFinite(usd)) return "explicit";
+  if (usd <= 1) return "silent";
+  if (usd <= 10) return "one-line";
+  return "explicit";
+}
+async function main2(argv) {
+  const args = parseArgs(argv);
+  const url = args.url || args._[0];
+  if (!url || url === true) usage('Required: --url "<coinbase payment link url or id>"');
+  const chainId = String(args.chain ?? "").trim();
+  const tokenSymbol = String(args.token ?? "").trim().toUpperCase();
+  if (!chainId || !tokenSymbol) {
+    usage("Required: --chain <chainId> --token <SYMBOL>. Run quote.js to see supported sources.");
+  }
+  if (!isSupportedSource(chainId, tokenSymbol)) {
+    throw new SkillError(
+      "UNSUPPORTED_SOURCE",
+      `${tokenSymbol} on ${chainName(chainId)} is not a supported source.`,
+      { supported: SUPPORTED_SOURCES }
+    );
+  }
+  const requested = { chainId, tokenSymbol };
+  const confirmed = Boolean(args.confirm);
+  let blacklist;
+  try {
+    blacklist = loadBlacklist();
+  } catch (err) {
+    throw new SkillError(
+      "BLACKLIST_UNAVAILABLE",
+      `Compromised-address list unusable: ${err.message} Refusing to proceed.`
+    );
+  }
+  const { linkId: parsedLinkId } = extractLinkId(String(url));
+  const quote = await quoteInvoice({ url: String(url) });
+  const snapshot2 = snapshotFromQuote(quote);
+  const quoteReceipt = quote?.quoteReceipt ?? null;
+  const created = await createInvoice({
+    url: String(url),
+    source: requested,
+    quoteReceipt
+  });
+  if (!created?.rozoPaymentId) {
+    throw new SkillError("CREATE_FAILED", "create-invoice returned no rozoPaymentId.", {
+      response: created
+    });
+  }
+  const rozoPaymentId = assertRozoPaymentId(created.rozoPaymentId);
+  const verify = verifyCreateAgainstQuote({ snapshot: snapshot2, created, requested });
+  if (!verify.ok) {
+    const onlySourceDrift = verify.drift.length > 0 && verify.drift.every((d) => d.field.startsWith("source."));
+    if (created.reused && onlySourceDrift) {
+      const existing = created.source || {};
+      const remainingMs = created.expiresAt ? Date.parse(created.expiresAt) - Date.now() : NaN;
+      emit(
+        {
+          success: false,
+          step: "reuse-source-mismatch",
+          error: {
+            code: "REUSED_SOURCE_MISMATCH",
+            message: `This link already has an unpaid order, created for ${existing.tokenSymbol ?? "?"} on chain ${existing.chainId ?? "?"}. You asked for ${tokenSymbol} on chain ${chainId}. Only one order exists per link at a time, so nothing new was created.`
+          },
+          linkId: created.linkId ?? parsedLinkId,
+          rozoPaymentId,
+          paymentLink: created.paymentLink ?? null,
+          existingOrder: {
+            rozoPaymentId,
+            chainId: existing.chainId ?? null,
+            tokenSymbol: existing.tokenSymbol ?? null,
+            expiresAt: created.expiresAt ?? null,
+            expiresIn: Number.isFinite(remainingMs) ? formatRemaining(remainingMs) : null
+          },
+          guidance: `Either pay the existing order with ${existing.tokenSymbol ?? "its own coin"} (re-run with --chain ${existing.chainId} --token ${existing.tokenSymbol}), or wait ${Number.isFinite(remainingMs) ? formatRemaining(remainingMs) : "for it to expire"} for it to expire and then create a new one. Unpaid orders cost nothing.`
+        },
+        EXIT_ERROR
+      );
+    }
+    emit(
+      {
+        success: false,
+        step: "verify-create",
+        error: { code: verify.code, message: verify.reason, details: { drift: verify.drift } },
+        linkId: created.linkId ?? parsedLinkId,
+        rozoPaymentId,
+        paymentLink: created.paymentLink ?? null,
+        guidance: "The order exists but was NOT validated. Do not fund it. Let it expire unfunded."
+      },
+      EXIT_ERROR
+    );
+  }
+  const payment = await getPayment(rozoPaymentId);
+  const source = payment?.source || {};
+  const guard = reuseGuard({ payment, requested, reused: created.reused });
+  if (!guard.ok) {
+    emit(
+      {
+        success: false,
+        step: "reuse-guard",
+        error: { code: guard.code, message: guard.reason, details: guard.evidence },
+        linkId: created.linkId ?? parsedLinkId,
+        rozoPaymentId,
+        paymentLink: created.paymentLink ?? null,
+        moneyDetected: guard.moneyDetected,
+        guidance: guard.moneyDetected ? "MONEY DETECTED. Do not pay again, do not retry into a new order. Preserve every id and tx hash above and escalate to the operator for manual reconciliation." : "Abort this run. Nothing was funded."
+      },
+      EXIT_ERROR
+    );
+  }
+  const lightning = String(source.chainId) === "lightning";
+  const bolt11 = source.lnInvoice ?? payment?.lnInvoice ?? null;
+  const expiry = checkExpiry({
+    now: Date.now(),
+    chainId: source.chainId ?? chainId,
+    intentExpiresAt: payment?.expiresAt,
+    coinbaseExpiry: snapshot2?.coinbase?.preApprovalExpiry,
+    // For Lightning the BOLT11's own validity is an extra gate. We only have a
+    // separate expiry if the backend exposes one; otherwise the intent expiry
+    // governs and we still require the 10-minute floor via the margin.
+    ...lightning ? { bolt11ExpiresAt: payment?.expiresAt } : {}
+  });
+  if (!expiry.ok) {
+    emit(
+      {
+        success: false,
+        step: "expiry-guard",
+        error: { code: expiry.code, message: expiry.reason, details: expiry },
+        linkId: created.linkId ?? parsedLinkId,
+        rozoPaymentId,
+        guidance: "Not enough time remains to fund, bridge and settle safely. Ask the merchant for a fresh link and start over. Do not fund this order."
+      },
+      EXIT_ERROR
+    );
+  }
+  try {
+    assertNotBlacklisted(
+      [
+        {
+          address: source.receiverAddress,
+          family: chainFamily(source.chainId),
+          role: "deposit address"
+        }
+      ],
+      blacklist
+    );
+  } catch (err) {
+    emit(
+      {
+        success: false,
+        step: "blacklist",
+        error: { code: err.code, message: err.message },
+        linkId: created.linkId ?? parsedLinkId,
+        rozoPaymentId,
+        guidance: "Do NOT send anything. Report this to the operator immediately."
+      },
+      EXIT_ERROR
+    );
+  }
+  const statusNow = await invoiceStatus({ linkId: created.linkId ?? parsedLinkId });
+  const payable = checkPayable(statusNow, Date.now());
+  if (!payable.ok) {
+    emit(
+      {
+        success: false,
+        step: "payability-revalidation",
+        error: { code: payable.code, message: payable.reason, details: payable.derived },
+        linkId: created.linkId ?? parsedLinkId,
+        rozoPaymentId,
+        guidance: "The Coinbase resource stopped being payable between quote and now (someone else may have paid it). Do NOT fund this order."
+      },
+      EXIT_ERROR
+    );
+  }
+  createOrderRecord({
+    rozoPaymentId,
+    linkId: created.linkId ?? parsedLinkId,
+    paymentLink: created.paymentLink ?? null,
+    merchant: created.merchant ?? snapshot2.merchant,
+    invoiceAmount: created.original ?? snapshot2.original,
+    source: { chainId: source.chainId, tokenSymbol: source.tokenSymbol },
+    receiverAddress: source.receiverAddress,
+    receiverMemo: source.receiverMemo ?? null,
+    amount: source.amount,
+    amountUnit: source.amountUnit ?? null,
+    expiresAt: payment?.expiresAt ?? null
+  });
+  const usd = created.original ?? snapshot2.original;
+  const family = chainFamily(source.chainId);
+  const tier = confirmTier(usd);
+  const depositInfo = guard.deposit;
+  if (confirmed) {
+    recordConfirmation(rozoPaymentId, { source, invoiceAmount: usd, tier });
+  }
+  const memoRequirement = lightning ? "Lightning invoices carry their own routing data; there is no separate memo." : source.receiverMemo ? "This deposit REQUIRES the memo/tag below. Sending without it will very likely lose the funds." : family === "stellar" ? "A Stellar deposit always requires a memo." : "This deposit does not use a memo. Leave the memo field empty.";
+  emit({
+    success: true,
+    step: "create-order",
+    confirmed,
+    reused: Boolean(created.reused),
+    reusedNote: created.reused ? `An existing unpaid order for this link was reused (${rozoPaymentId}), valid for another ${formatRemaining(expiry.msRemaining)}. Nothing new was created.` : null,
+    orderCost: "Creating an order moves no money. An order you never fund simply expires and costs nothing.",
+    linkId: created.linkId ?? parsedLinkId,
+    rozoPaymentId,
+    paymentLink: created.paymentLink ?? null,
+    merchant: normalizeMerchant(created.merchant ?? snapshot2.merchant),
+    invoice: { amount: usd, currency: snapshot2?.fiat?.currency ?? "USD" },
+    callerPays: created.callerPays ?? snapshot2.callerPays,
+    discount: created.discount ?? "0",
+    // Machine-readable, copy-pastable — and WITHHELD until --confirm. This is
+    // the only place the full address, memo and BOLT11 ever appear.
+    deposit: confirmed ? {
+      chainId: source.chainId,
+      chain: chainName(source.chainId),
+      tokenSymbol: source.tokenSymbol,
+      tokenAddress: source.tokenAddress || null,
+      // Lightning has no deposit address: the BOLT11 IS the instruction.
+      receiverAddress: lightning ? null : source.receiverAddress,
+      receiverMemo: source.receiverMemo ?? null,
+      // Stellar memos are TEXT even when they look numeric. Sending one as
+      // MEMO_ID produces a different memo and the payment will not match.
+      receiverMemoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
+      amount: source.amount,
+      amountUnit: source.amountUnit ?? null,
+      isSats: isSatsUnit(source.amountUnit),
+      lnInvoice: bolt11 || null,
+      payTo: depositInfo.payTo,
+      expiresAt: payment?.expiresAt ?? null,
+      expiresIn: formatRemaining(expiry.msRemaining)
+    } : null,
+    depositWithheld: !confirmed,
+    // Safe for prose / chat.
+    display: {
+      chain: chainName(source.chainId),
+      token: source.tokenSymbol,
+      amount: formatAmount(source),
+      isSats: isSatsUnit(source.amountUnit),
+      payToMasked: maskAddress2(depositInfo.payTo),
+      receiverMemoMasked: maskMemo(source.receiverMemo),
+      hasMemo: Boolean(source.receiverMemo),
+      memoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
+      memoRequirement
+    },
+    expiry: {
+      intentExpiresAt: payment?.expiresAt ?? null,
+      coinbaseExpiry: snapshot2?.coinbase?.preApprovalExpiry ?? null,
+      effectiveDeadlineIso: new Date(expiry.effectiveDeadlineMs).toISOString(),
+      // A duration, not just a timestamp: this is what a payer actually needs.
+      expiresIn: formatRemaining(expiry.msRemaining),
+      msRemaining: expiry.msRemaining,
+      marginMinutes: Math.round(expiry.marginMs / 6e4),
+      minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4)
+    },
+    confirmation: {
+      required: tier,
+      satisfied: confirmed,
+      note: confirmed ? "Confirmation recorded. The send scripts will verify it against the live deposit data." : "BINDING CONFIRMATION POINT. Present chain, token, exact amount, the masked address, the memo requirement, both expiries and the reused flag, and get an explicit yes. Then re-run this command with --confirm to release the full deposit details.",
+      warnings: [
+        "Wrong token, wrong network, or wrong amount is usually unrecoverable.",
+        memoRequirement,
+        "Send exactly once. A second send to the same one-time address is not guaranteed to be credited.",
+        "The deposit amount can exceed the invoice: it includes the bridge and network fees."
+      ]
+    },
+    blacklist: {
+      checked: true,
+      addressesInList: blacklist.entries.length,
+      digest: blacklist.provenance.addressesSha256
+    },
+    nextStep: confirmed ? {
+      modeA: "Give the user the `deposit` block, then poll: status.js --rozo-payment-id <id>",
+      modeB: family === "evm" ? `send-evm.js --rozo-payment-id ${rozoPaymentId} --send  (requires ROZO_CHECKOUT_EVM_KEY)` : family === "solana" ? `send-sol.js --rozo-payment-id ${rozoPaymentId} --send  (requires ROZO_CHECKOUT_SOL_KEY)` : "not available for this chain \u2014 pay from a wallet (Mode A)"
+    } : {
+      confirm: "Re-run this exact command with --confirm once the user has said yes."
+    }
+  });
+}
+async function run2(argv = process.argv.slice(2)) {
+  return main2(argv);
+}
+
+// scripts/src/status.mjs
+var POLL_INTERVAL_MS = 1e4;
+var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function snapshot({ rozoPaymentId, linkId }) {
+  let status = null;
+  let statusError = null;
+  try {
+    status = await invoiceStatus({ linkId, rozoPaymentId });
+  } catch (err) {
+    statusError = { code: err.code, message: err.message };
+  }
+  let id = rozoPaymentId || status?.rozo_payment_id || null;
+  let idSource = rozoPaymentId ? "argument" : status?.rozo_payment_id ? "invoice-status" : null;
+  if (!id && linkId) {
+    const local = findByLinkId(linkId);
+    if (local) {
+      id = local.rozoPaymentId;
+      idSource = "local state";
+    }
+  }
+  let payment = null;
+  let paymentError = null;
+  if (id && isRozoPaymentId(id)) {
+    try {
+      payment = await getPayment(id);
+    } catch (err) {
+      paymentError = { code: err.code, message: err.message };
+    }
+  }
+  const viewsFailed = Boolean(statusError) && !payment;
+  const verdict = classifyStatus({
+    payment: payment || status?.rozoPayment || {},
+    routerState: status?.routerState,
+    coinbase: status?.coinbase,
+    viewsFailed
+  });
+  const source = payment?.source || status?.rozoPayment?.source || {};
+  return {
+    rozoPaymentId: id,
+    rozoPaymentIdSource: idSource,
+    // Without the authoritative payment object we are reading a partial view.
+    authoritativeView: Boolean(payment),
+    linkId: linkId || status?.pl_id || null,
+    state: verdict.state,
+    unknown: verdict.unknown,
+    moneyDetected: verdict.moneyDetected,
+    terminal: verdict.terminal,
+    escalate: verdict.escalate,
+    detail: verdict.detail,
+    backend: {
+      paymentStatus: payment?.status ?? status?.rozoPayment?.status ?? null,
+      routerStatus: verdict.routerStatus,
+      coinbaseSettled: status?.coinbase?.settled ?? null,
+      coinbaseStatus: status?.coinbase?.status ?? null
+    },
+    payin: {
+      expected: source.amount ? formatAmount(source) : null,
+      received: source.amountReceived ?? null,
+      receipt: verdict.receipt,
+      txHash: source.txHash ?? null,
+      confirmedAt: source.confirmedAt ?? null,
+      senderAddressMasked: source.senderAddress ? maskAddress2(source.senderAddress) : null,
+      chain: source.chainId ? chainName(source.chainId) : null
+    },
+    expiry: (() => {
+      const iso = payment?.expiresAt ?? status?.rozoPayment?.expiresAt ?? null;
+      if (!iso) return { expiresAt: null, expiresIn: null, msRemaining: null };
+      const ms = Date.parse(iso) - Date.now();
+      return {
+        expiresAt: iso,
+        expiresIn: formatRemaining(ms),
+        msRemaining: Number.isFinite(ms) ? ms : null
+      };
+    })(),
+    payout: {
+      txHash: payment?.destination?.txHash ?? status?.rozoPayment?.destination?.txHash ?? null,
+      confirmedAt: payment?.destination?.confirmedAt ?? status?.rozoPayment?.destination?.confirmedAt ?? null
+    },
+    errors: [statusError, paymentError].filter(Boolean)
+  };
+}
+async function main3(argv) {
+  const args = parseArgs(argv);
+  const rozoPaymentId = args["rozo-payment-id"] || (isRozoPaymentId(args._[0]) ? args._[0] : null);
+  const linkId = args["link-id"] || (!rozoPaymentId ? args._[0] : null);
+  if (!rozoPaymentId && !linkId) {
+    usage("Required: --rozo-payment-id <uuid> and/or --link-id <pl_* | paymentSession_*>");
+  }
+  const watch = Boolean(args.watch);
+  const timeoutMs = Math.max(0, Number(args.timeout ?? 600) * 1e3);
+  const deadline = Date.now() + timeoutMs;
+  let result = await snapshot({ rozoPaymentId, linkId });
+  const history = [{ at: (/* @__PURE__ */ new Date()).toISOString(), state: result.state }];
+  while (watch && !result.terminal && !result.escalate && !result.unknown && Date.now() < deadline) {
+    await sleep(POLL_INTERVAL_MS);
+    const next = await snapshot({ rozoPaymentId: result.rozoPaymentId || rozoPaymentId, linkId });
+    if (next.state !== result.state) history.push({ at: (/* @__PURE__ */ new Date()).toISOString(), state: next.state });
+    result = next;
+  }
+  const guidance = result.escalate ? "MONEY DETECTED and the order is not on a healthy path. Do NOT pay again and do NOT create a new order for this link. Preserve linkId, rozoPaymentId and every tx hash, then escalate to the operator for manual reconciliation." : result.unknown ? "The order state could not be established. This is NOT evidence that nothing was paid \u2014 do not create a new order and do not send again on the strength of it. Retry, or pass --rozo-payment-id so the authoritative pay-in view can be read." : !result.authoritativeView ? "Only the fulfilment view was readable; the pay-in view is unavailable, so the money-detected rule cannot be enforced. Pass --rozo-payment-id for a complete answer." : result.state === "expired_unfunded" ? "Nothing was funded, so nothing was lost. Start a fresh order with: rozo-checkout pay <coinbase-link> --with <coin>  (or create-order.js --url <link> --chain <id> --token <SYMBOL>)" : result.terminal ? "Done." : "Still in flight. Poll again in ~10s.";
+  const unresolved = watch && !result.terminal && !result.escalate && !result.unknown;
+  const failed = result.escalate || result.unknown || !result.authoritativeView;
+  emit(
+    {
+      success: !failed,
+      step: "status",
+      ...result,
+      history,
+      guidance,
+      timedOut: unresolved
+    },
+    failed ? EXIT_ERROR : unresolved ? EXIT_UNCONFIRMED : 0
+  );
+}
+async function run3(argv = process.argv.slice(2)) {
+  return main3(argv);
 }
 
 // scripts/src/lib/passphrase.mjs
@@ -57937,6 +57949,7 @@ async function askYesNo(question) {
   }
 }
 async function cmdQuote(opts) {
+  if (!opts.json) out(dim("  Reading the payment link\u2026"));
   const { payload, exitCode } = await step(run, ["--url", opts.target]);
   if (opts.json) {
     printJson(payload);
@@ -57959,6 +57972,7 @@ async function cmdQuote(opts) {
 async function cmdStatus(opts) {
   const argv = [...targetToArgs(opts.target), "--timeout", String(opts.timeout ?? 600)];
   if (opts.watch) argv.push("--watch");
+  if (!opts.json) out(dim("  Checking payment status\u2026 (no money moves)"));
   const { payload, exitCode } = await step(run3, argv);
   if (opts.json) {
     printJson(payload);
@@ -57999,6 +58013,7 @@ async function cmdPay(opts) {
   let payer = null;
   let invoiceUsd = null;
   if (!opts.source || opts.payer) {
+    if (!opts.json) out(dim("  Reading the payment link\u2026"));
     const q = await step(run, ["--url", opts.target]);
     if (!q.payload.success) {
       if (opts.json) printJson(q.payload);
@@ -58038,6 +58053,18 @@ async function cmdPay(opts) {
   }
   const { chainId, tokenSymbol } = opts.source;
   const baseArgs = ["--url", opts.target, "--chain", chainId, "--token", tokenSymbol];
+  if (opts.send) {
+    const family = chainFamily(chainId);
+    if (family === "evm" || family === "solana") {
+      planSignability({
+        family,
+        keyfile: opts.keyfile,
+        envFile: opts.envFile,
+        applyEnvFile: applyDotenv
+      });
+    }
+  }
+  if (!opts.json) out(dim("  Creating a one-time order\u2026 (no money moves)"));
   const created = await step(run2, baseArgs);
   if (!created.payload.success) {
     if (opts.json) printJson(created.payload);
@@ -58091,6 +58118,7 @@ async function cmdPay(opts) {
       return EXIT_OK;
     }
   }
+  if (!opts.json) out(dim("  Confirming and releasing the deposit details\u2026 (no money moves yet)"));
   const confirmed = await step(run2, [...baseArgs, "--confirm"]);
   if (!confirmed.payload.success) {
     if (opts.json) printJson(confirmed.payload);

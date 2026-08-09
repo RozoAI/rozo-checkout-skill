@@ -386,6 +386,52 @@ export async function loadKeySource(plan, { family, env = process.env, askPassph
   return { privateKey, label: plan.label, kind: plan.kind };
 }
 
+/**
+ * Answer "can this machine sign at all?" before anything is created.
+ *
+ * The send scripts already call planKeySource, but they call it late — after
+ * an order exists and after the CLI has announced "Sending…". A user with no
+ * key configured saw a payment tool claim it was sending and then fail, with
+ * no way to tell whether money had moved. This is the same question asked
+ * first, while the answer is still free.
+ *
+ * Like planKeySource, this only decides WHICH source would be used. It never
+ * reads, decrypts or returns key material; that stays in loadKeySource at
+ * signing time.
+ *
+ * The env handling is the subtle part. A send script applies `--env-file` to
+ * process.env itself, so a key living in `.env` is invisible to a check that
+ * reads a bare process.env — which would reject a perfectly payable wallet.
+ * We therefore apply the dotenv to a COPY: the key is found, and the real
+ * environment the send path builds for itself is left untouched.
+ *
+ * @param {object}  opts
+ * @param {string}  opts.family     'evm' | 'solana'
+ * @param {string} [opts.keyfile]   --keyfile, if given
+ * @param {string} [opts.envFile]   --env-file, if given
+ * @param {object} [opts.env]       defaults to process.env; copied, never mutated
+ * @param {string} [opts.cwd]       for locating an implicit ./.env
+ * @param {Function} [opts.applyEnvFile] injection seam for tests
+ * @returns {{kind: string, label: string, path?: string}} the planned source
+ * @throws  {SkillError} NO_KEY_SOURCE, KEYFILE_UNREADABLE, BAD_KEYSTORE,
+ *          BAD_KEYPAIR_FILE, or any env-file hygiene failure — each carrying
+ *          the exact remedy for this chain.
+ */
+export function planSignability({
+  family,
+  keyfile,
+  envFile,
+  env = process.env,
+  cwd = process.cwd(),
+  applyEnvFile,
+}) {
+  const probeEnv = { ...env };
+  // Surfacing an unreadable / world-readable / git-tracked .env here rather
+  // than mid-send is the same trade: fail before an order is expiring.
+  if (applyEnvFile) applyEnvFile({ file: envFile, cwd, env: probeEnv });
+  return planKeySource({ family, keyfile, env: probeEnv });
+}
+
 /** `~/x` in a config value is not expanded by the shell when quoted. */
 export function expandHome(p) {
   const s = String(p);
