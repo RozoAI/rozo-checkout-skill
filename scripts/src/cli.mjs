@@ -38,6 +38,8 @@ import {
 import { readPrefs, savePrefs } from './lib/prefs.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
 import { extractLinkId, isRozoPaymentId } from './lib/ids.mjs';
+import { planSignability } from './lib/key-source.mjs';
+import { applyDotenv } from './lib/dotenv.mjs';
 
 import { run as runQuote } from './quote.mjs';
 import { run as runCreateOrder } from './create-order.mjs';
@@ -252,6 +254,10 @@ async function askYesNo(question) {
 // ---------------------------------------------------------------------------
 
 async function cmdQuote(opts) {
+  // Reading a payment link is a network round trip that has been measured at
+  // 25s+. Without a line here the first output is the merchant block, and the
+  // wait is indistinguishable from a hung process.
+  if (!opts.json) out(dim('  Reading the payment link…'));
   const { payload, exitCode } = await step(runQuote, ['--url', opts.target]);
   if (opts.json) {
     printJson(payload);
@@ -275,6 +281,7 @@ async function cmdQuote(opts) {
 async function cmdStatus(opts) {
   const argv = [...targetToArgs(opts.target), '--timeout', String(opts.timeout ?? 600)];
   if (opts.watch) argv.push('--watch');
+  if (!opts.json) out(dim('  Checking payment status… (no money moves)'));
   const { payload, exitCode } = await step(runStatus, argv);
   if (opts.json) {
     printJson(payload);
@@ -321,6 +328,7 @@ async function cmdPay(opts) {
   // The invoice amount drives the balance check, so quote before picking.
   let invoiceUsd = null;
   if (!opts.source || opts.payer) {
+    if (!opts.json) out(dim('  Reading the payment link…'));
     const q = await step(runQuote, ['--url', opts.target]);
     if (!q.payload.success) {
       if (opts.json) printJson(q.payload);
@@ -372,7 +380,39 @@ async function cmdPay(opts) {
   const { chainId, tokenSymbol } = opts.source;
   const baseArgs = ['--url', opts.target, '--chain', chainId, '--token', tokenSymbol];
 
+  // --- 0. Mode B preflight: can this machine actually sign? ----------------
+  // Resolving the key source is local and cheap, but it used to happen inside
+  // the send script — i.e. after the order existed and after the CLI had
+  // already printed "Sending…". A user with no key configured watched a
+  // payment tool claim it was sending, then fail, with no way to tell whether
+  // money had moved. Answer the question before either of those.
+  //
+  // This only PLANS the source (which file or env var would be used); it never
+  // loads or decrypts key material. That still happens in the send script,
+  // once, at signing time.
+  // --dry-run is included deliberately: it resolves a key source too (it
+  // reports which one it "would sign with"), so without this it fails just as
+  // late, only with a quieter label.
+  if (opts.send) {
+    const family = chainFamily(chainId);
+    // Stellar and Lightning have no --send path at all; that case is reported
+    // further down as SEND_UNSUPPORTED_CHAIN, which says something clearer
+    // than "no key found" would.
+    if (family === 'evm' || family === 'solana') {
+      // Throws NO_KEY_SOURCE (or a keyfile-specific code) with the exact
+      // remedy for this chain. Nothing has been created yet, so there is no
+      // order left expiring behind the failure.
+      planSignability({
+        family,
+        keyfile: opts.keyfile,
+        envFile: opts.envFile,
+        applyEnvFile: applyDotenv,
+      });
+    }
+  }
+
   // --- 1. create the order; the deposit address is withheld at this point ---
+  if (!opts.json) out(dim('  Creating a one-time order… (no money moves)'));
   const created = await step(runCreateOrder, baseArgs);
   if (!created.payload.success) {
     if (opts.json) printJson(created.payload);
@@ -437,6 +477,7 @@ async function cmdPay(opts) {
   }
 
   // --- 3. confirm phase: releases the full deposit block -------------------
+  if (!opts.json) out(dim('  Confirming and releasing the deposit details… (no money moves yet)'));
   const confirmed = await step(runCreateOrder, [...baseArgs, '--confirm']);
   if (!confirmed.payload.success) {
     if (opts.json) printJson(confirmed.payload);
