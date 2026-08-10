@@ -42588,6 +42588,143 @@ function maskMemo(memo) {
   return `${s.slice(0, 4)}...${s.slice(-3)}`;
 }
 
+// scripts/src/lib/expiry.mjs
+var MINUTE = 6e4;
+var MARGINS_MS = {
+  1: 10 * MINUTE,
+  56: 10 * MINUTE,
+  137: 10 * MINUTE,
+  8453: 10 * MINUTE,
+  900: 5 * MINUTE,
+  1500: 10 * MINUTE,
+  lightning: 10 * MINUTE
+};
+var BOLT11_MIN_VALIDITY_MS = 10 * MINUTE;
+var DEFAULT_MARGIN_MS = 10 * MINUTE;
+function formatRemaining(ms) {
+  if (!Number.isFinite(ms)) return "unknown";
+  if (ms <= 0) return "expired";
+  const totalMinutes = Math.floor(ms / 6e4);
+  if (totalMinutes < 1) return `${Math.floor(ms / 1e3)}s`;
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+function formatDeadline(iso, { now = Date.now(), locale, timeZone } = {}) {
+  if (!iso) return null;
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+  const msLeft = at.getTime() - now;
+  if (msLeft <= 0) return "expired";
+  const minutes = Math.round(msLeft / 6e4);
+  const human = minutes < 1 ? "less than a minute" : minutes < 60 ? `about ${minutes} minute${minutes === 1 ? "" : "s"}` : `about ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  const clock = at.toLocaleTimeString(locale, {
+    hour: "numeric",
+    minute: "2-digit",
+    ...timeZone ? { timeZone } : {}
+  });
+  return `in ${human}, at ${clock} local time`;
+}
+function marginFor(chainId) {
+  const key = String(chainId);
+  return MARGINS_MS[key] ?? MARGINS_MS[chainId] ?? DEFAULT_MARGIN_MS;
+}
+function parseDeadline(value) {
+  if (value === null || value === void 0 || value === "") return null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value < 1e12 ? Math.round(value * 1e3) : Math.round(value);
+  }
+  const s = String(value).trim();
+  if (/^\d+$/.test(s)) {
+    const n = Number(s);
+    return n < 1e12 ? n * 1e3 : n;
+  }
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : null;
+}
+function checkExpiry({
+  now,
+  chainId,
+  intentExpiresAt,
+  coinbaseExpiry,
+  bolt11ExpiresAt = void 0
+}) {
+  const marginMs = marginFor(chainId);
+  const intentMs = parseDeadline(intentExpiresAt);
+  const coinbaseMs = parseDeadline(coinbaseExpiry);
+  const bolt11Ms = bolt11ExpiresAt === void 0 ? void 0 : parseDeadline(bolt11ExpiresAt);
+  const deadlines = { intentMs, coinbaseMs, bolt11Ms: bolt11Ms ?? null };
+  const base = {
+    marginMs,
+    effectiveDeadlineMs: null,
+    msRemaining: null,
+    msOfSlack: null,
+    deadlines
+  };
+  if (intentMs === null) {
+    return {
+      ...base,
+      ok: false,
+      code: "EXPIRY_UNPARSABLE",
+      reason: "Intent expiresAt is missing or unparsable."
+    };
+  }
+  if (coinbaseMs === null) {
+    return {
+      ...base,
+      ok: false,
+      code: "EXPIRY_UNPARSABLE",
+      reason: "Coinbase preApprovalExpiry is missing or unparsable."
+    };
+  }
+  const effective = Math.min(intentMs, coinbaseMs);
+  const msRemaining = effective - now;
+  const msOfSlack = msRemaining - marginMs;
+  const withDeadline = {
+    ...base,
+    effectiveDeadlineMs: effective,
+    msRemaining,
+    msOfSlack
+  };
+  if (msRemaining <= 0) {
+    return {
+      ...withDeadline,
+      ok: false,
+      code: "EXPIRED",
+      reason: "The order or the Coinbase link has already expired."
+    };
+  }
+  if (msOfSlack <= 0) {
+    return {
+      ...withDeadline,
+      ok: false,
+      code: "EXPIRY_MARGIN",
+      reason: `Only ${Math.floor(msRemaining / 1e3)}s left before the earliest deadline; this chain needs a ${Math.floor(marginMs / 6e4)} min safety margin.`
+    };
+  }
+  if (bolt11ExpiresAt !== void 0) {
+    if (bolt11Ms === null) {
+      return {
+        ...withDeadline,
+        ok: false,
+        code: "EXPIRY_UNPARSABLE",
+        reason: "BOLT11 invoice expiry is missing or unparsable."
+      };
+    }
+    const bolt11Remaining = bolt11Ms - now;
+    if (bolt11Remaining < BOLT11_MIN_VALIDITY_MS) {
+      return {
+        ...withDeadline,
+        ok: false,
+        code: "BOLT11_TOO_SHORT",
+        reason: `BOLT11 invoice has ${Math.max(0, Math.floor(bolt11Remaining / 1e3))}s of validity left; at least 10 min is required. Request a fresh invoice.`
+      };
+    }
+  }
+  return { ...withDeadline, ok: true, code: null, reason: null };
+}
+
 // scripts/src/lib/key-source.mjs
 import fs5 from "node:fs";
 import path5 from "node:path";
@@ -54155,128 +54292,6 @@ function snapshotFromQuote(quote) {
   };
 }
 
-// scripts/src/lib/expiry.mjs
-var MINUTE = 6e4;
-var MARGINS_MS = {
-  1: 10 * MINUTE,
-  56: 10 * MINUTE,
-  137: 10 * MINUTE,
-  8453: 10 * MINUTE,
-  900: 5 * MINUTE,
-  1500: 10 * MINUTE,
-  lightning: 10 * MINUTE
-};
-var BOLT11_MIN_VALIDITY_MS = 10 * MINUTE;
-var DEFAULT_MARGIN_MS = 10 * MINUTE;
-function formatRemaining(ms) {
-  if (!Number.isFinite(ms)) return "unknown";
-  if (ms <= 0) return "expired";
-  const totalMinutes = Math.floor(ms / 6e4);
-  if (totalMinutes < 1) return `${Math.floor(ms / 1e3)}s`;
-  if (totalMinutes < 60) return `${totalMinutes}m`;
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-  return m ? `${h}h ${m}m` : `${h}h`;
-}
-function marginFor(chainId) {
-  const key = String(chainId);
-  return MARGINS_MS[key] ?? MARGINS_MS[chainId] ?? DEFAULT_MARGIN_MS;
-}
-function parseDeadline(value) {
-  if (value === null || value === void 0 || value === "") return null;
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value < 1e12 ? Math.round(value * 1e3) : Math.round(value);
-  }
-  const s = String(value).trim();
-  if (/^\d+$/.test(s)) {
-    const n = Number(s);
-    return n < 1e12 ? n * 1e3 : n;
-  }
-  const t = Date.parse(s);
-  return Number.isFinite(t) ? t : null;
-}
-function checkExpiry({
-  now,
-  chainId,
-  intentExpiresAt,
-  coinbaseExpiry,
-  bolt11ExpiresAt = void 0
-}) {
-  const marginMs = marginFor(chainId);
-  const intentMs = parseDeadline(intentExpiresAt);
-  const coinbaseMs = parseDeadline(coinbaseExpiry);
-  const bolt11Ms = bolt11ExpiresAt === void 0 ? void 0 : parseDeadline(bolt11ExpiresAt);
-  const deadlines = { intentMs, coinbaseMs, bolt11Ms: bolt11Ms ?? null };
-  const base = {
-    marginMs,
-    effectiveDeadlineMs: null,
-    msRemaining: null,
-    msOfSlack: null,
-    deadlines
-  };
-  if (intentMs === null) {
-    return {
-      ...base,
-      ok: false,
-      code: "EXPIRY_UNPARSABLE",
-      reason: "Intent expiresAt is missing or unparsable."
-    };
-  }
-  if (coinbaseMs === null) {
-    return {
-      ...base,
-      ok: false,
-      code: "EXPIRY_UNPARSABLE",
-      reason: "Coinbase preApprovalExpiry is missing or unparsable."
-    };
-  }
-  const effective = Math.min(intentMs, coinbaseMs);
-  const msRemaining = effective - now;
-  const msOfSlack = msRemaining - marginMs;
-  const withDeadline = {
-    ...base,
-    effectiveDeadlineMs: effective,
-    msRemaining,
-    msOfSlack
-  };
-  if (msRemaining <= 0) {
-    return {
-      ...withDeadline,
-      ok: false,
-      code: "EXPIRED",
-      reason: "The order or the Coinbase link has already expired."
-    };
-  }
-  if (msOfSlack <= 0) {
-    return {
-      ...withDeadline,
-      ok: false,
-      code: "EXPIRY_MARGIN",
-      reason: `Only ${Math.floor(msRemaining / 1e3)}s left before the earliest deadline; this chain needs a ${Math.floor(marginMs / 6e4)} min safety margin.`
-    };
-  }
-  if (bolt11ExpiresAt !== void 0) {
-    if (bolt11Ms === null) {
-      return {
-        ...withDeadline,
-        ok: false,
-        code: "EXPIRY_UNPARSABLE",
-        reason: "BOLT11 invoice expiry is missing or unparsable."
-      };
-    }
-    const bolt11Remaining = bolt11Ms - now;
-    if (bolt11Remaining < BOLT11_MIN_VALIDITY_MS) {
-      return {
-        ...withDeadline,
-        ok: false,
-        code: "BOLT11_TOO_SHORT",
-        reason: `BOLT11 invoice has ${Math.max(0, Math.floor(bolt11Remaining / 1e3))}s of validity left; at least 10 min is required. Request a fresh invoice.`
-      };
-    }
-  }
-  return { ...withDeadline, ok: true, code: null, reason: null };
-}
-
 // scripts/src/lib/guards.mjs
 var UNPAID_STATUS = "payment_unpaid";
 function receiptSignal(source) {
@@ -58057,6 +58072,16 @@ async function cmdPay(opts) {
     }
     if (!result.ok && !opts.json) {
       out(`  ${yellow(`Could not check balances (${result.reason}). Continuing.`)}`);
+    } else if (result.ok && !opts.json) {
+      const hit = (result.options ?? []).find(
+        (o) => o.chainId === String(opts.source.chainId) && o.tokenSymbol === String(opts.source.tokenSymbol).toUpperCase()
+      );
+      const short = `${opts.payer.slice(0, 6)}\u2026${opts.payer.slice(-4)}`;
+      if (hit?.balanceUsd != null) {
+        out(`  ${dim(`Payer ${short} holds about $${hit.balanceUsd} of ${opts.source.tokenSymbol} \u2014 enough for this invoice.`)}`);
+      } else {
+        out(`  ${dim(`Payer ${short}: balance not reported for this coin, so it was not verified.`)}`);
+      }
     }
     payer = { address: opts.payer, family };
   }
@@ -58099,10 +58124,12 @@ async function cmdPay(opts) {
     if (p.display?.hasMemo) {
       out(`  Memo      ${p.display.receiverMemoMasked} ${dim(`(${p.display.memoType})`)}`);
     }
-    out(`  Expires   in ${bold(p.expiry?.expiresIn ?? "?")} ${dim(`(${p.expiry?.effectiveDeadlineIso})`)}`);
-    if (p.reused) {
-      out(`  ${dim(`Reusing the existing unpaid order ${p.rozoPaymentId} \u2014 nothing new was created.`)}`);
-    }
+    const deadline = formatDeadline(p.expiry?.effectiveDeadlineIso);
+    out(`  Expires   ${bold(deadline ?? `in ${p.expiry?.expiresIn ?? "?"}`)}`);
+    out(`  ${dim("After that this order cannot be used and a new one must be created.")}`);
+    out(
+      p.reused ? `  ${dim(`Reusing existing unpaid order ${p.rozoPaymentId} \u2014 nothing new was created.`)}` : `  ${dim(`Order created: ${p.rozoPaymentId}`)}`
+    );
     out(`  ${dim("An order you never fund simply expires and costs nothing.")}`);
     out();
     out(dim(`  The amount you send includes bridge and network fees, so it is`));
@@ -58138,6 +58165,9 @@ async function cmdPay(opts) {
     return confirmed.exitCode;
   }
   const deposit = confirmed.payload.deposit;
+  if (!opts.json) {
+    out(`  ${dim(`Confirming order ${rozoPaymentId} \u2014 no second order was created.`)}`);
+  }
   if (opts.send) {
     const family = chainFamily(deposit.chainId);
     const sender = family === "evm" ? run4 : family === "solana" ? run5 : null;

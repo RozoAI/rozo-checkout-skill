@@ -38,6 +38,7 @@ import {
 import { readPrefs, savePrefs } from './lib/prefs.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
 import { extractLinkId, isRozoPaymentId } from './lib/ids.mjs';
+import { formatDeadline } from './lib/expiry.mjs';
 import { planSignability } from './lib/key-source.mjs';
 import { applyDotenv } from './lib/dotenv.mjs';
 
@@ -75,6 +76,7 @@ const yellow = (s) => c('33', s);
 const red = (s) => c('31', s);
 
 const out = (s = '') => process.stdout.write(`${s}\n`);
+
 
 function printJson(payload) {
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
@@ -373,6 +375,23 @@ async function cmdPay(opts) {
     }
     if (!result.ok && !opts.json) {
       out(`  ${yellow(`Could not check balances (${result.reason}). Continuing.`)}`);
+    } else if (result.ok && !opts.json) {
+      // Say so when the wallet CAN pay, not only when it cannot. A check that
+      // is silent on success is indistinguishable from a check that never ran,
+      // which is the wrong impression to leave right before someone commits
+      // money. "Not checked" is also a distinct, useful answer: the balance
+      // service only covers some chains, so absence of a row is not a verdict.
+      const hit = (result.options ?? []).find(
+        (o) =>
+          o.chainId === String(opts.source.chainId) &&
+          o.tokenSymbol === String(opts.source.tokenSymbol).toUpperCase(),
+      );
+      const short = `${opts.payer.slice(0, 6)}…${opts.payer.slice(-4)}`;
+      if (hit?.balanceUsd != null) {
+        out(`  ${dim(`Payer ${short} holds about $${hit.balanceUsd} of ${opts.source.tokenSymbol} — enough for this invoice.`)}`);
+      } else {
+        out(`  ${dim(`Payer ${short}: balance not reported for this coin, so it was not verified.`)}`);
+      }
     }
     payer = { address: opts.payer, family };
   }
@@ -443,10 +462,19 @@ async function cmdPay(opts) {
     if (p.display?.hasMemo) {
       out(`  Memo      ${p.display.receiverMemoMasked} ${dim(`(${p.display.memoType})`)}`);
     }
-    out(`  Expires   in ${bold(p.expiry?.expiresIn ?? '?')} ${dim(`(${p.expiry?.effectiveDeadlineIso})`)}`);
-    if (p.reused) {
-      out(`  ${dim(`Reusing the existing unpaid order ${p.rozoPaymentId} — nothing new was created.`)}`);
-    }
+    const deadline = formatDeadline(p.expiry?.effectiveDeadlineIso);
+    out(`  Expires   ${bold(deadline ?? `in ${p.expiry?.expiresIn ?? '?'}`)}`);
+    out(`  ${dim('After that this order cannot be used and a new one must be created.')}`);
+    // Say plainly which of the two situations this is. The API's `reused` flag
+    // answers "did an order already exist", which flips to true on the confirm
+    // call for the very order this run just made — accurate, and confusing to
+    // read across two adjacent steps. The user only needs to know whether a
+    // second order was created. One never is.
+    out(
+      p.reused
+        ? `  ${dim(`Reusing existing unpaid order ${p.rozoPaymentId} — nothing new was created.`)}`
+        : `  ${dim(`Order created: ${p.rozoPaymentId}`)}`,
+    );
     out(`  ${dim('An order you never fund simply expires and costs nothing.')}`);
     out();
     out(dim(`  The amount you send includes bridge and network fees, so it is`));
@@ -488,6 +516,14 @@ async function cmdPay(opts) {
     return confirmed.exitCode;
   }
   const deposit = confirmed.payload.deposit;
+
+  // Deliberately does NOT echo confirmed.payload.reused. That flag is true here
+  // for the order this same run created seconds ago, so surfacing it reads as
+  // "wait, which order is this?". The invariant the user cares about is stated
+  // instead, and it is always true: confirming never creates a second order.
+  if (!opts.json) {
+    out(`  ${dim(`Confirming order ${rozoPaymentId} — no second order was created.`)}`);
+  }
 
   // --- 4a. Mode B: hand off to the audited send flow ----------------------
   if (opts.send) {

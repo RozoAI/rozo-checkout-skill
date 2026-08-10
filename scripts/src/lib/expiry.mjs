@@ -50,6 +50,45 @@ export function formatRemaining(ms) {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
+/**
+ * Render a deadline the way someone deciding whether to go and fetch a wallet
+ * needs it: how long they have, and what time that is on their own clock.
+ *
+ * The raw ISO timestamp is UTC and demands mental arithmetic at exactly the
+ * moment the user is trying to work out whether they can make it. The ISO form
+ * stays in --json for machines.
+ *
+ * @param {string} iso   deadline, ISO 8601
+ * @param {object} [opts]
+ * @param {number} [opts.now]     epoch ms, injectable so tests are deterministic
+ * @param {string} [opts.locale]  passed to toLocaleTimeString
+ * @param {string} [opts.timeZone]
+ * @returns {string|null} null when the input is not a usable date
+ */
+export function formatDeadline(iso, { now = Date.now(), locale, timeZone } = {}) {
+  if (!iso) return null;
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+
+  const msLeft = at.getTime() - now;
+  if (msLeft <= 0) return 'expired';
+
+  const minutes = Math.round(msLeft / 60000);
+  const human =
+    minutes < 1
+      ? 'less than a minute'
+      : minutes < 60
+        ? `about ${minutes} minute${minutes === 1 ? '' : 's'}`
+        : `about ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+
+  const clock = at.toLocaleTimeString(locale, {
+    hour: 'numeric',
+    minute: '2-digit',
+    ...(timeZone ? { timeZone } : {}),
+  });
+  return `in ${human}, at ${clock} local time`;
+}
+
 export function marginFor(chainId) {
   const key = String(chainId);
   return MARGINS_MS[key] ?? MARGINS_MS[chainId] ?? DEFAULT_MARGIN_MS;
