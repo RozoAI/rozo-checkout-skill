@@ -67,9 +67,12 @@ unless they have explicitly asked for Mode B.
 Mode B takes its signing key from the first of these that exists:
 `--keyfile <path>`; then `~/.config/solana/id.json` for Solana or
 `ROZO_CHECKOUT_EVM_KEYSTORE` for EVM; then a raw key in the environment. The
-environment variables below may also be set in a `.env` in the working
-directory (or `--env-file <path>`); only `ROZO_CHECKOUT_*` keys are read from
-it, and the real environment wins over the file.
+environment variables below may also be set in a `.env` — either in the
+working directory or at `$HOME/.env`, whichever is found first, or an explicit
+`--env-file <path>`. Only `ROZO_CHECKOUT_*` keys are read from it, and the
+real environment wins over the file. Note that the working directory is the
+skill's own directory whenever you follow the run commands above, so `$HOME`
+is where a user's own `.env` will usually be.
 
 | Variable | Used by | Notes |
 |---|---|---|
@@ -188,6 +191,21 @@ it, and never re-type an address by hand.
 
 Then pick a mode.
 
+> **"Mode A" and "Mode B" are internal vocabulary. Never say them to the
+> user.** They are how this document names a branch you take; they carry no
+> meaning for someone who just wants an invoice paid. Say who sends the money
+> and what the user has to do — nothing else about the mechanism.
+>
+> | Do not say | Say |
+> |---|---|
+> | "Stellar is Mode A only, no `--send`" | "I can't send Stellar for you — here's the address and memo to pay from your wallet" (or: "I'll pay it with your `stellar-agent-wallet`") |
+> | "Mode B needs `ROZO_CHECKOUT_EVM_KEY`" | "To have me pay it directly I'd need a hot-wallet key configured; otherwise pay from your own wallet and I'll watch for it" |
+> | "`CAP_PER_TX`: over the Mode B limit" | "That's over the $1,100 I'll sign for automatically — pay this one from your own wallet, which has no limit" |
+>
+> Whichever branch you take, the user should end up reading the same four
+> things: the amount, the destination, the memo if there is one, and what they
+> personally need to do next.
+
 **Mode A (default) — the user pays from their own wallet. No key, no env var,
 no setup.** Give them the
 `deposit` block. For Lightning, `deposit.lnInvoice` is the BOLT11 string to
@@ -301,7 +319,7 @@ Then stop and hand off. Do not run any send script again.
 | `DECIMALS_MISMATCH` | the token's on-chain decimals disagree with expectations | do not sign — the amount could be off by orders of magnitude |
 | `CAP_PER_TX` | above the $1,100 per-payment limit for automated sending | no override exists; have the user pay from their own wallet (Mode A), which has no limit |
 | `UNSUPPORTED_SOURCE` | that coin/chain pair is not accepted | offer the table at the top of this file (the server's own list omits Lightning) |
-| `NO_KEY_SOURCE` | no keyfile, no `~/.config/solana/id.json`, no key env var | tell the user the three options; do not pick one for them |
+| `NO_KEY_SOURCE` | no keyfile, no `~/.config/solana/id.json`, no key env var | tell the user the three options; do not pick one for them. The message lists the `.env` paths that were searched — if theirs is somewhere else, pass `--env-file <path>` rather than moving their file |
 | `KEYFILE_PERMISSIONS` | the key file is readable by other users | have them run `chmod 600 <path>` |
 | `TRACKED_KEYFILE` | the key file is tracked by git | have them untrack it before signing with it |
 | `ENV_FILE_PERMISSIONS` | the `.env` is readable by other users | have them run `chmod 600 .env` |
@@ -326,8 +344,15 @@ That is a different, legacy protocol. Say so and stop.
 
 ### The user wants to pay in Base USDC
 
-Point them at `pay-coinbase` or `pay-invoice`. This skill would add a bridge
-they do not need.
+A Coinbase link takes Base USDC natively, so the cheapest path is paying it
+straight from a Base wallet — `pay-coinbase` or `pay-invoice` do that, and
+this skill would add a hop nobody needs.
+
+**But check they are actually installed before pointing at them.** If neither
+is, do not leave the user at a dead end: this skill handles chain `8453` /
+`USDC` like any other source. Say plainly that it costs a small extra fee
+versus paying direct, and carry on with the normal flow. A working payment
+with one extra hop beats a referral to a tool that is not there.
 
 ### Underpaid
 

@@ -25,6 +25,7 @@ import { keccak256 } from 'viem';
 
 import { SkillError } from './output.mjs';
 import { assertNotTrackedByGit } from './keys.mjs';
+import { envFileCandidates } from './dotenv.mjs';
 
 export const EVM_KEY_ENV = 'ROZO_CHECKOUT_EVM_KEY';
 export const SOL_KEY_ENV = 'ROZO_CHECKOUT_SOL_KEY';
@@ -280,7 +281,19 @@ export function looksLikeKeystore(text) {
  *
  * kind: 'keypair-file' | 'keystore' | 'env'
  */
-export function planKeySource({ family, keyfile, env = process.env }) {
+/**
+ * "…Looked for a .env in: <paths>." — appended to NO_KEY_SOURCE so the user
+ * can see WHERE the file was expected. Without it the error is unactionable
+ * for the common case: the docs say "a .env in the working directory", but
+ * every documented command cd's into the skill directory first, so a .env the
+ * user put somewhere sensible was never in scope and nothing said so.
+ */
+function searchedSuffix(searched) {
+  if (!searched || !searched.length) return '';
+  return ` Looked for a .env in: ${searched.map(displayPath).join(', ')}.`;
+}
+
+export function planKeySource({ family, keyfile, env = process.env, searched }) {
   if (keyfile) {
     const resolved = expandHome(keyfile);
     let text;
@@ -318,7 +331,8 @@ export function planKeySource({ family, keyfile, env = process.env }) {
     throw new SkillError(
       'NO_KEY_SOURCE',
       `No signing key found. Either create one with solana-keygen (writes ` +
-        `${displayPath(standard)}), pass --keyfile <path>, or set ${SOL_KEY_ENV}.`,
+        `${displayPath(standard)}), pass --keyfile <path>, or set ${SOL_KEY_ENV}.` +
+        searchedSuffix(searched),
     );
   }
 
@@ -332,7 +346,7 @@ export function planKeySource({ family, keyfile, env = process.env }) {
     throw new SkillError(
       'NO_KEY_SOURCE',
       `No signing key found. Either point ${EVM_KEYSTORE_ENV} at an encrypted JSON keystore, ` +
-        `pass --keyfile <path>, or set ${EVM_KEY_ENV}.`,
+        `pass --keyfile <path>, or set ${EVM_KEY_ENV}.${searchedSuffix(searched)}`,
     );
   }
 
@@ -429,7 +443,10 @@ export function planSignability({
   // Surfacing an unreadable / world-readable / git-tracked .env here rather
   // than mid-send is the same trade: fail before an order is expiring.
   if (applyEnvFile) applyEnvFile({ file: envFile, cwd, env: probeEnv });
-  return planKeySource({ family, keyfile, env: probeEnv });
+  // Only meaningful when no explicit --env-file was given: with one, a missing
+  // file already threw ENV_FILE_MISSING naming that exact path.
+  const searched = envFile ? null : envFileCandidates({ cwd });
+  return planKeySource({ family, keyfile, env: probeEnv, searched });
 }
 
 /** `~/x` in a config value is not expanded by the shell when quoted. */

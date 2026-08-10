@@ -30,7 +30,7 @@ import { assertRozoPaymentId, maskAddress } from './lib/ids.mjs';
 import { chainName, decimalsFor } from './lib/amounts.mjs';
 import { assertNoTrackedDotEnv } from './lib/keys.mjs';
 import { planKeySource, loadKeySource } from './lib/key-source.mjs';
-import { applyDotenv } from './lib/dotenv.mjs';
+import { applyDotenv, envFileCandidates } from './lib/dotenv.mjs';
 import { promptPassphrase } from './lib/passphrase.mjs';
 import { preflight, finalPayabilityCheck } from './lib/presend.mjs';
 import { claimSend, recordSendResult } from './lib/state.mjs';
@@ -67,7 +67,11 @@ async function main(argv) {
   const dotenv = applyDotenv({ file: args['env-file'] });
   // Most Solana users already have ~/.config/solana/id.json from solana-keygen;
   // that is preferred over a raw key in the environment.
-  const plan = planKeySource({ family: 'solana', keyfile: args.keyfile });
+  const plan = planKeySource({
+    family: 'solana',
+    keyfile: args.keyfile,
+    searched: args['env-file'] ? null : envFileCandidates(),
+  });
   const loaded = await loadKeySource(plan, { family: 'solana', askPassphrase: promptPassphrase });
   const secret = loaded.secretKey;
   const keypair =

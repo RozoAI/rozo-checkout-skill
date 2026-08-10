@@ -16,6 +16,7 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { SkillError } from './output.mjs';
 import { assertNotTrackedByGit } from './keys.mjs';
@@ -97,10 +98,29 @@ export function filterAllowed(vars) {
 }
 
 /**
- * Locate the file to read: an explicit path, or `.env` in the working
- * directory. Returns null when there is nothing to load.
+ * The places a `.env` is looked for, in order, when `--env-file` is not given.
+ *
+ * `$HOME/.env` is in the list because of how this skill is actually run. Every
+ * documented command starts with `cd` into the skill's own directory, so the
+ * working directory is the skill install — never wherever the user was
+ * standing when they wrote their `.env`. A user who follows the docs ("a .env
+ * in the working directory") and puts it in their home directory would
+ * otherwise get NO_KEY_SOURCE with no indication of where the file was
+ * expected. Home is already this tool's convention for user-level state
+ * (`~/.rozo-checkout`, `~/.config/solana/id.json`).
  */
-export function resolveEnvFile({ file, cwd = process.cwd() } = {}) {
+export function envFileCandidates({ cwd = process.cwd(), home = os.homedir() } = {}) {
+  const candidates = [path.join(cwd, '.env')];
+  const inHome = path.join(home, '.env');
+  if (inHome !== candidates[0]) candidates.push(inHome);
+  return candidates;
+}
+
+/**
+ * Locate the file to read: an explicit path, else the first candidate that
+ * exists. Returns null when there is nothing to load.
+ */
+export function resolveEnvFile({ file, cwd = process.cwd(), home = os.homedir() } = {}) {
   if (file) {
     const p = path.resolve(file);
     if (!fs.existsSync(p)) {
@@ -108,8 +128,7 @@ export function resolveEnvFile({ file, cwd = process.cwd() } = {}) {
     }
     return p;
   }
-  const fallback = path.join(cwd, '.env');
-  return fs.existsSync(fallback) ? fallback : null;
+  return envFileCandidates({ cwd, home }).find((p) => fs.existsSync(p)) ?? null;
 }
 
 /**
@@ -122,8 +141,13 @@ export function resolveEnvFile({ file, cwd = process.cwd() } = {}) {
  *
  * @returns {{path: string, applied: string[], ignored: number} | null}
  */
-export function applyDotenv({ file, cwd = process.cwd(), env = process.env } = {}) {
-  const target = resolveEnvFile({ file, cwd });
+export function applyDotenv({
+  file,
+  cwd = process.cwd(),
+  home = os.homedir(),
+  env = process.env,
+} = {}) {
+  const target = resolveEnvFile({ file, cwd, home });
   if (!target) return null;
 
   // Same hygiene as a key file: not world-readable, not tracked by git.
