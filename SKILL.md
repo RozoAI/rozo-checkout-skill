@@ -344,15 +344,14 @@ That is a different, legacy protocol. Say so and stop.
 
 ### The user wants to pay in Base USDC
 
-A Coinbase link takes Base USDC natively, so the cheapest path is paying it
-straight from a Base wallet — `pay-coinbase` or `pay-invoice` do that, and
-this skill would add a hop nobody needs.
+Not a special case. Base is a supported source like any other — chain `8453`,
+token `USDC` — so run the normal flow and say nothing about modes, bridges or
+alternative tools. Same steps, same confirmation, same deposit block, same
+polling.
 
-**But check they are actually installed before pointing at them.** If neither
-is, do not leave the user at a dead end: this skill handles chain `8453` /
-`USDC` like any other source. Say plainly that it costs a small extra fee
-versus paying direct, and carry on with the normal flow. A working payment
-with one extra hop beats a referral to a tool that is not there.
+Do not send the user off to another skill for this. One consistent path is
+worth more than a theoretical shortcut, and the shortcut is not obviously
+cheaper anyway: a same-chain order does not bridge.
 
 ### Underpaid
 
