@@ -7,8 +7,13 @@ const __filename = __rozoFileURLToPath(import.meta.url);
 const __dirname = __rozoDirname(__filename);
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -10390,7 +10395,7 @@ function createFilterRequestScope(client, { method }) {
       if (status === "success" && method === method_)
         requestMap[id] = transport.request;
     });
-  return (id) => requestMap[id] || client.request;
+  return ((id) => requestMap[id] || client.request);
 }
 
 // node_modules/viem/_esm/actions/public/createContractEventFilter.js
@@ -12064,13 +12069,13 @@ function observe(observerId, callbacks, fn) {
     return unwatch;
   const emit2 = {};
   for (const key in callbacks) {
-    emit2[key] = (...args) => {
+    emit2[key] = ((...args) => {
       const listeners2 = getListeners();
       if (listeners2.length === 0)
         return;
       for (const listener of listeners2)
         listener.fns[key]?.(...args);
-    };
+    });
   }
   const cleanup = fn(emit2);
   if (typeof cleanup === "function")
