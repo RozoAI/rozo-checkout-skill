@@ -1,22 +1,18 @@
 ---
 name: rozo-checkout
 description: >
-  Pay an OpenRouter Coinbase Payment Link with BTC Lightning, or with USDT/USDC
-  on Solana, BNB Chain, Ethereum, Polygon, Base or Stellar — the coins a
-  Coinbase Payment Link cannot take directly. A bridge creates a one-time
-  deposit order for the coin you actually hold, then a funder wallet settles the
-  Coinbase invoice for you. Triggers on "rozo-checkout", "checkout-rozo",
-  "pay-any", "pay with USDT on solana", "pay with USDT on bnb", "pay this link
-  with bitcoin / lightning", "用 USDT 付这个链接", "用比特币付", "跨链付这个
-  invoice", or on a payments.coinbase.com/payment-links/pl_* (or
-  payment-sessions/paymentSession_*) URL mentioned together with any coin other
-  than Base USDC. If the caller wants to pay in Base USDC, use pay-coinbase or
-  pay-invoice instead — this skill adds a bridge they do not need.
+  Pay an OpenRouter Coinbase Payment Link with Stellar, Solana, BNB Chain,
+  Ethereum, Polygon, Base (USDT/USDC) or Bitcoin Lightning. A bridge creates a
+  one-time deposit order for the coin you actually hold, then a funder wallet
+  settles the Coinbase invoice for you. Use when a
+  payments.coinbase.com/payment-links/pl_* (or
+  payment-sessions/paymentSession_*) URL should be paid with any of these
+  coins, or on "rozo-checkout" / "pay this link with bitcoin".
 metadata:
   version: 1.0.0
 ---
 
-# Pay a Coinbase Payment Link with a non-Base-USDC coin
+# Pay a Coinbase Payment Link with Stellar, Solana, BNB Chain, Bitcoin and more
 
 ## What this is
 
@@ -37,10 +33,6 @@ order with a deposit address for the coin you chose, and once your deposit
 lands, a funder wallet pays the Coinbase invoice. **There is no discount** —
 `callerPays` equals the invoice amount. If a response ever shows a discount, or
 `callerPays` differs from the invoice, stop and explain; do not proceed.
-
-Sibling skills: `pay-coinbase` (sign ERC-3009 yourself, Base USDC),
-`pay-invoice` (hosted relay, Base USDC). Use those when the caller already has
-Base USDC.
 
 ## Runtime
 
