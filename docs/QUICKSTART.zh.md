@@ -185,6 +185,8 @@ ROZO_CHECKOUT_EVM_KEYSTORE=~/wallets/hot.json \
 <details>
 <summary><b>为 <code>--send</code> 配置本地钱包</b> —— .env 模板与各钱包导出步骤</summary>
 
+你很可能完全不需要这些：默认路径不需要任何私钥；Stellar 来源可用 `stellar-agent-wallet` skill，它有自己的密钥管理来完成发送 —— 这份 `.env` 配置只用于无人值守的 EVM/Solana 自动化，且应使用余额很低的专用热钱包。
+
 **默认路径不需要这里的任何东西。** 用你自己的钱包付款既不需要私钥也不需要任何配置，
 而且支持那些在这里根本用不了的钱包 —— 包括硬件钱包和交易所账户。
 
