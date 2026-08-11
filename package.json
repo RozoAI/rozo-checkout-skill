@@ -1,6 +1,6 @@
 {
   "name": "@rozoai/checkout",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "type": "module",
   "description": "Pay an OpenRouter Coinbase Payment Link with BTC Lightning, or USDT/USDC on Solana, BNB Chain, Ethereum, Polygon, Base or Stellar.",
   "license": "MIT",
