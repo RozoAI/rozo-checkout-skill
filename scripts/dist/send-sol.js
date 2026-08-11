@@ -32528,13 +32528,26 @@ function resolveEnvFile({ file, cwd = process.cwd(), home = os.homedir() } = {})
   }
   return envFileCandidates({ cwd, home }).find((p) => fs2.existsSync(p)) ?? null;
 }
+function pickImplicitEnvFile({ cwd, home }) {
+  const [inCwd, inHome] = envFileCandidates({ cwd, home });
+  if (inCwd && fs2.existsSync(inCwd)) return inCwd;
+  if (!inHome || !fs2.existsSync(inHome)) return null;
+  try {
+    if (Object.keys(filterAllowed(parseDotenv(fs2.readFileSync(inHome, "utf8")))).length === 0) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return inHome;
+}
 function applyDotenv({
   file,
   cwd = process.cwd(),
   home = os.homedir(),
   env = process.env
 } = {}) {
-  const target = resolveEnvFile({ file, cwd, home });
+  const target = file ? resolveEnvFile({ file, cwd, home }) : pickImplicitEnvFile({ cwd, home });
   if (!target) return null;
   let stat;
   try {

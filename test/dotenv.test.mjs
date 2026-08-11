@@ -225,6 +225,49 @@ test('the working directory wins over home when both have a .env', () => {
   }
 });
 
+test('an unrelated home .env is ignored rather than made fatal', () => {
+  // The regression this guards: $HOME/.env is a file many people already have
+  // for other projects, conventionally mode 0644. Adopting it unconditionally
+  // made its permissions fatal and broke signing for users who were passing
+  // --keyfile and never meant to offer us that file at all.
+  const dir = tempDir();
+  const home = tempDir();
+  try {
+    writeEnv(home, 'OPENAI_API_KEY=not-ours\nDATABASE_URL=postgres://x\n', 0o644);
+    const env = {};
+    assert.equal(applyDotenv({ cwd: dir, home, env }), null);
+    assert.deepEqual(env, {});
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a home .env that IS ours still gets the full hygiene check', () => {
+  const dir = tempDir();
+  const home = tempDir();
+  try {
+    writeEnv(home, `ROZO_CHECKOUT_EVM_KEY=${KEY}\n`, 0o644);
+    assert.throws(() => applyDotenv({ cwd: dir, home, env: {} }), (e) => e.code === 'ENV_FILE_PERMISSIONS');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a malformed unrelated home .env is skipped, not an error', () => {
+  const dir = tempDir();
+  const home = tempDir();
+  try {
+    writeEnv(home, 'this is not a dotenv line at all\n');
+    const env = {};
+    assert.equal(applyDotenv({ cwd: dir, home, env }), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('cwd === home yields one candidate, not a duplicate', () => {
   const dir = tempDir();
   try {

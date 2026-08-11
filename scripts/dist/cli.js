@@ -53857,13 +53857,26 @@ function resolveEnvFile({ file, cwd = process.cwd(), home = os3.homedir() } = {}
   }
   return envFileCandidates({ cwd, home }).find((p) => fs5.existsSync(p)) ?? null;
 }
+function pickImplicitEnvFile({ cwd, home }) {
+  const [inCwd, inHome] = envFileCandidates({ cwd, home });
+  if (inCwd && fs5.existsSync(inCwd)) return inCwd;
+  if (!inHome || !fs5.existsSync(inHome)) return null;
+  try {
+    if (Object.keys(filterAllowed(parseDotenv(fs5.readFileSync(inHome, "utf8")))).length === 0) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return inHome;
+}
 function applyDotenv({
   file,
   cwd = process.cwd(),
   home = os3.homedir(),
   env = process.env
 } = {}) {
-  const target = resolveEnvFile({ file, cwd, home });
+  const target = file ? resolveEnvFile({ file, cwd, home }) : pickImplicitEnvFile({ cwd, home });
   if (!target) return null;
   let stat;
   try {

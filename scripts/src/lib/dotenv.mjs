@@ -132,6 +132,38 @@ export function resolveEnvFile({ file, cwd = process.cwd(), home = os.homedir() 
 }
 
 /**
+ * Choose among the implicit candidates, skipping a `$HOME/.env` that has
+ * nothing to do with this tool.
+ *
+ * `$HOME/.env` is a file many people already have, for unrelated projects, and
+ * it is conventionally mode 0644. Treating it as ours unconditionally would
+ * make its permissions fatal — a user signing happily via `--keyfile` would
+ * start getting ENV_FILE_PERMISSIONS about a file they never meant to offer
+ * us. So the home candidate is only adopted once it is known to carry an
+ * allowed key; if it is unreadable, unparseable, or simply not about us, it is
+ * skipped as though it were not there.
+ *
+ * The working-directory candidate keeps the strict behaviour: a `.env` sitting
+ * where the command runs is deliberate, and quietly ignoring a malformed or
+ * world-readable one there would hide a real problem.
+ */
+function pickImplicitEnvFile({ cwd, home }) {
+  const [inCwd, inHome] = envFileCandidates({ cwd, home });
+  if (inCwd && fs.existsSync(inCwd)) return inCwd;
+  if (!inHome || !fs.existsSync(inHome)) return null;
+  try {
+    // Read-only probe. Nothing is applied and no hygiene check runs yet — this
+    // only answers "is this file ours?".
+    if (Object.keys(filterAllowed(parseDotenv(fs.readFileSync(inHome, 'utf8')))).length === 0) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return inHome;
+}
+
+/**
  * Read a `.env` and apply its allowed keys to `process.env`, WITHOUT
  * overwriting anything already set there.
  *
@@ -147,7 +179,9 @@ export function applyDotenv({
   home = os.homedir(),
   env = process.env,
 } = {}) {
-  const target = resolveEnvFile({ file, cwd, home });
+  const target = file
+    ? resolveEnvFile({ file, cwd, home })
+    : pickImplicitEnvFile({ cwd, home });
   if (!target) return null;
 
   // Same hygiene as a key file: not world-readable, not tracked by git.
