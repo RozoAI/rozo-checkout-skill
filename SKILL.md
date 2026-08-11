@@ -23,7 +23,7 @@ caller pay one with something else:
 |---|---|
 | USDT or USDC | Solana, BNB Chain, Ethereum, Polygon |
 | USDC | Base, Stellar |
-| BTC | Lightning (BOLT11) |
+| BTC | Lightning (BOLT11) — any wallet that pays an invoice works, including Cashu/ecash wallets that melt to Lightning |
 
 Native SOL, native BNB, native ETH and on-chain BTC are **not** supported —
 always say "USDT **on** Solana", never "SOL".
