@@ -34,7 +34,7 @@ metadata:
       - "~/.rozo-checkout/  (state + prefs + optional .env; created by this tool)"
       - ".env in the working directory or a --env-file path (ROZO_CHECKOUT_* keys only)"
       - "Mode B key files, read-only: ~/.config/solana/id.json, a --keyfile path, or the ROZO_CHECKOUT_EVM_KEYSTORE path"
-      - ".git/index read-only, to refuse git-tracked key files"
+      - ".git metadata read-only (index, and gitdir/commondir resolution for worktrees), to refuse git-tracked key files"
     spending:
       - "Mode B (--send) signs and broadcasts one ERC-20/SPL transfer, capped at $1,100,"
       - "only after create-order --confirm recorded a digest-bound confirmation."
