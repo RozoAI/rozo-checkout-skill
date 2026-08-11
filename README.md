@@ -33,7 +33,7 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 | Base | `usdc-base` | `8453` | 6 decimals |
 | Solana | `usdt-solana` `usdc-solana` | `900` | SPL; native SOL not supported |
 | Stellar | `usdc-stellar` | `1500` | `MEMO_TEXT` memo required — shown in the deposit block |
-| Bitcoin Lightning | `btc-lightning` | `lightning` | BOLT11; amounts in satoshis |
+| Bitcoin Lightning | `btc-lightning` | `lightning` | BOLT11; amounts in satoshis. Any wallet that can pay an invoice works, including Cashu/ecash wallets — the mint melts your ecash into the Lightning payment. |
 
 Native gas coins (SOL, BNB, ETH, MATIC) and on-chain BTC are not accepted.
 
@@ -52,7 +52,10 @@ already hold and pay from wherever it already lives.
   address plus `receiverMemo`, so whatever you send from — exchange or wallet —
   must let you set a memo. Omit it and the payment is lost.
 - **Lightning pays an invoice, not an address.** Scan or paste
-  `deposit.lnInvoice`; there is no address to send to.
+  `deposit.lnInvoice`; there is no address to send to. A Cashu/ecash wallet
+  works here too — paying the invoice melts the ecash on your behalf, and this
+  route settles against ROZO's own Lightning node rather than a third-party
+  swap, so no special handling is needed on our side.
 - **Only `--send` needs a private key**, read from `ROZO_CHECKOUT_EVM_KEY` or
   `ROZO_CHECKOUT_SOL_KEY`, and it covers EVM chains and Solana only. Everything
   else is keyless.
