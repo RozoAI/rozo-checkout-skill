@@ -15,8 +15,9 @@ metadata:
   # scanners do not have to reverse-engineer it from the bundle.
   permissions:
     network_endpoints:
-      - payments.coinbase.com     # quote the Coinbase payment session
-      - intentapiv4.rozo.ai       # create/track the bridge order
+      - apiserver.mpprouter.dev   # quote the Coinbase link, create/track the order
+      - intentapiv4.rozo.ai       # bridge order status (payment-api)
+      - intentapi.rozo.ai         # wallet balance / payment-option assistance
       - "per-chain public RPCs"   # Mode B only: broadcast the signed transfer
     environment_variables:
       read_only:
@@ -26,9 +27,13 @@ metadata:
         - ROZO_CHECKOUT_KEYSTORE_PASSPHRASE
         - "ROZO_CHECKOUT_RPC_<chainId>"
         - ROZO_CHECKOUT_STATE_DIR
+        - ROZO_CHECKOUT_MPP_BASE         # endpoint overrides (testing/self-host)
+        - ROZO_CHECKOUT_INTENTS_BASE
+        - ROZO_CHECKOUT_INTENT_API
     filesystem:
       - "~/.rozo-checkout/  (state + prefs + optional .env; created by this tool)"
       - ".env in the working directory or a --env-file path (ROZO_CHECKOUT_* keys only)"
+      - "Mode B key files, read-only: ~/.config/solana/id.json, a --keyfile path, or the ROZO_CHECKOUT_EVM_KEYSTORE path"
       - ".git/index read-only, to refuse git-tracked key files"
     spending:
       - "Mode B (--send) signs and broadcasts one ERC-20/SPL transfer, capped at $1,100,"
