@@ -10,8 +10,134 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { SkillError } from './output.mjs';
+
+// ---------------------------------------------------------------------------
+// Git-tracked detection, WITHOUT child_process.
+//
+// This module used to shell out to `git rev-parse` / `git ls-files`. Those
+// were the only subprocess executions in the whole skill, and they made every
+// security scan of the published bundle light up with "shell command execution
+// detected" — indistinguishable, to a scanner, from a skill that runs
+// arbitrary commands. Reading `.git/index` directly answers the same question
+// ("does the index contain this path?") with plain file reads, which is also
+// exactly what `git ls-files` does under the hood.
+//
+// The fail-closed contract is unchanged: a definite "no repository" passes,
+// a definite "tracked" refuses, and anything unverifiable — an index version
+// this parser does not support, a corrupt index, an unreadable directory —
+// refuses rather than assumes.
+// ---------------------------------------------------------------------------
+
+/**
+ * Find the repository containing `dir`: walk up looking for a `.git` entry.
+ * Returns { root, gitDir } or null when no repository contains `dir`.
+ * A `.git` FILE (worktree / submodule) is followed via its `gitdir:` pointer.
+ */
+export function findGitRepo(dir) {
+  let cur = path.resolve(dir);
+  for (;;) {
+    const dotGit = path.join(cur, '.git');
+    let st = null;
+    try {
+      st = fs.statSync(dotGit);
+    } catch {
+      st = null;
+    }
+    if (st) {
+      if (st.isDirectory()) return { root: cur, gitDir: dotGit };
+      // Worktree/submodule pointer file: "gitdir: <path>\n"
+      let text;
+      try {
+        text = fs.readFileSync(dotGit, 'utf8');
+      } catch {
+        throw new SkillError(
+          'TRACKED_DOTENV_UNVERIFIABLE',
+          'A .git entry exists here but could not be read, so tracked status cannot be proved. Refusing.',
+        );
+      }
+      const m = /^gitdir:\s*(.+)\s*$/m.exec(text);
+      if (!m) {
+        throw new SkillError(
+          'TRACKED_DOTENV_UNVERIFIABLE',
+          'A .git file exists here but is not a recognised gitdir pointer. Refusing.',
+        );
+      }
+      return { root: cur, gitDir: path.resolve(cur, m[1]) };
+    }
+    const parent = path.dirname(cur);
+    if (parent === cur) return null;
+    cur = parent;
+  }
+}
+
+/**
+ * Parse a `.git/index` buffer and return the set of tracked paths
+ * (repo-root-relative, POSIX separators). Supports index versions 2 and 3.
+ * Version 4 (path prefix compression) and anything unrecognised throw —
+ * fail closed, never guess.
+ */
+export function trackedPathsFromIndex(buf) {
+  const fail = (why) =>
+    new SkillError(
+      'TRACKED_DOTENV_UNVERIFIABLE',
+      `The git index could not be interpreted (${why}), so tracked status cannot be proved. Refusing.`,
+    );
+  if (buf.length < 12 || buf.toString('latin1', 0, 4) !== 'DIRC') throw fail('bad header');
+  const version = buf.readUInt32BE(4);
+  if (version !== 2 && version !== 3) throw fail(`unsupported index version ${version}`);
+  const count = buf.readUInt32BE(8);
+  const paths = new Set();
+  let off = 12;
+  for (let i = 0; i < count; i++) {
+    const entryStart = off;
+    if (off + 62 > buf.length) throw fail('truncated entry');
+    const flags = buf.readUInt16BE(off + 60);
+    let nameOff = off + 62;
+    // v3: an extended-flags word follows when the extended bit is set.
+    if (flags & 0x4000) {
+      if (version < 3) throw fail('extended flags in v2 index');
+      nameOff += 2;
+    }
+    const nameLen = flags & 0x0fff;
+    let end;
+    if (nameLen < 0x0fff) {
+      end = nameOff + nameLen;
+      if (end > buf.length) throw fail('truncated path');
+    } else {
+      end = buf.indexOf(0, nameOff);
+      if (end === -1) throw fail('unterminated path');
+    }
+    paths.add(buf.toString('utf8', nameOff, end));
+    // Entries are NUL-padded so the TOTAL length is a multiple of 8.
+    const entryLen = end - entryStart;
+    off = entryStart + (Math.floor(entryLen / 8) + 1) * 8;
+  }
+  return paths;
+}
+
+/**
+ * Which of `files` (absolute paths inside `root`) does the index track?
+ * Unverifiable states throw; "no index yet" means nothing is tracked.
+ */
+function trackedAmong(repo, files) {
+  const indexPath = path.join(repo.gitDir, 'index');
+  let buf;
+  try {
+    buf = fs.readFileSync(indexPath);
+  } catch (err) {
+    if (err?.code === 'ENOENT') return []; // fresh repo, nothing staged or committed
+    throw new SkillError(
+      'TRACKED_DOTENV_UNVERIFIABLE',
+      'The git index exists but could not be read, so tracked status cannot be proved. Refusing.',
+    );
+  }
+  const tracked = trackedPathsFromIndex(buf);
+  return files.filter((f) => {
+    const rel = path.relative(repo.root, path.resolve(f)).split(path.sep).join('/');
+    return tracked.has(rel);
+  });
+}
 
 export const EVM_KEY_ENV = 'ROZO_CHECKOUT_EVM_KEY';
 export const SOL_KEY_ENV = 'ROZO_CHECKOUT_SOL_KEY';
@@ -45,54 +171,16 @@ const ENV_FILE_RE = /^\.env(\..+)?$/;
 const PUBLIC_ENV_RE = /^\.env\.(example|sample|template)$/;
 
 /**
- * Is `dir` inside a git work tree? Fails CLOSED: git being unavailable or
- * erroring in an uninterpretable way is a refusal, not a pass. The one
- * interpretable failure — git saying it is not a repository — is a definite
- * answer and returns false.
- */
-function insideGitWorkTree(dir, whatFor) {
-  try {
-    return (
-      execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
-        cwd: dir,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        encoding: 'utf8',
-      }).trim() === 'true'
-    );
-  } catch (err) {
-    const stderr = String(err?.stderr || '');
-    if (/not a git repository|does not appear to be a git repository/i.test(stderr)) return false;
-    throw new SkillError(
-      'TRACKED_DOTENV_UNVERIFIABLE',
-      `git could not be consulted (${err?.code || 'unknown error'}), so it cannot be proved ` +
-        `that ${whatFor} is untracked. Refusing rather than assuming it is safe.`,
-    );
-  }
-}
-
-/**
  * Refuse a secret-bearing file that git tracks. A key file committed to a
  * repository is one `git push` from being public.
  */
 export function assertNotTrackedByGit(file) {
   const dir = path.dirname(path.resolve(file));
-  const base = path.basename(file);
-  if (!insideGitWorkTree(dir, 'this key file')) return { checked: true, tracked: false };
-
-  let out;
-  try {
-    out = execFileSync('git', ['ls-files', '-z', '--', base], {
-      cwd: dir,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      encoding: 'utf8',
-    });
-  } catch {
-    throw new SkillError(
-      'TRACKED_DOTENV_UNVERIFIABLE',
-      'git could not report whether this key file is tracked. Refusing to use it.',
-    );
-  }
-  if (out.split('\0').filter(Boolean).length) {
+  const repo = findGitRepo(dir);
+  if (!repo) return { checked: true, tracked: false };
+  const hits = trackedAmong(repo, [file]);
+  if (hits.length) {
+    const base = path.basename(file);
     throw new SkillError(
       'TRACKED_KEYFILE',
       `${base} is tracked by git. A committed key is one push from being public — ` +
@@ -119,48 +207,12 @@ export function assertNoTrackedDotEnv(cwd = process.cwd()) {
   }
   if (candidates.length === 0) return { checked: true, tracked: false, candidates: [] };
 
-  // Is this a git repository at all?
-  let insideRepo;
-  try {
-    insideRepo =
-      execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
-        cwd,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        encoding: 'utf8',
-      }).trim() === 'true';
-  } catch (err) {
-    // The ONLY interpretable failure is git telling us this is not a
-    // repository — a definite answer, not an error we cannot read. Everything
-    // else (git missing, permission denied, a corrupt or unreadable repo, an
-    // unrecognised message) leaves the question open, and therefore refuses.
-    const stderr = String(err?.stderr || '');
-    const notARepo = /not a git repository|does not appear to be a git repository/i.test(stderr);
-    if (notARepo) return { checked: true, tracked: false, candidates };
-    throw new SkillError(
-      'TRACKED_DOTENV_UNVERIFIABLE',
-      `Found ${candidates.length} .env file(s) here, but git could not be consulted ` +
-        `(${err?.code || 'unknown error'}), so it cannot be proved they are untracked. ` +
-        'Refusing to use hot-wallet keys in this directory.',
-    );
-  }
-  if (!insideRepo) return { checked: true, tracked: false, candidates };
+  const repo = findGitRepo(cwd);
+  if (!repo) return { checked: true, tracked: false, candidates };
 
-  let out;
-  try {
-    out = execFileSync('git', ['ls-files', '-z', '--', ...candidates], {
-      cwd,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      encoding: 'utf8',
-    });
-  } catch {
-    throw new SkillError(
-      'TRACKED_DOTENV_UNVERIFIABLE',
-      'git could not report whether the .env file(s) in this directory are tracked. Refusing ' +
-        'to use hot-wallet keys rather than assuming they are safe.',
-    );
-  }
-
-  const tracked = out.split('\0').filter(Boolean);
+  const tracked = trackedAmong(repo, candidates.map((f) => path.join(cwd, f))).map((f) =>
+    path.basename(f),
+  );
   if (tracked.length) {
     throw new SkillError(
       'TRACKED_DOTENV',

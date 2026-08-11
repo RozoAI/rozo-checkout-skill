@@ -53697,43 +53697,103 @@ init_keccak256();
 // scripts/src/lib/keys.mjs
 import fs4 from "node:fs";
 import path4 from "node:path";
-import { execFileSync } from "node:child_process";
-var ENV_FILE_RE = /^\.env(\..+)?$/;
-var PUBLIC_ENV_RE = /^\.env\.(example|sample|template)$/;
-function insideGitWorkTree(dir, whatFor) {
-  try {
-    return execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
-      cwd: dir,
-      stdio: ["ignore", "pipe", "pipe"],
-      encoding: "utf8"
-    }).trim() === "true";
-  } catch (err) {
-    const stderr = String(err?.stderr || "");
-    if (/not a git repository|does not appear to be a git repository/i.test(stderr)) return false;
-    throw new SkillError(
-      "TRACKED_DOTENV_UNVERIFIABLE",
-      `git could not be consulted (${err?.code || "unknown error"}), so it cannot be proved that ${whatFor} is untracked. Refusing rather than assuming it is safe.`
-    );
+function findGitRepo(dir) {
+  let cur = path4.resolve(dir);
+  for (; ; ) {
+    const dotGit = path4.join(cur, ".git");
+    let st = null;
+    try {
+      st = fs4.statSync(dotGit);
+    } catch {
+      st = null;
+    }
+    if (st) {
+      if (st.isDirectory()) return { root: cur, gitDir: dotGit };
+      let text;
+      try {
+        text = fs4.readFileSync(dotGit, "utf8");
+      } catch {
+        throw new SkillError(
+          "TRACKED_DOTENV_UNVERIFIABLE",
+          "A .git entry exists here but could not be read, so tracked status cannot be proved. Refusing."
+        );
+      }
+      const m = /^gitdir:\s*(.+)\s*$/m.exec(text);
+      if (!m) {
+        throw new SkillError(
+          "TRACKED_DOTENV_UNVERIFIABLE",
+          "A .git file exists here but is not a recognised gitdir pointer. Refusing."
+        );
+      }
+      return { root: cur, gitDir: path4.resolve(cur, m[1]) };
+    }
+    const parent = path4.dirname(cur);
+    if (parent === cur) return null;
+    cur = parent;
   }
 }
-function assertNotTrackedByGit(file) {
-  const dir = path4.dirname(path4.resolve(file));
-  const base = path4.basename(file);
-  if (!insideGitWorkTree(dir, "this key file")) return { checked: true, tracked: false };
-  let out2;
+function trackedPathsFromIndex(buf) {
+  const fail2 = (why) => new SkillError(
+    "TRACKED_DOTENV_UNVERIFIABLE",
+    `The git index could not be interpreted (${why}), so tracked status cannot be proved. Refusing.`
+  );
+  if (buf.length < 12 || buf.toString("latin1", 0, 4) !== "DIRC") throw fail2("bad header");
+  const version6 = buf.readUInt32BE(4);
+  if (version6 !== 2 && version6 !== 3) throw fail2(`unsupported index version ${version6}`);
+  const count = buf.readUInt32BE(8);
+  const paths = /* @__PURE__ */ new Set();
+  let off = 12;
+  for (let i = 0; i < count; i++) {
+    const entryStart = off;
+    if (off + 62 > buf.length) throw fail2("truncated entry");
+    const flags = buf.readUInt16BE(off + 60);
+    let nameOff = off + 62;
+    if (flags & 16384) {
+      if (version6 < 3) throw fail2("extended flags in v2 index");
+      nameOff += 2;
+    }
+    const nameLen = flags & 4095;
+    let end;
+    if (nameLen < 4095) {
+      end = nameOff + nameLen;
+      if (end > buf.length) throw fail2("truncated path");
+    } else {
+      end = buf.indexOf(0, nameOff);
+      if (end === -1) throw fail2("unterminated path");
+    }
+    paths.add(buf.toString("utf8", nameOff, end));
+    const entryLen = end - entryStart;
+    off = entryStart + (Math.floor(entryLen / 8) + 1) * 8;
+  }
+  return paths;
+}
+function trackedAmong(repo, files) {
+  const indexPath = path4.join(repo.gitDir, "index");
+  let buf;
   try {
-    out2 = execFileSync("git", ["ls-files", "-z", "--", base], {
-      cwd: dir,
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf8"
-    });
-  } catch {
+    buf = fs4.readFileSync(indexPath);
+  } catch (err) {
+    if (err?.code === "ENOENT") return [];
     throw new SkillError(
       "TRACKED_DOTENV_UNVERIFIABLE",
-      "git could not report whether this key file is tracked. Refusing to use it."
+      "The git index exists but could not be read, so tracked status cannot be proved. Refusing."
     );
   }
-  if (out2.split("\0").filter(Boolean).length) {
+  const tracked = trackedPathsFromIndex(buf);
+  return files.filter((f) => {
+    const rel = path4.relative(repo.root, path4.resolve(f)).split(path4.sep).join("/");
+    return tracked.has(rel);
+  });
+}
+var ENV_FILE_RE = /^\.env(\..+)?$/;
+var PUBLIC_ENV_RE = /^\.env\.(example|sample|template)$/;
+function assertNotTrackedByGit(file) {
+  const dir = path4.dirname(path4.resolve(file));
+  const repo = findGitRepo(dir);
+  if (!repo) return { checked: true, tracked: false };
+  const hits = trackedAmong(repo, [file]);
+  if (hits.length) {
+    const base = path4.basename(file);
     throw new SkillError(
       "TRACKED_KEYFILE",
       `${base} is tracked by git. A committed key is one push from being public \u2014 untrack it (git rm --cached ${base}) and gitignore it before using it to sign.`
@@ -53752,37 +53812,11 @@ function assertNoTrackedDotEnv(cwd = process.cwd()) {
     );
   }
   if (candidates.length === 0) return { checked: true, tracked: false, candidates: [] };
-  let insideRepo;
-  try {
-    insideRepo = execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
-      cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      encoding: "utf8"
-    }).trim() === "true";
-  } catch (err) {
-    const stderr = String(err?.stderr || "");
-    const notARepo = /not a git repository|does not appear to be a git repository/i.test(stderr);
-    if (notARepo) return { checked: true, tracked: false, candidates };
-    throw new SkillError(
-      "TRACKED_DOTENV_UNVERIFIABLE",
-      `Found ${candidates.length} .env file(s) here, but git could not be consulted (${err?.code || "unknown error"}), so it cannot be proved they are untracked. Refusing to use hot-wallet keys in this directory.`
-    );
-  }
-  if (!insideRepo) return { checked: true, tracked: false, candidates };
-  let out2;
-  try {
-    out2 = execFileSync("git", ["ls-files", "-z", "--", ...candidates], {
-      cwd,
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf8"
-    });
-  } catch {
-    throw new SkillError(
-      "TRACKED_DOTENV_UNVERIFIABLE",
-      "git could not report whether the .env file(s) in this directory are tracked. Refusing to use hot-wallet keys rather than assuming they are safe."
-    );
-  }
-  const tracked = out2.split("\0").filter(Boolean);
+  const repo = findGitRepo(cwd);
+  if (!repo) return { checked: true, tracked: false, candidates };
+  const tracked = trackedAmong(repo, candidates.map((f) => path4.join(cwd, f))).map(
+    (f) => path4.basename(f)
+  );
   if (tracked.length) {
     throw new SkillError(
       "TRACKED_DOTENV",

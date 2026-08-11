@@ -139,20 +139,58 @@ test('a directory with no env files, and a non-repo, are both fine', () => {
   }
 });
 
-test('the tracked-secret check fails CLOSED when git cannot be run', () => {
+test('no git binary is needed: outside any repo the check passes definitively', () => {
+  // The old implementation shelled out to git and had to refuse when the
+  // binary was missing. The index-reading implementation answers without a
+  // subprocess: no .git anywhere up the tree means there is no repository to
+  // leak into — a definite pass, not an unverifiable state.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rozo-nogit-'));
   const prevPath = process.env.PATH;
   try {
     fs.writeFileSync(path.join(dir, '.env'), 'KEY=value\n');
-    // Empty PATH: the git binary cannot be found (ENOENT).
     process.env.PATH = '';
+    const res = assertNoTrackedDotEnv(dir);
+    assert.equal(res.tracked, false);
+  } finally {
+    process.env.PATH = prevPath;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an uninterpretable git index fails CLOSED', () => {
+  // Unsupported index versions (v4 path compression) and corrupt indexes must
+  // refuse: "could not check" is exactly when a tracked key would slip through.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rozo-badindex-'));
+  try {
+    fs.mkdirSync(path.join(dir, '.git'));
+    fs.writeFileSync(path.join(dir, '.env'), 'KEY=value\n');
+    const v4 = Buffer.alloc(12);
+    v4.write('DIRC', 0, 'latin1');
+    v4.writeUInt32BE(4, 4); // version 4: unsupported by the parser
+    v4.writeUInt32BE(0, 8);
+    fs.writeFileSync(path.join(dir, '.git', 'index'), v4);
     assert.throws(
       () => assertNoTrackedDotEnv(dir),
       (e) => e.code === 'TRACKED_DOTENV_UNVERIFIABLE',
-      'an unverifiable check must refuse, not pass',
+    );
+    fs.writeFileSync(path.join(dir, '.git', 'index'), Buffer.from('garbage'));
+    assert.throws(
+      () => assertNoTrackedDotEnv(dir),
+      (e) => e.code === 'TRACKED_DOTENV_UNVERIFIABLE',
     );
   } finally {
-    process.env.PATH = prevPath;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a repo with no index yet means nothing is tracked', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rozo-freshrepo-'));
+  try {
+    fs.mkdirSync(path.join(dir, '.git'));
+    fs.writeFileSync(path.join(dir, '.env'), 'KEY=value\n');
+    const res = assertNoTrackedDotEnv(dir);
+    assert.equal(res.tracked, false);
+  } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
