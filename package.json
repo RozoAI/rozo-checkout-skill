@@ -1,6 +1,6 @@
 {
   "name": "@rozoai/checkout",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "type": "module",
   "description": "Pay an OpenRouter Coinbase Payment Link with BTC Lightning, or USDT/USDC on Solana, BNB Chain, Ethereum, Polygon, Base or Stellar.",
   "license": "MIT",
@@ -47,9 +47,13 @@
     "prepack": "npm run build"
   },
   "devDependencies": {
-    "@solana/spl-token": "^0.4.9",
     "@solana/web3.js": "^1.95.0",
     "esbuild": "^0.28.2",
     "viem": "^2.21.0"
+  },
+  "overrides": {
+    "jayson": {
+      "uuid": "^11.1.1"
+    }
   }
 }
