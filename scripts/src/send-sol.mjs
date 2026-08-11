@@ -48,8 +48,7 @@ import {
   createTransferCheckedInstruction,
   getAccount,
   getMint,
-  TOKEN_PROGRAM_ID,
-} from '@solana/spl-token';
+} from './spl-lite.mjs';
 
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 const MAINNET_GENESIS = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
@@ -211,8 +210,6 @@ async function main(argv) {
       keypair.publicKey,
       amountAtomic,
       mintInfo.decimals,
-      [],
-      TOKEN_PROGRAM_ID,
     ),
   );
   if (source.receiverMemo) {

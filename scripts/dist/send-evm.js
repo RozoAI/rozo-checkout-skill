@@ -999,7 +999,7 @@ var init_size = __esm({
 var version2;
 var init_version2 = __esm({
   "node_modules/viem/_esm/errors/version.js"() {
-    version2 = "2.55.11";
+    version2 = "2.55.13";
   }
 });
 
@@ -11454,14 +11454,6 @@ async function prepareTransactionRequest(client, args) {
   }
   let account = account_ ? parseAccount(account_) : account_;
   let nonce = request2.nonce;
-  if (parameters.includes("nonce") && typeof nonce === "undefined" && account && nonceManager) {
-    const chainId2 = await getChainId2();
-    nonce = await nonceManager.consume({
-      address: account.address,
-      chainId: chainId2,
-      client
-    });
-  }
   if (prepareTransactionRequest2?.fn && prepareTransactionRequest2.runAt?.includes("beforeFillTransaction")) {
     request2 = await prepareTransactionRequest2.fn({ ...request2, chain }, {
       client,
@@ -11471,13 +11463,21 @@ async function prepareTransactionRequest(client, args) {
     const sender = request2.account ?? request2.from;
     account = sender ? parseAccount(sender) : void 0;
   }
+  if (parameters.includes("nonce") && typeof nonce === "undefined" && account && nonceManager) {
+    const chainId2 = await getChainId2();
+    nonce = await nonceManager.consume({
+      address: account.address,
+      chainId: chainId2,
+      client
+    });
+  }
   const attemptFill = (() => {
     if ((parameters.includes("blobVersionedHashes") || parameters.includes("sidecars")) && request2.kzg && request2.blobs)
       return false;
-    if (supportsFillTransaction.get(client.uid) === false)
-      return false;
     if (parameters.length > 0 && "feePayer" in request2 && request2.feePayer && !("feePayerSignature" in request2 && request2.feePayerSignature))
       return true;
+    if (supportsFillTransaction.get(client.uid) === false)
+      return false;
     const shouldAttempt = ["fees", "gas"].some((parameter) => parameters.includes(parameter));
     if (!shouldAttempt)
       return false;
@@ -12609,17 +12609,29 @@ async function sendTransaction(client, parameters) {
       }
     }
     if (account?.type === "local") {
-      if (account.nonceManager && typeof nonce === "undefined") {
-        const requestChainId = rest.chainId;
-        const chainId = await (async () => {
-          if (typeof requestChainId === "number")
-            return requestChainId;
-          if (chain)
-            return chain.id;
-          return getAction(client, getChainId, "getChainId")({});
-        })();
-        nonceManagerParameters = { address: account.address, chainId };
-      }
+      const nonceManager = (() => {
+        if (!account.nonceManager || typeof nonce !== "undefined")
+          return account.nonceManager;
+        const nonceManager2 = account.nonceManager;
+        return {
+          consume(parameters2) {
+            nonceManagerParameters = {
+              address: parameters2.address,
+              chainId: parameters2.chainId
+            };
+            return nonceManager2.consume(parameters2);
+          },
+          get(parameters2) {
+            return nonceManager2.get(parameters2);
+          },
+          increment(parameters2) {
+            return nonceManager2.increment(parameters2);
+          },
+          reset(parameters2) {
+            return nonceManager2.reset(parameters2);
+          }
+        };
+      })();
       const request2 = await getAction(client, prepareTransactionRequest, "prepareTransactionRequest")({
         account,
         accessList,
@@ -12633,7 +12645,7 @@ async function sendTransaction(client, parameters) {
         maxFeePerGas,
         maxPriorityFeePerGas,
         nonce,
-        nonceManager: account.nonceManager,
+        nonceManager,
         parameters: [...defaultParameters, "sidecars"],
         type,
         value,
@@ -13138,6 +13150,7 @@ function bindActionDecorators(client, action) {
     "estimateGas",
     "prepare",
     "prepareRecipient",
+    "predict",
     "simulate"
   ])
     if (Object.hasOwn(action, key)) {
@@ -20533,17 +20546,29 @@ async function sendTransactionSync(client, parameters) {
       return receipt;
     }
     if (account?.type === "local") {
-      if (account.nonceManager && typeof nonce === "undefined") {
-        const requestChainId = rest.chainId;
-        const chainId = await (async () => {
-          if (typeof requestChainId === "number")
-            return requestChainId;
-          if (chain)
-            return chain.id;
-          return getAction(client, getChainId, "getChainId")({});
-        })();
-        nonceManagerParameters = { address: account.address, chainId };
-      }
+      const nonceManager = (() => {
+        if (!account.nonceManager || typeof nonce !== "undefined")
+          return account.nonceManager;
+        const nonceManager2 = account.nonceManager;
+        return {
+          consume(parameters2) {
+            nonceManagerParameters = {
+              address: parameters2.address,
+              chainId: parameters2.chainId
+            };
+            return nonceManager2.consume(parameters2);
+          },
+          get(parameters2) {
+            return nonceManager2.get(parameters2);
+          },
+          increment(parameters2) {
+            return nonceManager2.increment(parameters2);
+          },
+          reset(parameters2) {
+            return nonceManager2.reset(parameters2);
+          }
+        };
+      })();
       const request2 = await getAction(client, prepareTransactionRequest, "prepareTransactionRequest")({
         account,
         accessList,
@@ -20557,7 +20582,7 @@ async function sendTransactionSync(client, parameters) {
         maxFeePerGas,
         maxPriorityFeePerGas,
         nonce,
-        nonceManager: account.nonceManager,
+        nonceManager,
         parameters: [...defaultParameters, "sidecars"],
         type,
         value,
