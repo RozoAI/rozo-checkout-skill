@@ -36,6 +36,20 @@ import { SkillError } from './output.mjs';
  * A `.git` FILE (worktree / submodule) is followed via its `gitdir:` pointer.
  */
 export function findGitRepo(dir) {
+  // GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE select a repository without any
+  // .git entry in the ancestors — a setup `git ls-files` honoured but this
+  // reader does not resolve (env-relative work-tree mapping, alternate index
+  // files). Rather than reimplement git's environment handling, refuse: an
+  // unresolvable "which repository?" is an unverifiable tracked status.
+  for (const v of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) {
+    if (process.env[v]) {
+      throw new SkillError(
+        'TRACKED_DOTENV_UNVERIFIABLE',
+        `${v} is set, so the repository layout cannot be resolved by reading the filesystem ` +
+          'alone. Unset it (or run from a plain checkout) before using hot-wallet keys.',
+      );
+    }
+  }
   let cur = path.resolve(dir);
   for (;;) {
     const dotGit = path.join(cur, '.git');

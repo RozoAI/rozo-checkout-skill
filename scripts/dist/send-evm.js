@@ -10216,6 +10216,14 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto2 from "node:crypto";
 function findGitRepo(dir) {
+  for (const v of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]) {
+    if (process.env[v]) {
+      throw new SkillError(
+        "TRACKED_DOTENV_UNVERIFIABLE",
+        `${v} is set, so the repository layout cannot be resolved by reading the filesystem alone. Unset it (or run from a plain checkout) before using hot-wallet keys.`
+      );
+    }
+  }
   let cur = path.resolve(dir);
   for (; ; ) {
     const dotGit = path.join(cur, ".git");
