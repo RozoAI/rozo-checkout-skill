@@ -11988,10 +11988,10 @@ var require_dist = __commonJS({
 });
 
 // node_modules/uuid/dist/esm-node/rng.js
-import crypto5 from "crypto";
+import crypto6 from "crypto";
 function rng() {
   if (poolPtr > rnds8Pool.length - 16) {
-    crypto5.randomFillSync(rnds8Pool);
+    crypto6.randomFillSync(rnds8Pool);
     poolPtr = 0;
   }
   return rnds8Pool.slice(poolPtr, poolPtr += 16);
@@ -12191,14 +12191,14 @@ var init_v35 = __esm({
 });
 
 // node_modules/uuid/dist/esm-node/md5.js
-import crypto6 from "crypto";
+import crypto7 from "crypto";
 function md5(bytes) {
   if (Array.isArray(bytes)) {
     bytes = Buffer.from(bytes);
   } else if (typeof bytes === "string") {
     bytes = Buffer.from(bytes, "utf8");
   }
-  return crypto6.createHash("md5").update(bytes).digest();
+  return crypto7.createHash("md5").update(bytes).digest();
 }
 var md5_default;
 var init_md5 = __esm({
@@ -12243,14 +12243,14 @@ var init_v4 = __esm({
 });
 
 // node_modules/uuid/dist/esm-node/sha1.js
-import crypto7 from "crypto";
+import crypto8 from "crypto";
 function sha1(bytes) {
   if (Array.isArray(bytes)) {
     bytes = Buffer.from(bytes);
   } else if (typeof bytes === "string") {
     bytes = Buffer.from(bytes, "utf8");
   }
-  return crypto7.createHash("sha1").update(bytes).digest();
+  return crypto8.createHash("sha1").update(bytes).digest();
 }
 var sha1_default;
 var init_sha1 = __esm({
@@ -32359,6 +32359,7 @@ function chainFamily(chainId) {
 // scripts/src/lib/keys.mjs
 import fs from "node:fs";
 import path from "node:path";
+import crypto2 from "node:crypto";
 function findGitRepo(dir) {
   let cur = path.resolve(dir);
   for (; ; ) {
@@ -32394,22 +32395,27 @@ function findGitRepo(dir) {
     cur = parent;
   }
 }
-function trackedPathsFromIndex(buf) {
+function trackedPathsFromIndex(buf, { hashLen = 20 } = {}) {
   const fail2 = (why) => new SkillError(
     "TRACKED_DOTENV_UNVERIFIABLE",
     `The git index could not be interpreted (${why}), so tracked status cannot be proved. Refusing.`
   );
-  if (buf.length < 12 || buf.toString("latin1", 0, 4) !== "DIRC") throw fail2("bad header");
+  if (buf.length < 12 + hashLen || buf.toString("latin1", 0, 4) !== "DIRC") throw fail2("bad header");
+  const algo = hashLen === 32 ? "sha256" : "sha1";
+  const expected = buf.subarray(buf.length - hashLen);
+  const actual = crypto2.createHash(algo).update(buf.subarray(0, buf.length - hashLen)).digest();
+  if (!actual.equals(expected)) throw fail2(`${algo} checksum mismatch`);
   const version4 = buf.readUInt32BE(4);
   if (version4 !== 2 && version4 !== 3) throw fail2(`unsupported index version ${version4}`);
   const count = buf.readUInt32BE(8);
   const paths = /* @__PURE__ */ new Set();
+  const fixed = 40 + hashLen + 2;
   let off = 12;
   for (let i = 0; i < count; i++) {
     const entryStart = off;
-    if (off + 62 > buf.length) throw fail2("truncated entry");
-    const flags = buf.readUInt16BE(off + 60);
-    let nameOff = off + 62;
+    if (off + fixed > buf.length - hashLen) throw fail2("truncated entry");
+    const flags = buf.readUInt16BE(off + fixed - 2);
+    let nameOff = off + fixed;
     if (flags & 16384) {
       if (version4 < 3) throw fail2("extended flags in v2 index");
       nameOff += 2;
@@ -32418,16 +32424,35 @@ function trackedPathsFromIndex(buf) {
     let end;
     if (nameLen < 4095) {
       end = nameOff + nameLen;
-      if (end > buf.length) throw fail2("truncated path");
+      if (end > buf.length - hashLen) throw fail2("truncated path");
     } else {
       end = buf.indexOf(0, nameOff);
-      if (end === -1) throw fail2("unterminated path");
+      if (end === -1 || end > buf.length - hashLen) throw fail2("unterminated path");
     }
     paths.add(buf.toString("utf8", nameOff, end));
     const entryLen = end - entryStart;
     off = entryStart + (Math.floor(entryLen / 8) + 1) * 8;
   }
+  while (off < buf.length - hashLen) {
+    if (off + 8 > buf.length - hashLen) throw fail2("truncated extension header");
+    const extName = buf.toString("latin1", off, off + 4);
+    const extSize = buf.readUInt32BE(off + 4);
+    const first = extName.charCodeAt(0);
+    if (first >= 97 && first <= 122) {
+      throw fail2(`mandatory index extension "${extName}" (e.g. core.splitIndex) is not supported`);
+    }
+    off += 8 + extSize;
+    if (off > buf.length - hashLen) throw fail2("truncated extension");
+  }
   return paths;
+}
+function repoHashLen(gitDir) {
+  try {
+    const cfg = fs.readFileSync(path.join(gitDir, "config"), "utf8");
+    if (/^\s*objectformat\s*=\s*sha256\s*$/im.test(cfg)) return 32;
+  } catch {
+  }
+  return 20;
 }
 function trackedAmong(repo, files) {
   const indexPath = path.join(repo.gitDir, "index");
@@ -32441,7 +32466,7 @@ function trackedAmong(repo, files) {
       "The git index exists but could not be read, so tracked status cannot be proved. Refusing."
     );
   }
-  const tracked = trackedPathsFromIndex(buf);
+  const tracked = trackedPathsFromIndex(buf, { hashLen: repoHashLen(repo.gitDir) });
   return files.filter((f) => {
     const rel = path.relative(repo.root, path.resolve(f)).split(path.sep).join("/");
     return tracked.has(rel);
@@ -32492,7 +32517,7 @@ function assertNoTrackedDotEnv(cwd = process.cwd()) {
 import fs3 from "node:fs";
 import path3 from "node:path";
 import os2 from "node:os";
-import crypto2 from "node:crypto";
+import crypto3 from "node:crypto";
 
 // node_modules/viem/_esm/index.js
 init_keccak256();
@@ -32723,7 +32748,7 @@ function decryptKeystoreV3(keystore, passphrase) {
     if (!n || !r || !p || !dklen || !salt) {
       throw new SkillError("BAD_KEYSTORE", "The keystore scrypt parameters are incomplete.");
     }
-    derived = crypto2.scryptSync(pass, Buffer.from(salt, "hex"), dklen, {
+    derived = crypto3.scryptSync(pass, Buffer.from(salt, "hex"), dklen, {
       N: n,
       r,
       p,
@@ -32739,7 +32764,7 @@ function decryptKeystoreV3(keystore, passphrase) {
     if (!iterations || !dklen || !salt) {
       throw new SkillError("BAD_KEYSTORE", "The keystore pbkdf2 parameters are incomplete.");
     }
-    derived = crypto2.pbkdf2Sync(pass, Buffer.from(salt, "hex"), iterations, dklen, "sha256");
+    derived = crypto3.pbkdf2Sync(pass, Buffer.from(salt, "hex"), iterations, dklen, "sha256");
   } else {
     throw new SkillError("BAD_KEYSTORE", `Unsupported keystore KDF "${c.kdf}".`);
   }
@@ -32754,7 +32779,7 @@ function decryptKeystoreV3(keystore, passphrase) {
   if (c.cipher !== "aes-128-ctr") {
     throw new SkillError("BAD_KEYSTORE", `Unsupported keystore cipher "${c.cipher}".`);
   }
-  const decipher = crypto2.createDecipheriv(
+  const decipher = crypto3.createDecipheriv(
     "aes-128-ctr",
     derived.subarray(0, 16),
     Buffer.from(c.cipherparams.iv, "hex")
@@ -32776,7 +32801,7 @@ function timingSafeEqualHex(a, b) {
   const ab = Buffer.from(String(a).toLowerCase(), "hex");
   const bb = Buffer.from(String(b).toLowerCase(), "hex");
   if (ab.length === 0 || ab.length !== bb.length) return false;
-  return crypto2.timingSafeEqual(ab, bb);
+  return crypto3.timingSafeEqual(ab, bb);
 }
 function looksLikeKeystore(text) {
   const t = String(text).trimStart();
@@ -33326,7 +33351,7 @@ function checkExpiry({
 // scripts/src/lib/blacklist.mjs
 import fs4 from "node:fs";
 import path4 from "node:path";
-import crypto3 from "node:crypto";
+import crypto4 from "node:crypto";
 import { fileURLToPath } from "node:url";
 var BlacklistError = class extends Error {
   constructor(code, message) {
@@ -33361,7 +33386,7 @@ function parseBlacklist(doc) {
     }
     addresses.push(e.address);
   }
-  const digest = crypto3.createHash("sha256").update(JSON.stringify(addresses), "utf8").digest("hex");
+  const digest = crypto4.createHash("sha256").update(JSON.stringify(addresses), "utf8").digest("hex");
   if (typeof provenance.addressesSha256 !== "string" || !provenance.addressesSha256) {
     throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist provenance digest is missing.");
   }
@@ -33450,7 +33475,7 @@ function assertNotBlacklisted(targets, blacklist) {
 import fs5 from "node:fs";
 import path5 from "node:path";
 import os3 from "node:os";
-import crypto4 from "node:crypto";
+import crypto5 from "node:crypto";
 var LOCK_STALE_MS = 6e4;
 var LOCK_WAIT_MS = 1e4;
 var LOCK_POLL_MS = 25;
@@ -33480,7 +33505,7 @@ function withLock(fn) {
     try {
       const age = Date.now() - fs5.statSync(file).mtimeMs;
       if (age > LOCK_STALE_MS) {
-        const stolen = `${file}.stale.${crypto4.randomBytes(4).toString("hex")}`;
+        const stolen = `${file}.stale.${crypto5.randomBytes(4).toString("hex")}`;
         try {
           fs5.renameSync(file, stolen);
           fs5.unlinkSync(stolen);
@@ -33521,7 +33546,7 @@ function statePath(rozoPaymentId) {
 function writeAtomic(file, data) {
   const dir = path5.dirname(file);
   fs5.mkdirSync(dir, { recursive: true, mode: 448 });
-  const tmp = path5.join(dir, `.${path5.basename(file)}.${crypto4.randomBytes(6).toString("hex")}.tmp`);
+  const tmp = path5.join(dir, `.${path5.basename(file)}.${crypto5.randomBytes(6).toString("hex")}.tmp`);
   const fd = fs5.openSync(tmp, "wx", 384);
   try {
     fs5.writeFileSync(fd, JSON.stringify(data, null, 2) + "\n", "utf8");
@@ -33560,7 +33585,7 @@ function depositDigest(source) {
     amountUnit: source?.amountUnit ?? null,
     lnInvoice: source?.lnInvoice ?? null
   });
-  return crypto4.createHash("sha256").update(canonical, "utf8").digest("hex");
+  return crypto5.createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 function claimSend(rozoPaymentId, intent, { skipCaps = false } = {}) {
   return withLock(() => {

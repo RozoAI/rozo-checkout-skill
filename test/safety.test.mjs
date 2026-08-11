@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 import { redact, redactDeep, EXIT_OK, EXIT_ERROR, EXIT_UNCONFIRMED } from '../scripts/src/lib/output.mjs';
@@ -164,10 +165,13 @@ test('an uninterpretable git index fails CLOSED', () => {
   try {
     fs.mkdirSync(path.join(dir, '.git'));
     fs.writeFileSync(path.join(dir, '.env'), 'KEY=value\n');
-    const v4 = Buffer.alloc(12);
-    v4.write('DIRC', 0, 'latin1');
-    v4.writeUInt32BE(4, 4); // version 4: unsupported by the parser
-    v4.writeUInt32BE(0, 8);
+    // A structurally plausible v4 index with a correct SHA-1 trailer: the
+    // version check must reject it even when the checksum passes.
+    const head = Buffer.alloc(12);
+    head.write('DIRC', 0, 'latin1');
+    head.writeUInt32BE(4, 4); // version 4: unsupported by the parser
+    head.writeUInt32BE(0, 8);
+    const v4 = Buffer.concat([head, crypto.createHash('sha1').update(head).digest()]);
     fs.writeFileSync(path.join(dir, '.git', 'index'), v4);
     assert.throws(
       () => assertNoTrackedDotEnv(dir),

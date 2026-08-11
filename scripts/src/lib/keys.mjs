@@ -10,6 +10,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { SkillError } from './output.mjs';
 
 // ---------------------------------------------------------------------------
@@ -73,27 +74,45 @@ export function findGitRepo(dir) {
 
 /**
  * Parse a `.git/index` buffer and return the set of tracked paths
- * (repo-root-relative, POSIX separators). Supports index versions 2 and 3.
- * Version 4 (path prefix compression) and anything unrecognised throw —
- * fail closed, never guess.
+ * (repo-root-relative, POSIX separators). Supports index versions 2 and 3,
+ * for both SHA-1 and SHA-256 repositories (`hashLen` 20 or 32).
+ *
+ * Fail closed, never guess:
+ *  - version 4 (path prefix compression) throws;
+ *  - the trailing checksum is verified before any parsed path is trusted;
+ *  - a `link` extension (core.splitIndex) throws — most tracked paths then
+ *    live in sharedindex.* which this parser does not resolve;
+ *  - any other mandatory (lowercase) extension throws for the same reason.
  */
-export function trackedPathsFromIndex(buf) {
+export function trackedPathsFromIndex(buf, { hashLen = 20 } = {}) {
   const fail = (why) =>
     new SkillError(
       'TRACKED_DOTENV_UNVERIFIABLE',
       `The git index could not be interpreted (${why}), so tracked status cannot be proved. Refusing.`,
     );
-  if (buf.length < 12 || buf.toString('latin1', 0, 4) !== 'DIRC') throw fail('bad header');
+  if (buf.length < 12 + hashLen || buf.toString('latin1', 0, 4) !== 'DIRC') throw fail('bad header');
+
+  // Integrity first: git writes hash(all preceding bytes) as the trailer. A
+  // header that parses but a trailer that does not match is corruption, and a
+  // corrupt index must refuse — flipped bytes in a pathname would otherwise
+  // read as "not tracked".
+  const algo = hashLen === 32 ? 'sha256' : 'sha1';
+  const expected = buf.subarray(buf.length - hashLen);
+  const actual = crypto.createHash(algo).update(buf.subarray(0, buf.length - hashLen)).digest();
+  if (!actual.equals(expected)) throw fail(`${algo} checksum mismatch`);
+
   const version = buf.readUInt32BE(4);
   if (version !== 2 && version !== 3) throw fail(`unsupported index version ${version}`);
   const count = buf.readUInt32BE(8);
   const paths = new Set();
+  // Fixed part of an entry: 40 bytes of stat data, the object id, 2 flag bytes.
+  const fixed = 40 + hashLen + 2;
   let off = 12;
   for (let i = 0; i < count; i++) {
     const entryStart = off;
-    if (off + 62 > buf.length) throw fail('truncated entry');
-    const flags = buf.readUInt16BE(off + 60);
-    let nameOff = off + 62;
+    if (off + fixed > buf.length - hashLen) throw fail('truncated entry');
+    const flags = buf.readUInt16BE(off + fixed - 2);
+    let nameOff = off + fixed;
     // v3: an extended-flags word follows when the extended bit is set.
     if (flags & 0x4000) {
       if (version < 3) throw fail('extended flags in v2 index');
@@ -103,17 +122,49 @@ export function trackedPathsFromIndex(buf) {
     let end;
     if (nameLen < 0x0fff) {
       end = nameOff + nameLen;
-      if (end > buf.length) throw fail('truncated path');
+      if (end > buf.length - hashLen) throw fail('truncated path');
     } else {
       end = buf.indexOf(0, nameOff);
-      if (end === -1) throw fail('unterminated path');
+      if (end === -1 || end > buf.length - hashLen) throw fail('unterminated path');
     }
     paths.add(buf.toString('utf8', nameOff, end));
     // Entries are NUL-padded so the TOTAL length is a multiple of 8.
     const entryLen = end - entryStart;
     off = entryStart + (Math.floor(entryLen / 8) + 1) * 8;
   }
+
+  // Extensions follow the entries. Optional ones (name starts uppercase, e.g.
+  // TREE) are safely skippable; mandatory ones (lowercase, e.g. `link` for
+  // core.splitIndex) change what "the tracked set" means, so refuse.
+  while (off < buf.length - hashLen) {
+    if (off + 8 > buf.length - hashLen) throw fail('truncated extension header');
+    const extName = buf.toString('latin1', off, off + 4);
+    const extSize = buf.readUInt32BE(off + 4);
+    const first = extName.charCodeAt(0);
+    if (first >= 0x61 && first <= 0x7a) {
+      throw fail(`mandatory index extension "${extName}" (e.g. core.splitIndex) is not supported`);
+    }
+    off += 8 + extSize;
+    if (off > buf.length - hashLen) throw fail('truncated extension');
+  }
+
   return paths;
+}
+
+/**
+ * The repository's object-id length: 32 for `--object-format=sha256`, else 20.
+ * Read from the repo config; an unreadable config on a repo that has one is
+ * left to the checksum verification to catch (a wrong hashLen cannot produce
+ * a matching checksum).
+ */
+function repoHashLen(gitDir) {
+  try {
+    const cfg = fs.readFileSync(path.join(gitDir, 'config'), 'utf8');
+    if (/^\s*objectformat\s*=\s*sha256\s*$/im.test(cfg)) return 32;
+  } catch {
+    // No readable config: assume SHA-1; a mismatch fails the checksum check.
+  }
+  return 20;
 }
 
 /**
@@ -132,7 +183,7 @@ function trackedAmong(repo, files) {
       'The git index exists but could not be read, so tracked status cannot be proved. Refusing.',
     );
   }
-  const tracked = trackedPathsFromIndex(buf);
+  const tracked = trackedPathsFromIndex(buf, { hashLen: repoHashLen(repo.gitDir) });
   return files.filter((f) => {
     const rel = path.relative(repo.root, path.resolve(f)).split(path.sep).join('/');
     return tracked.has(rel);
