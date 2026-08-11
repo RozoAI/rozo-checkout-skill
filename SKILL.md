@@ -7,9 +7,10 @@ description: >
   settles the Coinbase invoice for you. Use when a
   payments.coinbase.com/payment-links/pl_* (or
   payment-sessions/paymentSession_*) URL should be paid with any of these
-  coins, or on "rozo-checkout" / "pay this link with bitcoin".
+  coins, on "rozo-checkout" / "pay this link with bitcoin", or when a user
+  asks to top up OpenRouter credits with crypto and has no link yet.
 metadata:
-  version: 1.0.0
+  version: 1.1.0
 
   # Declared capabilities — what this skill can actually do, so reviewers and
   # scanners do not have to reverse-engineer it from the bundle.
@@ -63,6 +64,67 @@ order with a deposit address for the coin you chose, and once your deposit
 lands, a funder wallet pays the Coinbase invoice. **There is no discount** —
 `callerPays` equals the invoice amount. If a response ever shows a discount, or
 `callerPays` differs from the invoice, stop and explain; do not proceed.
+
+## OpenRouter top-up — when there is no link yet
+
+OpenRouter has no public API for creating crypto credit checkouts (the old
+`POST /api/v1/credits/coinbase` returns HTTP 410 Gone). The link can only be
+created inside the user's own logged-in OpenRouter session. Two ways to get it:
+
+### Default — the user creates it (works everywhere)
+
+Give these steps and wait for the URL:
+
+```
+1. Open https://openrouter.ai/settings/credits
+2. Enable "Use crypto".
+3. Enter the credit amount and click "Purchase".
+4. Copy the resulting payments.coinbase.com/payment-sessions/paymentSession_*
+   URL and paste it here.
+```
+
+Then continue with the normal flow at Step 1 (quote).
+
+### Accelerator — only when browser control already exists
+
+If, and **only** if, this session *already* has a working browser-control
+capability **and** that browser is *already* signed in to OpenRouter, you may
+offer to click through yourself. **Never tell the user to install a browser,
+an extension, or a plugin to unlock this** — when the capability is absent,
+give the default steps immediately and say nothing about automation.
+
+Ask first, in words that separate invoice creation from payment:
+
+> I can open your logged-in OpenRouter Credits page and generate the $N
+> invoice there — that creates an unpaid checkout and moves no money.
+> Continue?
+
+On yes: navigate to `https://openrouter.ai/settings/credits`, enable
+`Use crypto`, enter the amount, click `Purchase`, and capture the resulting
+`paymentSession_*` URL. Targeted actions only — **no screenshots and no
+full-page DOM dumps**. On a CAPTCHA, a login wall, or an unexpected page
+layout, stop the automation immediately and fall back to the default steps;
+do not wait for the user to log in and then resume driving the browser — the
+accelerator only ever operates on a session that was authenticated before it
+started.
+
+### Verify before offering payment
+
+Whichever path produced the URL, run Step 1 (quote) on it and fail closed
+unless **all** of these hold: the merchant is exactly `OpenRouter, Inc`; the
+status is payable; the invoice total is consistent with the requested credit
+amount **after OpenRouter's ~5% crypto fee** — accept when
+`credit ≤ invoice ≤ credit × 1.10` (e.g. a $5.00 credit yields a $5.25
+invoice; $1.00 yields $1.05), and stop and show both numbers when the invoice
+is below the credit or more than 10% above it; and the checkout is unexpired.
+
+Do not enforce a minimum amount yourself — a $1.00 credit checkout has been
+created successfully in practice. Pass the user's amount through and surface
+OpenRouter's own validation error if one appears.
+
+**Consent to create the invoice is never consent to pay it.** Payment
+continues at Step 2 of the normal flow with its own confirmation thresholds,
+unchanged.
 
 ## Runtime
 
