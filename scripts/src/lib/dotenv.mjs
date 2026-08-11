@@ -100,19 +100,23 @@ export function filterAllowed(vars) {
 /**
  * The places a `.env` is looked for, in order, when `--env-file` is not given.
  *
- * `$HOME/.env` is in the list because of how this skill is actually run. Every
- * documented command starts with `cd` into the skill's own directory, so the
+ * The second entry exists because of how this skill is actually run: every
+ * documented command starts by `cd`-ing into the skill's own directory, so the
  * working directory is the skill install — never wherever the user was
- * standing when they wrote their `.env`. A user who follows the docs ("a .env
- * in the working directory") and puts it in their home directory would
- * otherwise get NO_KEY_SOURCE with no indication of where the file was
- * expected. Home is already this tool's convention for user-level state
- * (`~/.rozo-checkout`, `~/.config/solana/id.json`).
+ * standing when they wrote their file. Without a user-level location, a `.env`
+ * put anywhere sensible was silently out of scope.
+ *
+ * That location is `~/.rozo-checkout/.env`, this tool's own directory (already
+ * home to its state and prefs) — deliberately NOT `~/.env`. A generic home
+ * dotenv belongs to the user and typically holds unrelated credentials: API
+ * keys, database URLs. Reading it at all would mean parsing secrets that were
+ * never offered to us, on every run, just to discover it has nothing of ours
+ * in it. Owning the path keeps this tool to files that exist for this tool.
  */
 export function envFileCandidates({ cwd = process.cwd(), home = os.homedir() } = {}) {
   const candidates = [path.join(cwd, '.env')];
-  const inHome = path.join(home, '.env');
-  if (inHome !== candidates[0]) candidates.push(inHome);
+  const owned = path.join(home, '.rozo-checkout', '.env');
+  if (owned !== candidates[0]) candidates.push(owned);
   return candidates;
 }
 
@@ -132,38 +136,6 @@ export function resolveEnvFile({ file, cwd = process.cwd(), home = os.homedir() 
 }
 
 /**
- * Choose among the implicit candidates, skipping a `$HOME/.env` that has
- * nothing to do with this tool.
- *
- * `$HOME/.env` is a file many people already have, for unrelated projects, and
- * it is conventionally mode 0644. Treating it as ours unconditionally would
- * make its permissions fatal — a user signing happily via `--keyfile` would
- * start getting ENV_FILE_PERMISSIONS about a file they never meant to offer
- * us. So the home candidate is only adopted once it is known to carry an
- * allowed key; if it is unreadable, unparseable, or simply not about us, it is
- * skipped as though it were not there.
- *
- * The working-directory candidate keeps the strict behaviour: a `.env` sitting
- * where the command runs is deliberate, and quietly ignoring a malformed or
- * world-readable one there would hide a real problem.
- */
-function pickImplicitEnvFile({ cwd, home }) {
-  const [inCwd, inHome] = envFileCandidates({ cwd, home });
-  if (inCwd && fs.existsSync(inCwd)) return inCwd;
-  if (!inHome || !fs.existsSync(inHome)) return null;
-  try {
-    // Read-only probe. Nothing is applied and no hygiene check runs yet — this
-    // only answers "is this file ours?".
-    if (Object.keys(filterAllowed(parseDotenv(fs.readFileSync(inHome, 'utf8')))).length === 0) {
-      return null;
-    }
-  } catch {
-    return null;
-  }
-  return inHome;
-}
-
-/**
  * Read a `.env` and apply its allowed keys to `process.env`, WITHOUT
  * overwriting anything already set there.
  *
@@ -179,9 +151,7 @@ export function applyDotenv({
   home = os.homedir(),
   env = process.env,
 } = {}) {
-  const target = file
-    ? resolveEnvFile({ file, cwd, home })
-    : pickImplicitEnvFile({ cwd, home });
+  const target = resolveEnvFile({ file, cwd, home });
   if (!target) return null;
 
   // Same hygiene as a key file: not world-readable, not tracked by git.

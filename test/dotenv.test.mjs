@@ -191,16 +191,19 @@ test('no .env means nothing happens', () => {
   }
 });
 
-test('a .env in the home directory is found when the working directory has none', () => {
+test('a .env in this tool\'s own directory is found when the working directory has none', () => {
   // The real shape of the bug this covers: every documented command cd's into
   // the skill directory, so cwd is never where the user wrote their .env.
+  // The user-level location is ~/.rozo-checkout/.env, never a generic ~/.env,
+  // which belongs to the user and holds unrelated credentials.
   const dir = tempDir();
   const home = tempDir();
   try {
-    writeEnv(home, `ROZO_CHECKOUT_EVM_KEY=${KEY}\n`);
+    fs.mkdirSync(path.join(home, '.rozo-checkout'));
+    writeEnv(path.join(home, '.rozo-checkout'), `ROZO_CHECKOUT_EVM_KEY=${KEY}\n`);
     const env = {};
     const res = applyDotenv({ cwd: dir, home, env });
-    assert.equal(res.path, path.join(home, '.env'));
+    assert.equal(res.path, path.join(home, '.rozo-checkout', '.env'));
     assert.equal(env.ROZO_CHECKOUT_EVM_KEY, KEY);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -214,7 +217,8 @@ test('the working directory wins over home when both have a .env', () => {
   try {
     const cwdKey = '0x' + '22'.repeat(32);
     writeEnv(dir, `ROZO_CHECKOUT_EVM_KEY=${cwdKey}\n`);
-    writeEnv(home, `ROZO_CHECKOUT_EVM_KEY=${KEY}\n`);
+    fs.mkdirSync(path.join(home, '.rozo-checkout'));
+    writeEnv(path.join(home, '.rozo-checkout'), `ROZO_CHECKOUT_EVM_KEY=${KEY}\n`);
     const env = {};
     const res = applyDotenv({ cwd: dir, home, env });
     assert.equal(res.path, path.join(dir, '.env'));
@@ -225,53 +229,30 @@ test('the working directory wins over home when both have a .env', () => {
   }
 });
 
-test('an unrelated home .env is ignored rather than made fatal', () => {
-  // The regression this guards: $HOME/.env is a file many people already have
-  // for other projects, conventionally mode 0644. Adopting it unconditionally
-  // made its permissions fatal and broke signing for users who were passing
-  // --keyfile and never meant to offer us that file at all.
+test('a generic ~/.env is never read', () => {
+  // Reading it would mean parsing unrelated API keys and database URLs that
+  // were never offered to this tool.
   const dir = tempDir();
   const home = tempDir();
   try {
-    writeEnv(home, 'OPENAI_API_KEY=not-ours\nDATABASE_URL=postgres://x\n', 0o644);
+    writeEnv(home, `ROZO_CHECKOUT_EVM_KEY=${KEY}\n`);
     const env = {};
     assert.equal(applyDotenv({ cwd: dir, home, env }), null);
     assert.deepEqual(env, {});
+    assert.ok(!envFileCandidates({ cwd: dir, home }).includes(path.join(home, '.env')));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
-test('a home .env that IS ours still gets the full hygiene check', () => {
-  const dir = tempDir();
-  const home = tempDir();
-  try {
-    writeEnv(home, `ROZO_CHECKOUT_EVM_KEY=${KEY}\n`, 0o644);
-    assert.throws(() => applyDotenv({ cwd: dir, home, env: {} }), (e) => e.code === 'ENV_FILE_PERMISSIONS');
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-    fs.rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test('a malformed unrelated home .env is skipped, not an error', () => {
-  const dir = tempDir();
-  const home = tempDir();
-  try {
-    writeEnv(home, 'this is not a dotenv line at all\n');
-    const env = {};
-    assert.equal(applyDotenv({ cwd: dir, home, env }), null);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-    fs.rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test('cwd === home yields one candidate, not a duplicate', () => {
+test('the owned candidate is listed for the NO_KEY_SOURCE message', () => {
   const dir = tempDir();
   try {
-    assert.deepEqual(envFileCandidates({ cwd: dir, home: dir }), [path.join(dir, '.env')]);
+    assert.deepEqual(envFileCandidates({ cwd: dir, home: dir }), [
+      path.join(dir, '.env'),
+      path.join(dir, '.rozo-checkout', '.env'),
+    ]);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

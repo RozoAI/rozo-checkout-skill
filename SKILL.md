@@ -68,11 +68,14 @@ Mode B takes its signing key from the first of these that exists:
 `--keyfile <path>`; then `~/.config/solana/id.json` for Solana or
 `ROZO_CHECKOUT_EVM_KEYSTORE` for EVM; then a raw key in the environment. The
 environment variables below may also be set in a `.env` — either in the
-working directory or at `$HOME/.env`, whichever is found first, or an explicit
+working directory or at `~/.rozo-checkout/.env`, whichever is found first, or an explicit
 `--env-file <path>`. Only `ROZO_CHECKOUT_*` keys are read from it, and the
 real environment wins over the file. Note that the working directory is the
-skill's own directory whenever you follow the run commands above, so `$HOME`
-is where a user's own `.env` will usually be.
+skill's own directory whenever you follow the run commands above, so
+`~/.rozo-checkout/.env` is the right place for a user's own settings. A
+generic `~/.env` is deliberately NOT read: it belongs to the user and usually
+holds unrelated credentials. If theirs lives elsewhere, pass `--env-file
+<path>` rather than asking them to move it.
 
 | Variable | Used by | Notes |
 |---|---|---|
