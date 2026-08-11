@@ -10,6 +10,31 @@ description: >
   coins, or on "rozo-checkout" / "pay this link with bitcoin".
 metadata:
   version: 1.0.0
+
+  # Declared capabilities — what this skill can actually do, so reviewers and
+  # scanners do not have to reverse-engineer it from the bundle.
+  permissions:
+    network_endpoints:
+      - payments.coinbase.com     # quote the Coinbase payment session
+      - intentapiv4.rozo.ai       # create/track the bridge order
+      - "per-chain public RPCs"   # Mode B only: broadcast the signed transfer
+    environment_variables:
+      read_only:
+        - ROZO_CHECKOUT_EVM_KEY          # Mode B (--send) only
+        - ROZO_CHECKOUT_SOL_KEY          # Mode B (--send) only
+        - ROZO_CHECKOUT_EVM_KEYSTORE     # Mode B (--send) only
+        - ROZO_CHECKOUT_KEYSTORE_PASSPHRASE
+        - "ROZO_CHECKOUT_RPC_<chainId>"
+        - ROZO_CHECKOUT_STATE_DIR
+    filesystem:
+      - "~/.rozo-checkout/  (state + prefs + optional .env; created by this tool)"
+      - ".env in the working directory or a --env-file path (ROZO_CHECKOUT_* keys only)"
+      - ".git/index read-only, to refuse git-tracked key files"
+    spending:
+      - "Mode B (--send) signs and broadcasts one ERC-20/SPL transfer, capped at $1,100,"
+      - "only after create-order --confirm recorded a digest-bound confirmation."
+    subprocess: none
+  default_mode_needs_no_credentials: true
 ---
 
 # Pay a Coinbase Payment Link with Stellar, Solana, BNB Chain, Bitcoin and more
@@ -63,6 +88,15 @@ to rebuild them (`npm run build`).
 configuration at all.** The variables below exist only for Mode B (`--send`),
 where this machine signs on the user's behalf. Never ask a user to set one
 unless they have explicitly asked for Mode B.
+
+The recommended way to have an agent send the deposit is not to configure
+hot-wallet keys here. In order of preference: first, the default keyless path —
+the user pays from their own wallet. Second, for Stellar sources, the separate
+`stellar-agent-wallet` skill (ClawHub: `shawnmuggle/stellar-agentic-wallet`)
+pays the deposit address and memo via its `send-raw` command, with its own
+file-based key handling and confirmation prompts — no `ROZO_CHECKOUT_*`
+variable is involved. Only for unattended EVM/Solana automation does Mode B
+apply, and then with a dedicated hot wallet holding a low balance.
 
 Mode B takes its signing key from the first of these that exists:
 `--keyfile <path>`; then `~/.config/solana/id.json` for Solana or

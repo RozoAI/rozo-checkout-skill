@@ -217,6 +217,8 @@ not be tracked by git. Both are refused rather than warned about.
 <details>
 <summary><b>Set up a local wallet for <code>--send</code></b> — .env template and per-wallet export steps</summary>
 
+You very likely do not need any of this: the default path needs no key, and for Stellar the `stellar-agent-wallet` skill sends with its own key handling — this `.env` setup is only for unattended EVM/Solana automation with a dedicated low-balance hot wallet.
+
 **None of this is needed for the default path.** Paying from your own wallet
 needs no key and no configuration, and works with wallets that can never be
 used here — including hardware wallets and exchange accounts.

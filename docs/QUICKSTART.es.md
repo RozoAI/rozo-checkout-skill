@@ -224,6 +224,8 @@ Un archivo de claves o un `.env` no debe ser legible por otros usuarios
 <details>
 <summary><b>Configurar una billetera local para <code>--send</code></b> — plantilla .env y pasos de exportación por billetera</summary>
 
+Muy probablemente no necesites nada de esto: la ruta por defecto no requiere ninguna clave, y para Stellar la skill `stellar-agent-wallet` envía con su propio manejo de claves — esta configuración `.env` es solo para automatización desatendida en EVM/Solana con una billetera caliente dedicada de saldo bajo.
+
 **Nada de esto hace falta para la ruta por defecto.** Pagar desde la propia
 billetera no necesita clave ni configuración, y funciona con billeteras que aquí
 nunca se pueden usar, incluidas las de hardware y las cuentas de exchange.
