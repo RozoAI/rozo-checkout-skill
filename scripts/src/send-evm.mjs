@@ -35,7 +35,7 @@ import { assertRozoPaymentId, maskAddress } from './lib/ids.mjs';
 import { chainName, decimalsFor } from './lib/amounts.mjs';
 import { assertNoTrackedDotEnv } from './lib/keys.mjs';
 import { planKeySource, loadKeySource } from './lib/key-source.mjs';
-import { applyDotenv } from './lib/dotenv.mjs';
+import { applyDotenv, envFileCandidates } from './lib/dotenv.mjs';
 import { promptPassphrase } from './lib/passphrase.mjs';
 import { preflight, finalPayabilityCheck } from './lib/presend.mjs';
 import { claimSend, recordSendResult } from './lib/state.mjs';
@@ -119,7 +119,11 @@ async function main(argv) {
   const dotenv = applyDotenv({ file: args['env-file'] });
   // Where the key comes from is the only thing this resolves; every gate below
   // runs identically whichever source wins.
-  const plan = planKeySource({ family: 'evm', keyfile: args.keyfile });
+  const plan = planKeySource({
+    family: 'evm',
+    keyfile: args.keyfile,
+    searched: args['env-file'] ? null : envFileCandidates(),
+  });
   const loaded = await loadKeySource(plan, { family: 'evm', askPassphrase: promptPassphrase });
   const account = privateKeyToAccount(loaded.privateKey);
   const sender = account.address;

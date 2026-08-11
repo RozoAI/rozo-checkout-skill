@@ -18,6 +18,7 @@ import {
   filterAllowed,
   isAllowedKey,
   resolveEnvFile,
+  envFileCandidates,
   applyDotenv,
   ALLOWED_KEYS,
 } from '../scripts/src/lib/dotenv.mjs';
@@ -176,11 +177,101 @@ test('an empty process value counts as unset', () => {
 
 test('no .env means nothing happens', () => {
   const dir = tempDir();
+  // An explicit empty home: otherwise this asserts something about the machine
+  // running the tests (whether a real ~/.env happens to exist), not the code.
+  const home = tempDir();
   try {
     const env = {};
-    assert.equal(applyDotenv({ cwd: dir, env }), null);
+    assert.equal(applyDotenv({ cwd: dir, home, env }), null);
     assert.deepEqual(env, {});
-    assert.equal(resolveEnvFile({ cwd: dir }), null);
+    assert.equal(resolveEnvFile({ cwd: dir, home }), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a .env in the home directory is found when the working directory has none', () => {
+  // The real shape of the bug this covers: every documented command cd's into
+  // the skill directory, so cwd is never where the user wrote their .env.
+  const dir = tempDir();
+  const home = tempDir();
+  try {
+    writeEnv(home, `ROZO_CHECKOUT_EVM_KEY=${KEY}\n`);
+    const env = {};
+    const res = applyDotenv({ cwd: dir, home, env });
+    assert.equal(res.path, path.join(home, '.env'));
+    assert.equal(env.ROZO_CHECKOUT_EVM_KEY, KEY);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('the working directory wins over home when both have a .env', () => {
+  const dir = tempDir();
+  const home = tempDir();
+  try {
+    const cwdKey = '0x' + '22'.repeat(32);
+    writeEnv(dir, `ROZO_CHECKOUT_EVM_KEY=${cwdKey}\n`);
+    writeEnv(home, `ROZO_CHECKOUT_EVM_KEY=${KEY}\n`);
+    const env = {};
+    const res = applyDotenv({ cwd: dir, home, env });
+    assert.equal(res.path, path.join(dir, '.env'));
+    assert.equal(env.ROZO_CHECKOUT_EVM_KEY, cwdKey);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('an unrelated home .env is ignored rather than made fatal', () => {
+  // The regression this guards: $HOME/.env is a file many people already have
+  // for other projects, conventionally mode 0644. Adopting it unconditionally
+  // made its permissions fatal and broke signing for users who were passing
+  // --keyfile and never meant to offer us that file at all.
+  const dir = tempDir();
+  const home = tempDir();
+  try {
+    writeEnv(home, 'OPENAI_API_KEY=not-ours\nDATABASE_URL=postgres://x\n', 0o644);
+    const env = {};
+    assert.equal(applyDotenv({ cwd: dir, home, env }), null);
+    assert.deepEqual(env, {});
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a home .env that IS ours still gets the full hygiene check', () => {
+  const dir = tempDir();
+  const home = tempDir();
+  try {
+    writeEnv(home, `ROZO_CHECKOUT_EVM_KEY=${KEY}\n`, 0o644);
+    assert.throws(() => applyDotenv({ cwd: dir, home, env: {} }), (e) => e.code === 'ENV_FILE_PERMISSIONS');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a malformed unrelated home .env is skipped, not an error', () => {
+  const dir = tempDir();
+  const home = tempDir();
+  try {
+    writeEnv(home, 'this is not a dotenv line at all\n');
+    const env = {};
+    assert.equal(applyDotenv({ cwd: dir, home, env }), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('cwd === home yields one candidate, not a duplicate', () => {
+  const dir = tempDir();
+  try {
+    assert.deepEqual(envFileCandidates({ cwd: dir, home: dir }), [path.join(dir, '.env')]);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

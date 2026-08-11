@@ -10310,9 +10310,9 @@ function assertNoTrackedDotEnv(cwd = process.cwd()) {
 }
 
 // scripts/src/lib/key-source.mjs
-import fs2 from "node:fs";
-import path2 from "node:path";
-import os from "node:os";
+import fs3 from "node:fs";
+import path3 from "node:path";
+import os2 from "node:os";
 import crypto3 from "node:crypto";
 
 // node_modules/viem/_esm/utils/getAction.js
@@ -21278,18 +21278,134 @@ function http(url, config = {}) {
 init_encodeFunctionData();
 init_keccak256();
 
+// scripts/src/lib/dotenv.mjs
+import fs2 from "node:fs";
+import os from "node:os";
+import path2 from "node:path";
+var ALLOWED_KEYS = [
+  "ROZO_CHECKOUT_EVM_KEY",
+  "ROZO_CHECKOUT_SOL_KEY",
+  "ROZO_CHECKOUT_EVM_KEYSTORE",
+  "ROZO_CHECKOUT_KEYSTORE_PASSPHRASE"
+];
+var ALLOWED_PATTERN = /^ROZO_CHECKOUT_RPC_[A-Za-z0-9_]+$/;
+function isAllowedKey(key) {
+  return ALLOWED_KEYS.includes(key) || ALLOWED_PATTERN.test(key);
+}
+function parseDotenv(text) {
+  const vars = {};
+  const lines = String(text).split(/\r?\n/);
+  lines.forEach((rawLine, i) => {
+    const lineNo = i + 1;
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) return;
+    const withoutExport = line.startsWith("export ") ? line.slice(7).trim() : line;
+    const eq = withoutExport.indexOf("=");
+    if (eq === -1) {
+      throw new SkillError(
+        "BAD_ENV_FILE",
+        `Malformed .env: line ${lineNo} is not KEY=VALUE. (Content withheld \u2014 it may be a secret.)`
+      );
+    }
+    const key = withoutExport.slice(0, eq).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      throw new SkillError(
+        "BAD_ENV_FILE",
+        `Malformed .env: line ${lineNo} has an invalid key name. (Content withheld.)`
+      );
+    }
+    let value = withoutExport.slice(eq + 1).trim();
+    if (value.length >= 2 && (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    vars[key] = value;
+  });
+  return vars;
+}
+function filterAllowed(vars) {
+  const out = {};
+  for (const [k, v] of Object.entries(vars)) if (isAllowedKey(k)) out[k] = v;
+  return out;
+}
+function envFileCandidates({ cwd = process.cwd(), home = os.homedir() } = {}) {
+  const candidates = [path2.join(cwd, ".env")];
+  const inHome = path2.join(home, ".env");
+  if (inHome !== candidates[0]) candidates.push(inHome);
+  return candidates;
+}
+function resolveEnvFile({ file, cwd = process.cwd(), home = os.homedir() } = {}) {
+  if (file) {
+    const p = path2.resolve(file);
+    if (!fs2.existsSync(p)) {
+      throw new SkillError("ENV_FILE_MISSING", `No such env file: ${file}`);
+    }
+    return p;
+  }
+  return envFileCandidates({ cwd, home }).find((p) => fs2.existsSync(p)) ?? null;
+}
+function pickImplicitEnvFile({ cwd, home }) {
+  const [inCwd, inHome] = envFileCandidates({ cwd, home });
+  if (inCwd && fs2.existsSync(inCwd)) return inCwd;
+  if (!inHome || !fs2.existsSync(inHome)) return null;
+  try {
+    if (Object.keys(filterAllowed(parseDotenv(fs2.readFileSync(inHome, "utf8")))).length === 0) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return inHome;
+}
+function applyDotenv({
+  file,
+  cwd = process.cwd(),
+  home = os.homedir(),
+  env = process.env
+} = {}) {
+  const target = file ? resolveEnvFile({ file, cwd, home }) : pickImplicitEnvFile({ cwd, home });
+  if (!target) return null;
+  let stat;
+  try {
+    stat = fs2.statSync(target);
+  } catch (err) {
+    throw new SkillError("ENV_FILE_MISSING", `Cannot read env file (${err.code || "error"}).`);
+  }
+  if (process.platform !== "win32" && stat.mode & 63) {
+    const mode = (stat.mode & 511).toString(8).padStart(3, "0");
+    throw new SkillError(
+      "ENV_FILE_PERMISSIONS",
+      `That .env is readable by other users (mode ${mode}). Run: chmod 600 ${target}`
+    );
+  }
+  assertNotTrackedByGit(target);
+  const parsed = parseDotenv(fs2.readFileSync(target, "utf8"));
+  const allowed = filterAllowed(parsed);
+  const applied = [];
+  for (const [k, v] of Object.entries(allowed)) {
+    const existing = env[k];
+    if (existing !== void 0 && String(existing).trim() !== "") continue;
+    env[k] = v;
+    applied.push(k);
+  }
+  return {
+    path: target,
+    applied,
+    ignored: Object.keys(parsed).length - Object.keys(allowed).length
+  };
+}
+
 // scripts/src/lib/key-source.mjs
 var EVM_KEY_ENV = "ROZO_CHECKOUT_EVM_KEY";
 var SOL_KEY_ENV = "ROZO_CHECKOUT_SOL_KEY";
 var EVM_KEYSTORE_ENV = "ROZO_CHECKOUT_EVM_KEYSTORE";
 var KEYSTORE_PASSPHRASE_ENV = "ROZO_CHECKOUT_KEYSTORE_PASSPHRASE";
 function defaultSolanaKeypairPath() {
-  return path2.join(os.homedir(), ".config", "solana", "id.json");
+  return path3.join(os2.homedir(), ".config", "solana", "id.json");
 }
 function assertKeyfileSafe(file) {
   let stat;
   try {
-    stat = fs2.statSync(file);
+    stat = fs3.statSync(file);
   } catch (err) {
     throw new SkillError(
       "KEYFILE_UNREADABLE",
@@ -21466,12 +21582,16 @@ function looksLikeKeystore(text) {
     return false;
   }
 }
-function planKeySource({ family, keyfile, env = process.env }) {
+function searchedSuffix(searched) {
+  if (!searched || !searched.length) return "";
+  return ` Looked for a .env in: ${searched.map(displayPath).join(", ")}.`;
+}
+function planKeySource({ family, keyfile, env = process.env, searched }) {
   if (keyfile) {
     const resolved = expandHome(keyfile);
     let text;
     try {
-      text = fs2.readFileSync(resolved, "utf8");
+      text = fs3.readFileSync(resolved, "utf8");
     } catch (err) {
       throw new SkillError(
         "KEYFILE_UNREADABLE",
@@ -21495,13 +21615,13 @@ function planKeySource({ family, keyfile, env = process.env }) {
   }
   if (family === "solana") {
     const standard = defaultSolanaKeypairPath();
-    if (fs2.existsSync(standard)) {
+    if (fs3.existsSync(standard)) {
       return { kind: "keypair-file", path: standard, label: displayPath(standard) };
     }
     if (env[SOL_KEY_ENV]) return { kind: "env", label: SOL_KEY_ENV };
     throw new SkillError(
       "NO_KEY_SOURCE",
-      `No signing key found. Either create one with solana-keygen (writes ${displayPath(standard)}), pass --keyfile <path>, or set ${SOL_KEY_ENV}.`
+      `No signing key found. Either create one with solana-keygen (writes ${displayPath(standard)}), pass --keyfile <path>, or set ${SOL_KEY_ENV}.` + searchedSuffix(searched)
     );
   }
   if (family === "evm") {
@@ -21513,7 +21633,7 @@ function planKeySource({ family, keyfile, env = process.env }) {
     if (env[EVM_KEY_ENV]) return { kind: "env", label: EVM_KEY_ENV };
     throw new SkillError(
       "NO_KEY_SOURCE",
-      `No signing key found. Either point ${EVM_KEYSTORE_ENV} at an encrypted JSON keystore, pass --keyfile <path>, or set ${EVM_KEY_ENV}.`
+      `No signing key found. Either point ${EVM_KEYSTORE_ENV} at an encrypted JSON keystore, pass --keyfile <path>, or set ${EVM_KEY_ENV}.${searchedSuffix(searched)}`
     );
   }
   throw new SkillError("NO_KEY_SOURCE", `No key source for family "${family}".`);
@@ -21531,7 +21651,7 @@ async function loadKeySource(plan, { family, env = process.env, askPassphrase } 
     return { secretKey: decodeSolanaEnvKey(raw), label: plan.label, kind: plan.kind };
   }
   assertKeyfileSafe(plan.path);
-  const text = fs2.readFileSync(plan.path, "utf8");
+  const text = fs3.readFileSync(plan.path, "utf8");
   if (plan.kind === "keypair-file") {
     return { secretKey: parseSolanaKeypairJson(text), label: plan.label, kind: plan.kind };
   }
@@ -21550,106 +21670,14 @@ async function loadKeySource(plan, { family, env = process.env, askPassphrase } 
 }
 function expandHome(p) {
   const s = String(p);
-  if (s === "~") return os.homedir();
-  if (s.startsWith("~/")) return path2.join(os.homedir(), s.slice(2));
+  if (s === "~") return os2.homedir();
+  if (s.startsWith("~/")) return path3.join(os2.homedir(), s.slice(2));
   return s;
 }
 function displayPath(p) {
-  const home = os.homedir();
+  const home = os2.homedir();
   const s = String(p);
-  return s.startsWith(home + path2.sep) ? `~${s.slice(home.length)}` : s;
-}
-
-// scripts/src/lib/dotenv.mjs
-import fs3 from "node:fs";
-import path3 from "node:path";
-var ALLOWED_KEYS = [
-  "ROZO_CHECKOUT_EVM_KEY",
-  "ROZO_CHECKOUT_SOL_KEY",
-  "ROZO_CHECKOUT_EVM_KEYSTORE",
-  "ROZO_CHECKOUT_KEYSTORE_PASSPHRASE"
-];
-var ALLOWED_PATTERN = /^ROZO_CHECKOUT_RPC_[A-Za-z0-9_]+$/;
-function isAllowedKey(key) {
-  return ALLOWED_KEYS.includes(key) || ALLOWED_PATTERN.test(key);
-}
-function parseDotenv(text) {
-  const vars = {};
-  const lines = String(text).split(/\r?\n/);
-  lines.forEach((rawLine, i) => {
-    const lineNo = i + 1;
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#")) return;
-    const withoutExport = line.startsWith("export ") ? line.slice(7).trim() : line;
-    const eq = withoutExport.indexOf("=");
-    if (eq === -1) {
-      throw new SkillError(
-        "BAD_ENV_FILE",
-        `Malformed .env: line ${lineNo} is not KEY=VALUE. (Content withheld \u2014 it may be a secret.)`
-      );
-    }
-    const key = withoutExport.slice(0, eq).trim();
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
-      throw new SkillError(
-        "BAD_ENV_FILE",
-        `Malformed .env: line ${lineNo} has an invalid key name. (Content withheld.)`
-      );
-    }
-    let value = withoutExport.slice(eq + 1).trim();
-    if (value.length >= 2 && (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    vars[key] = value;
-  });
-  return vars;
-}
-function filterAllowed(vars) {
-  const out = {};
-  for (const [k, v] of Object.entries(vars)) if (isAllowedKey(k)) out[k] = v;
-  return out;
-}
-function resolveEnvFile({ file, cwd = process.cwd() } = {}) {
-  if (file) {
-    const p = path3.resolve(file);
-    if (!fs3.existsSync(p)) {
-      throw new SkillError("ENV_FILE_MISSING", `No such env file: ${file}`);
-    }
-    return p;
-  }
-  const fallback = path3.join(cwd, ".env");
-  return fs3.existsSync(fallback) ? fallback : null;
-}
-function applyDotenv({ file, cwd = process.cwd(), env = process.env } = {}) {
-  const target = resolveEnvFile({ file, cwd });
-  if (!target) return null;
-  let stat;
-  try {
-    stat = fs3.statSync(target);
-  } catch (err) {
-    throw new SkillError("ENV_FILE_MISSING", `Cannot read env file (${err.code || "error"}).`);
-  }
-  if (process.platform !== "win32" && stat.mode & 63) {
-    const mode = (stat.mode & 511).toString(8).padStart(3, "0");
-    throw new SkillError(
-      "ENV_FILE_PERMISSIONS",
-      `That .env is readable by other users (mode ${mode}). Run: chmod 600 ${target}`
-    );
-  }
-  assertNotTrackedByGit(target);
-  const parsed = parseDotenv(fs3.readFileSync(target, "utf8"));
-  const allowed = filterAllowed(parsed);
-  const applied = [];
-  for (const [k, v] of Object.entries(allowed)) {
-    const existing = env[k];
-    if (existing !== void 0 && String(existing).trim() !== "") continue;
-    env[k] = v;
-    applied.push(k);
-  }
-  return {
-    path: target,
-    applied,
-    ignored: Object.keys(parsed).length - Object.keys(allowed).length
-  };
+  return s.startsWith(home + path3.sep) ? `~${s.slice(home.length)}` : s;
 }
 
 // scripts/src/lib/passphrase.mjs
@@ -22215,7 +22243,7 @@ function assertNotBlacklisted(targets, blacklist) {
 // scripts/src/lib/state.mjs
 import fs5 from "node:fs";
 import path5 from "node:path";
-import os2 from "node:os";
+import os3 from "node:os";
 import crypto5 from "node:crypto";
 var LOCK_STALE_MS = 6e4;
 var LOCK_WAIT_MS = 1e4;
@@ -22276,7 +22304,7 @@ function withLock(fn) {
   }
 }
 function stateRoot() {
-  return process.env.ROZO_CHECKOUT_STATE_DIR || path5.join(os2.homedir(), ".rozo-checkout", "state");
+  return process.env.ROZO_CHECKOUT_STATE_DIR || path5.join(os3.homedir(), ".rozo-checkout", "state");
 }
 function statePath(rozoPaymentId) {
   if (!/^[A-Za-z0-9-]{8,64}$/.test(String(rozoPaymentId || ""))) {
@@ -22770,7 +22798,11 @@ async function main(argv) {
   const rozoPaymentId = assertRozoPaymentId(args["rozo-payment-id"] || args._[0]);
   assertNoTrackedDotEnv();
   const dotenv = applyDotenv({ file: args["env-file"] });
-  const plan = planKeySource({ family: "evm", keyfile: args.keyfile });
+  const plan = planKeySource({
+    family: "evm",
+    keyfile: args.keyfile,
+    searched: args["env-file"] ? null : envFileCandidates()
+  });
   const loaded = await loadKeySource(plan, { family: "evm", askPassphrase: promptPassphrase });
   const account = privateKeyToAccount(loaded.privateKey);
   const sender = account.address;
