@@ -42,7 +42,18 @@ export function findGitRepo(dir) {
     let st = null;
     try {
       st = fs.statSync(dotGit);
-    } catch {
+    } catch (err) {
+      // Only a definitely-absent .git continues the upward search. A .git we
+      // cannot stat (EACCES, EIO) leaves "is this a repository?" unanswered,
+      // and unanswered must refuse — signing would otherwise proceed with the
+      // tracked-secret check silently skipped.
+      if (err?.code !== 'ENOENT' && err?.code !== 'ENOTDIR') {
+        throw new SkillError(
+          'TRACKED_DOTENV_UNVERIFIABLE',
+          `A .git entry here could not be inspected (${err?.code || 'error'}), so tracked ` +
+            'status cannot be proved. Refusing.',
+        );
+      }
       st = null;
     }
     if (st) {
@@ -158,8 +169,19 @@ export function trackedPathsFromIndex(buf, { hashLen = 20 } = {}) {
  * a matching checksum).
  */
 function repoHashLen(gitDir) {
+  // In a linked worktree, gitDir is <common>/worktrees/<name> and the config
+  // holding extensions.objectFormat lives in the COMMON directory, named by
+  // the `commondir` file. Resolve it first or a SHA-256 worktree would be
+  // read as SHA-1 and every valid checksum would be rejected.
+  let configDir = gitDir;
   try {
-    const cfg = fs.readFileSync(path.join(gitDir, 'config'), 'utf8');
+    const common = fs.readFileSync(path.join(gitDir, 'commondir'), 'utf8').trim();
+    if (common) configDir = path.resolve(gitDir, common);
+  } catch {
+    // No commondir file: this IS the common directory.
+  }
+  try {
+    const cfg = fs.readFileSync(path.join(configDir, 'config'), 'utf8');
     if (/^\s*objectformat\s*=\s*sha256\s*$/im.test(cfg)) return 32;
   } catch {
     // No readable config: assume SHA-1; a mismatch fails the checksum check.

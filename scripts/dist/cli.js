@@ -53705,7 +53705,13 @@ function findGitRepo(dir) {
     let st = null;
     try {
       st = fs4.statSync(dotGit);
-    } catch {
+    } catch (err) {
+      if (err?.code !== "ENOENT" && err?.code !== "ENOTDIR") {
+        throw new SkillError(
+          "TRACKED_DOTENV_UNVERIFIABLE",
+          `A .git entry here could not be inspected (${err?.code || "error"}), so tracked status cannot be proved. Refusing.`
+        );
+      }
       st = null;
     }
     if (st) {
@@ -53785,8 +53791,14 @@ function trackedPathsFromIndex(buf, { hashLen = 20 } = {}) {
   return paths;
 }
 function repoHashLen(gitDir) {
+  let configDir = gitDir;
   try {
-    const cfg = fs4.readFileSync(path4.join(gitDir, "config"), "utf8");
+    const common = fs4.readFileSync(path4.join(gitDir, "commondir"), "utf8").trim();
+    if (common) configDir = path4.resolve(gitDir, common);
+  } catch {
+  }
+  try {
+    const cfg = fs4.readFileSync(path4.join(configDir, "config"), "utf8");
     if (/^\s*objectformat\s*=\s*sha256\s*$/im.test(cfg)) return 32;
   } catch {
   }
