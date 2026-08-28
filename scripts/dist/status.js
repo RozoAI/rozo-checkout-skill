@@ -116,6 +116,9 @@ function maskAddress(address) {
   return `${s.slice(0, 6)}...${s.slice(-4)}`;
 }
 
+// scripts/src/lib/api.mjs
+import { createRequire } from "node:module";
+
 // scripts/src/lib/http.mjs
 var DEFAULT_TIMEOUT_MS = 2e4;
 var USER_AGENT = "rozo-checkout-skill/1.0";
@@ -182,7 +185,15 @@ function getJson(url, opts) {
 }
 
 // scripts/src/lib/api.mjs
+var PKG_VERSION = (() => {
+  try {
+    return createRequire(import.meta.url)("../../../package.json").version;
+  } catch {
+    return "0.0.0";
+  }
+})();
 var MPP_BASE = process.env.ROZO_CHECKOUT_MPP_BASE || "https://apiserver.mpprouter.dev/v1/services/rozo-agent-api";
+var CLIENT_LABEL = `rozo-checkout-cli/${PKG_VERSION}`;
 var INTENTS_BASE = process.env.ROZO_CHECKOUT_INTENTS_BASE || "https://intentapiv4.rozo.ai/functions/v1/payment-api";
 async function invoiceStatus({ linkId, rozoPaymentId }) {
   const qs = new URLSearchParams();

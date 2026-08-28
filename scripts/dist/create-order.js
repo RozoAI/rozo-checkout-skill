@@ -153,6 +153,9 @@ function maskMemo(memo) {
   return `${s.slice(0, 4)}...${s.slice(-3)}`;
 }
 
+// scripts/src/lib/api.mjs
+import { createRequire } from "node:module";
+
 // scripts/src/lib/http.mjs
 var DEFAULT_TIMEOUT_MS = 2e4;
 var USER_AGENT = "rozo-checkout-skill/1.0";
@@ -222,7 +225,15 @@ function postJson(url, body, opts) {
 }
 
 // scripts/src/lib/api.mjs
+var PKG_VERSION = (() => {
+  try {
+    return createRequire(import.meta.url)("../../../package.json").version;
+  } catch {
+    return "0.0.0";
+  }
+})();
 var MPP_BASE = process.env.ROZO_CHECKOUT_MPP_BASE || "https://apiserver.mpprouter.dev/v1/services/rozo-agent-api";
+var CLIENT_LABEL = `rozo-checkout-cli/${PKG_VERSION}`;
 var INTENTS_BASE = process.env.ROZO_CHECKOUT_INTENTS_BASE || "https://intentapiv4.rozo.ai/functions/v1/payment-api";
 async function quoteInvoice({ url, linkId }) {
   const body = url ? { url } : { payment_id: linkId };
@@ -232,7 +243,8 @@ async function createInvoice({ url, linkId, source, quoteReceipt }) {
   const body = {
     ...url ? { url } : { payment_id: linkId },
     source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
-    ...quoteReceipt ? { quoteReceipt } : {}
+    ...quoteReceipt ? { quoteReceipt } : {},
+    client: CLIENT_LABEL
   };
   return postJson(`${MPP_BASE}/create-invoice`, body);
 }
