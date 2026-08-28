@@ -12,12 +12,33 @@
  * context). Only the public read-only GET is called against payment-api.
  */
 
+import { createRequire } from 'node:module';
+
 import { getJson, postJson } from './http.mjs';
 import { SkillError } from './output.mjs';
+
+// Same resolution the `--version` command uses. Falls back rather than throwing:
+// a missing package.json must not stop a payment.
+const PKG_VERSION = (() => {
+  try {
+    return createRequire(import.meta.url)('../../../package.json').version;
+  } catch {
+    return '0.0.0';
+  }
+})();
 
 export const MPP_BASE =
   process.env.ROZO_CHECKOUT_MPP_BASE ||
   'https://apiserver.mpprouter.dev/v1/services/rozo-agent-api';
+
+/**
+ * Caller provenance sent with every order this CLI creates. The router stores it
+ * as `metadata.client`, which is the only way to tell a scripted payment apart
+ * from one a human made in the browser — both hit the same create-invoice
+ * endpoint, so without this label every order looks identical server-side.
+ * Reporting only; it carries no identity and grants no privilege.
+ */
+export const CLIENT_LABEL = `rozo-checkout-cli/${PKG_VERSION}`;
 
 export const INTENTS_BASE =
   process.env.ROZO_CHECKOUT_INTENTS_BASE ||
@@ -38,6 +59,7 @@ export async function createInvoice({ url, linkId, source, quoteReceipt }) {
     ...(url ? { url } : { payment_id: linkId }),
     source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
     ...(quoteReceipt ? { quoteReceipt } : {}),
+    client: CLIENT_LABEL,
   };
   return postJson(`${MPP_BASE}/create-invoice`, body);
 }
