@@ -186,11 +186,15 @@ function getJson(url, opts) {
 
 // scripts/src/lib/api.mjs
 var PKG_VERSION = (() => {
-  try {
-    return createRequire(import.meta.url)("../../../package.json").version;
-  } catch {
-    return "0.0.0";
+  const requireFrom = createRequire(import.meta.url);
+  for (const candidate of ["../../package.json", "../../../package.json"]) {
+    try {
+      const pkg = requireFrom(candidate);
+      if (pkg?.name === "@rozoai/checkout" && pkg.version) return pkg.version;
+    } catch {
+    }
   }
+  return "0.0.0";
 })();
 var MPP_BASE = process.env.ROZO_CHECKOUT_MPP_BASE || "https://apiserver.mpprouter.dev/v1/services/rozo-agent-api";
 var CLIENT_LABEL = `rozo-checkout-cli/${PKG_VERSION}`;
