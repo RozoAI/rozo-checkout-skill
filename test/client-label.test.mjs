@@ -11,7 +11,8 @@ import { createRequire } from 'node:module';
 
 import { CLIENT_LABEL, createInvoice, MPP_BASE } from '../scripts/src/lib/api.mjs';
 
-const pkg = createRequire(import.meta.url)('../package.json');
+const require_ = createRequire(import.meta.url);
+const pkg = require_('../package.json');
 
 test('the client label names the CLI and its real published version', () => {
   assert.equal(CLIENT_LABEL, `rozo-checkout-cli/${pkg.version}`);
@@ -61,4 +62,46 @@ test('createInvoice sends the client label on every order', async () => {
   assert.equal(seen[1].body.payment_id, 'pl_test');
   assert.equal(seen[1].body.quoteReceipt, 'r');
   assert.deepEqual(seen[1].body.source, { chainId: 'lightning', tokenSymbol: 'BTC' });
+});
+
+test('the built artifact resolves the version at its SHIPPED depth', () => {
+  // The regression this guards: api.mjs lives at scripts/src/lib/ but ships
+  // bundled into scripts/dist/, one directory shallower, so package.json sits
+  // at a different depth in the artifact. A lookup hardcoded to the source
+  // depth throws in the published package and falls back to "0.0.0" --
+  // silently, because that fallback exists so a missing package.json can never
+  // stop a payment. Every real user's order would carry a version that does
+  // not exist.
+  //
+  // `--version` does NOT catch this: cli.mjs has its own lookup at its own
+  // depth, which happened to stay correct. Only resolving from the bundled
+  // file's location does.
+  //
+  // The bundles are CLI entrypoints that run on import, so this resolves the
+  // path the way the bundle does rather than importing it.
+  const built = new URL('../scripts/dist/create-order.js', import.meta.url);
+  const requireFrom = createRequire(built);
+  let found = null;
+  for (const candidate of ['../../package.json', '../../../package.json']) {
+    try {
+      const p = requireFrom(candidate);
+      if (p?.name === '@rozoai/checkout' && p.version) { found = p.version; break; }
+    } catch { /* wrong depth for this layout */ }
+  }
+  assert.equal(found, pkg.version, 'the bundle cannot see its own package.json');
+});
+
+test('the shipped bundles carry the client label', () => {
+  const fs = require_('node:fs');
+  const dir = new URL('../scripts/dist/', import.meta.url);
+  for (const file of ['cli.js', 'create-order.js']) {
+    const src = fs.readFileSync(new URL(file, dir), 'utf8');
+    assert.ok(
+      src.includes('rozo-checkout-cli/'),
+      `${file} is stale -- run npm run build`
+    );
+    // Both depths must be present, or the artifact resolves at only one layout.
+    assert.ok(src.includes("'../../package.json'") || src.includes('"../../package.json"'),
+      `${file} lost the artifact-depth candidate`);
+  }
 });
