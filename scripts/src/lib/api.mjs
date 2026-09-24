@@ -52,6 +52,16 @@ export const MPP_BASE =
  */
 export const CLIENT_LABEL = `rozo-checkout-cli/${PKG_VERSION}`;
 
+/**
+ * Order-level attribution (router contract of 2026-09-25). The router writes
+ * `attribution` to `metadata.attribution` on intent creation, next to the
+ * legacy `metadata.client` above, so orders can be split by surface: this
+ * skill vs agent.rozo.ai vs checkout.rozo.ai. Same rules as CLIENT_LABEL:
+ * reporting only, no identity, and the router drops malformed values instead
+ * of failing the order.
+ */
+export const ATTRIBUTION_CLIENT = `rozo-checkout-skill/${PKG_VERSION}`;
+
 export const INTENTS_BASE =
   process.env.ROZO_CHECKOUT_INTENTS_BASE ||
   'https://intentapiv4.rozo.ai/functions/v1/payment-api';
@@ -72,6 +82,7 @@ export async function createInvoice({ url, linkId, source, quoteReceipt }) {
     source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
     ...(quoteReceipt ? { quoteReceipt } : {}),
     client: CLIENT_LABEL,
+    attribution: { client: ATTRIBUTION_CLIENT },
   };
   return postJson(`${MPP_BASE}/create-invoice`, body);
 }

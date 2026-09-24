@@ -198,6 +198,7 @@ var PKG_VERSION = (() => {
 })();
 var MPP_BASE = process.env.ROZO_CHECKOUT_MPP_BASE || "https://apiserver.mpprouter.dev/v1/services/rozo-agent-api";
 var CLIENT_LABEL = `rozo-checkout-cli/${PKG_VERSION}`;
+var ATTRIBUTION_CLIENT = `rozo-checkout-skill/${PKG_VERSION}`;
 var INTENTS_BASE = process.env.ROZO_CHECKOUT_INTENTS_BASE || "https://intentapiv4.rozo.ai/functions/v1/payment-api";
 async function invoiceStatus({ linkId, rozoPaymentId }) {
   const qs = new URLSearchParams();
