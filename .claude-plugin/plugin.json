@@ -1,11 +1,25 @@
 {
   "name": "rozo-checkout",
   "description": "Pay OpenRouter, or any Coinbase invoice, with the crypto you already hold: USDT/USDC on Solana, BNB Chain, Ethereum or Polygon, USDC on Base or Stellar, or BTC over Lightning. No Coinbase account needed.",
-  "version": "0.1.11",
-  "author": { "name": "Rozo AI", "url": "https://rozo.ai" },
+  "version": "0.1.12",
+  "author": {
+    "name": "Rozo AI",
+    "url": "https://rozo.ai"
+  },
   "homepage": "https://github.com/RozoAI/rozo-checkout-skill#readme",
   "repository": "https://github.com/RozoAI/rozo-checkout-skill",
   "license": "MIT",
-  "keywords": ["openrouter", "coinbase", "payments", "usdc", "usdt", "solana", "lightning", "agent"],
-  "skills": ["./"]
+  "keywords": [
+    "openrouter",
+    "coinbase",
+    "payments",
+    "usdc",
+    "usdt",
+    "solana",
+    "lightning",
+    "agent"
+  ],
+  "skills": [
+    "./"
+  ]
 }
