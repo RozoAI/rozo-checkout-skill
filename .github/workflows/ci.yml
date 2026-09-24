@@ -12,9 +12,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 18 is the floor declared in engines; 22 is current LTS; 24 is where the
+        # 20 is the floor declared in engines (@solana/* and commander need >=20);
+        # 22 is current LTS; 24 is where the
         # ESM __filename crash first showed up, so it stays in the matrix.
-        node: ['18', '22', '24']
+        node: ['20', '22', '24']
     steps:
       - uses: actions/checkout@v4
 
