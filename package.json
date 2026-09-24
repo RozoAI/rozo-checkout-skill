@@ -1,6 +1,6 @@
 {
   "name": "@rozoai/checkout",
-  "version": "0.1.12",
+  "version": "0.1.11",
   "type": "module",
   "description": "Pay OpenRouter, or any Coinbase invoice, with the crypto you already hold: USDT/USDC on Solana, BNB Chain, Ethereum or Polygon, USDC on Base or Stellar, or BTC over Lightning. No Coinbase account.",
   "license": "MIT",

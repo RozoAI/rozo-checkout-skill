@@ -386,7 +386,7 @@ The full list of what this refuses to do, and why, is in
 
 ## Changelog
 
-- **0.1.12**: each order now carries `attribution.client`
+- **0.1.11**: each order now carries `attribution.client`
   (`rozo-checkout-skill/<version>`) so skill-created orders can be told apart
   from the web checkout. Installable as a Claude Code plugin
   (`/plugin marketplace add RozoAI/rozo-checkout-skill`). README and skill
