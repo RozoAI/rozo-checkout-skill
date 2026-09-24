@@ -1,0 +1,15 @@
+{
+  "name": "rozo",
+  "owner": { "name": "Rozo AI", "url": "https://rozo.ai" },
+  "description": "Rozo AI skills for agents that pay with crypto.",
+  "plugins": [
+    {
+      "name": "rozo-checkout",
+      "source": "./",
+      "description": "Pay OpenRouter, or any Coinbase invoice, with the crypto you already hold: USDT/USDC on Solana, BNB Chain, Ethereum or Polygon, USDC on Base or Stellar, or BTC over Lightning. No Coinbase account needed.",
+      "category": "payments",
+      "homepage": "https://github.com/RozoAI/rozo-checkout-skill#readme",
+      "license": "MIT"
+    }
+  ]
+}

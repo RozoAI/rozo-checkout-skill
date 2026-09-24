@@ -2,11 +2,34 @@
 
 **English** | [简体中文](docs/README.zh.md) | [日本語](docs/README.ja.md) | [Español](docs/README.es.md)
 
-Pay an **OpenRouter Coinbase Payment Link** with a coin that link cannot take
-directly — BTC over Lightning, or USDT/USDC on Solana, BNB Chain, Ethereum,
-Polygon, Base or Stellar. A Coinbase Payment Link only accepts USDC on Base;
-this routes the coin you actually hold through a bridge, and a funder wallet
-settles the invoice for you. No account, no API key, no browser.
+### When your agent needs to pay OpenRouter (or any Coinbase invoice) with the crypto you already hold
+
+OpenRouter crypto top-ups and other Coinbase-hosted invoices settle in USDC on
+Base. This skill pays them from whatever you hold instead, and it does three
+things the official path cannot:
+
+- **Pay from the chain you are already on.** USDT or USDC on Solana, BNB Chain,
+  Ethereum or Polygon, USDC on Base or Stellar, or BTC over Lightning. Coinbase's
+  own direct pay takes USDC on Base.
+- **No Coinbase account.** Pay the deposit address from any wallet or straight
+  from an exchange withdrawal. No sign-up, no API key, no browser.
+- **Scriptable.** OpenRouter's crypto credits API (`POST /api/v1/credits/coinbase`)
+  now returns `410 Gone`, so top-ups can no longer be automated there. Once you
+  have the payment link, paying it is one command an agent or a cron job can
+  run: without a terminal it stops for confirmation, so an unattended caller
+  reviews the quote and then passes `--yes`.
+
+Merchants we have been paid through so far: **OpenRouter, Venice.ai, Porkbun
+and Alchemy**. Any `payments.coinbase.com` link is quoted the same way.
+
+Before you pay, know two things:
+
+- **The fee is in the live quote.** You pay the full invoice, no discount and no
+  markup on it; the bridge and network fee is added to the deposit amount, which
+  is shown in the order summary before the deposit address is released. Send
+  exactly that amount, nothing more is charged.
+- **Crypto payments to OpenRouter are never refundable.** That is OpenRouter's
+  policy, not ours; check the credit amount before you send.
 
 ```bash
 npx @rozoai/checkout pay <coinbase-link>
@@ -61,6 +84,21 @@ already hold and pay from wherever it already lives.
   else is keyless.
 
 ## Use it from your agent
+
+Install it as a skill, or just run the CLI:
+
+```text
+# Claude Code
+/plugin marketplace add RozoAI/rozo-checkout-skill
+/plugin install rozo-checkout@rozo
+
+# OpenClaw / ClawHub
+clawhub install rozo-checkout
+
+# Any agent that can run a shell: review the quote, then pay unattended
+npx @rozoai/checkout quote <coinbase-link>
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana --yes
+```
 
 The payload is the same everywhere: the one-liner above, or point the agent at
 [llms.txt](llms.txt). Agents and scripts should always pass `--with` — the
