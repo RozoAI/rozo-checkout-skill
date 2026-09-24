@@ -95,8 +95,9 @@ Install it as a skill, or just run the CLI:
 # OpenClaw / ClawHub
 clawhub install rozo-checkout
 
-# Any agent that can run a shell (add --yes once the quote is reviewed)
-npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
+# Any agent that can run a shell: review the quote, then pay unattended
+npx @rozoai/checkout quote <coinbase-link>
+npx @rozoai/checkout pay <coinbase-link> --with usdt-solana --yes
 ```
 
 The payload is the same everywhere: the one-liner above, or point the agent at
