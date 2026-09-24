@@ -9,14 +9,15 @@ Base. This skill pays them from whatever you hold instead, and it does three
 things the official path cannot:
 
 - **Pay from the chain you are already on.** USDT or USDC on Solana, BNB Chain,
-  Ethereum, Polygon or Base, USDC on Stellar, or BTC over Lightning. Coinbase's
+  Ethereum or Polygon, USDC on Base or Stellar, or BTC over Lightning. Coinbase's
   own direct pay takes USDC on Base.
 - **No Coinbase account.** Pay the deposit address from any wallet or straight
   from an exchange withdrawal. No sign-up, no API key, no browser.
 - **Scriptable.** OpenRouter's crypto credits API (`POST /api/v1/credits/coinbase`)
   now returns `410 Gone`, so top-ups can no longer be automated there. Once you
-  have the payment link, paying it is one command that an agent or a cron job
-  can run.
+  have the payment link, paying it is one command an agent or a cron job can
+  run: without a terminal it stops for confirmation, so an unattended caller
+  reviews the quote and then passes `--yes`.
 
 Merchants we have been paid through so far: **OpenRouter, Venice.ai, Porkbun
 and Alchemy**. Any `payments.coinbase.com` link is quoted the same way.
@@ -94,7 +95,7 @@ Install it as a skill, or just run the CLI:
 # OpenClaw / ClawHub
 clawhub install rozo-checkout
 
-# Any agent that can run a shell
+# Any agent that can run a shell (add --yes once the quote is reviewed)
 npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 ```
 
