@@ -1,14 +1,15 @@
 ---
 name: rozo-checkout
 description: >
-  Pay an OpenRouter Coinbase Payment Link with Stellar, Solana, BNB Chain,
-  Ethereum, Polygon, Base (USDT/USDC) or Bitcoin Lightning. A bridge creates a
-  one-time deposit order for the coin you actually hold, then a funder wallet
-  settles the Coinbase invoice for you. Use when a
+  Use when an agent needs to pay OpenRouter (or any Coinbase invoice) with the
+  crypto it already holds: USDT/USDC on Solana, BNB Chain, Ethereum, Polygon or
+  Base, USDC on Stellar, or BTC over Lightning, with no Coinbase account. A
+  bridge creates a one-time deposit order for that coin, then a funder wallet
+  settles the Coinbase invoice. Triggers on a
   payments.coinbase.com/payment-links/pl_* (or
-  payment-sessions/paymentSession_*) URL should be paid with any of these
-  coins, on "rozo-checkout" / "pay this link with bitcoin", or when a user
-  asks to top up OpenRouter credits with crypto and has no link yet.
+  payment-sessions/paymentSession_*) URL, on "rozo-checkout" / "pay this link
+  with bitcoin", or when a user asks to top up OpenRouter credits with crypto
+  and has no link yet (OpenRouter's crypto credits API returns 410 Gone).
 metadata:
   version: 1.1.0
 

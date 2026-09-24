@@ -1,8 +1,10 @@
 # rozo-checkout
 
-> Pay an OpenRouter Coinbase Payment Link (payments.coinbase.com/payment-links/pl_* or
+> When your agent needs to pay OpenRouter (or any Coinbase invoice) with the crypto you
+> already hold. Pays a Coinbase Payment Link (payments.coinbase.com/payment-links/pl_* or
 > /payment-sessions/paymentSession_*) with BTC over Lightning, or USDT/USDC on Solana,
-> BNB Chain, Ethereum, Polygon, Base, or Stellar. Public HTTP endpoints, no API key.
+> BNB Chain, Ethereum, Polygon, Base, or Stellar. No Coinbase account, public HTTP
+> endpoints, no API key. Crypto payments to OpenRouter are never refundable.
 > The payer funds a one-time deposit address; a bridge and a funder wallet settle the
 > Coinbase link automatically. No discount: you pay the invoice amount, plus the
 > deposit normally carries a small bridge/source-chain fee on top.
