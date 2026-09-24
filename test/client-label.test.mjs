@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
-import { CLIENT_LABEL, createInvoice, MPP_BASE } from '../scripts/src/lib/api.mjs';
+import { ATTRIBUTION_CLIENT, CLIENT_LABEL, createInvoice, MPP_BASE } from '../scripts/src/lib/api.mjs';
 
 const require_ = createRequire(import.meta.url);
 const pkg = require_('../package.json');
@@ -19,6 +19,11 @@ test('the client label names the CLI and its real published version', () => {
   // A 0.0.0 label means the package.json lookup silently fell back and every
   // order would be tagged with a version that does not exist.
   assert.notEqual(pkg.version, '0.0.0');
+});
+
+test('the attribution client names the skill and its real version', () => {
+  assert.equal(ATTRIBUTION_CLIENT, `rozo-checkout-skill/${pkg.version}`);
+  assert.ok(ATTRIBUTION_CLIENT.length <= 64, 'must survive the 64-char cap');
 });
 
 test('the label stays inside the charset the router keeps', () => {
@@ -56,6 +61,7 @@ test('createInvoice sends the client label on every order', async () => {
   for (const call of seen) {
     assert.equal(call.url, `${MPP_BASE}/create-invoice`);
     assert.equal(call.body.client, CLIENT_LABEL);
+    assert.deepEqual(call.body.attribution, { client: ATTRIBUTION_CLIENT });
   }
   // Provenance must not disturb the fields the payment actually depends on.
   assert.equal(seen[0].body.url, 'https://payments.coinbase.com/payment-links/pl_test');
@@ -99,6 +105,10 @@ test('the shipped bundles carry the client label', () => {
     assert.ok(
       src.includes('rozo-checkout-cli/'),
       `${file} is stale -- run npm run build`
+    );
+    assert.ok(
+      src.includes('rozo-checkout-skill/${PKG_VERSION}') || src.includes('attribution: { client:'),
+      `${file} does not send attribution -- run npm run build`
     );
     // Both depths must be present, or the artifact resolves at only one layout.
     assert.ok(src.includes("'../../package.json'") || src.includes('"../../package.json"'),
