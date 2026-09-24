@@ -274,7 +274,7 @@ Stellar and Lightning are Mode A only.
 <summary><b>Terminal — no agent at all</b> — run the scripts step by step</summary>
 
 Drive each step yourself. The bundles are self-contained; nothing to install
-beyond Node 18+.
+beyond Node 20.18+.
 
 ```bash
 git clone https://github.com/RozoAI/rozo-checkout-skill && cd rozo-checkout-skill
