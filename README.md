@@ -386,6 +386,12 @@ The full list of what this refuses to do, and why, is in
 
 ## Changelog
 
+- **0.1.11**: each order now carries `attribution.client`
+  (`rozo-checkout-skill/<version>`) so skill-created orders can be told apart
+  from the web checkout. Installable as a Claude Code plugin
+  (`/plugin marketplace add RozoAI/rozo-checkout-skill`). README and skill
+  description rewritten around paying Coinbase invoices from the crypto you
+  already hold.
 - **0.1.3** — fixes found by the first real payment. The built bundles no
   longer crash with `__filename is not defined` on Node 22+ (the esbuild banner
   now shims `__filename`/`__dirname` as well as `require`, and every bundle is
