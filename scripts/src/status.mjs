@@ -24,6 +24,7 @@ import { chainName, formatAmount } from './lib/amounts.mjs';
 import { classifyStatus } from './lib/guards.mjs';
 import { formatRemaining } from './lib/expiry.mjs';
 import { findByLinkId, readState } from './lib/state.mjs';
+import { providerFromPayment } from './lib/bitrefill.mjs';
 
 const POLL_INTERVAL_MS = 10_000;
 
@@ -34,16 +35,28 @@ function resolveProvider(explicit, rozoPaymentId) {
   if (explicit) return String(explicit).toLowerCase();
   if (rozoPaymentId && isRozoPaymentId(rozoPaymentId)) {
     try {
-      return readState(rozoPaymentId)?.provider ?? 'coinbase';
+      return readState(rozoPaymentId)?.provider ?? null;
     } catch {
-      return 'coinbase';
+      return null;
     }
   }
-  return 'coinbase';
+  return null;
 }
 
 async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
-  const provider = resolveProvider(explicitProvider, rozoPaymentId);
+  let provider = resolveProvider(explicitProvider, rozoPaymentId);
+  // No flag and no local record: ask the intent itself first, so a Bitrefill
+  // order created elsewhere is still classified correctly.
+  let prefetched = null;
+  if (!provider && rozoPaymentId && isRozoPaymentId(rozoPaymentId)) {
+    try {
+      prefetched = await getPayment(rozoPaymentId);
+      provider = providerFromPayment(prefetched);
+    } catch {
+      prefetched = null;
+    }
+  }
+  provider = provider === 'bitrefill' ? 'bitrefill' : 'coinbase';
   let status = null;
   let statusError = null;
   // A Bitrefill order has no Coinbase resource and no router fulfilment
@@ -72,7 +85,9 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
 
   let payment = null;
   let paymentError = null;
-  if (id && isRozoPaymentId(id)) {
+  if (prefetched && id === rozoPaymentId) {
+    payment = prefetched;
+  } else if (id && isRozoPaymentId(id)) {
     try {
       payment = await getPayment(id);
     } catch (err) {

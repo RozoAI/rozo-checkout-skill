@@ -405,10 +405,16 @@ function classifyStatus({
       escalate: true
     });
   }
-  if (bitrefill && (payment?.status === "payment_payout_completed" || payment?.status === "payment_completed")) {
-    return mk("settled", "USDC delivered to the Bitrefill invoice address on Base.", {
-      terminal: true
-    });
+  if (bitrefill) {
+    const payoutTx = Boolean(payment?.destination?.txHash);
+    if (payment?.status === "payment_payout_completed" || payment?.status === "payment_completed" && payoutTx) {
+      return mk("settled", "USDC delivered to the Bitrefill invoice address on Base.", {
+        terminal: true
+      });
+    }
+    if (payment?.status === "payment_completed") {
+      return mk("bridging", "Payment completed but no payout transaction is visible yet. Keep polling.");
+    }
   }
   switch (payment?.status) {
     case "payment_unpaid": {
@@ -536,6 +542,20 @@ function findByLinkId(linkId) {
   return best;
 }
 
+// scripts/src/lib/bitrefill.mjs
+var PROVIDER_BITREFILL = "bitrefill";
+var BITREFILL_DESTINATION = Object.freeze({ chainId: "8453", tokenSymbol: "USDC" });
+var BITREFILL_MIN_EXPIRY_MS = 5 * 60 * 1e3;
+var BITREFILL_MIN_PAY_WINDOW_MS = 2 * 60 * 1e3;
+var BITREFILL_MAX_EXPIRY_AHEAD_MS = 30 * 60 * 1e3;
+function providerFromPayment(payment) {
+  if (!payment) return null;
+  if (String(payment.orderId ?? payment.order_id ?? "").startsWith("bitrefill_")) return PROVIDER_BITREFILL;
+  const meta = payment.metadata?.provider;
+  if (meta) return String(meta).toLowerCase();
+  return null;
+}
+
 // scripts/src/status.mjs
 var POLL_INTERVAL_MS = 1e4;
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -543,15 +563,25 @@ function resolveProvider(explicit, rozoPaymentId) {
   if (explicit) return String(explicit).toLowerCase();
   if (rozoPaymentId && isRozoPaymentId(rozoPaymentId)) {
     try {
-      return readState(rozoPaymentId)?.provider ?? "coinbase";
+      return readState(rozoPaymentId)?.provider ?? null;
     } catch {
-      return "coinbase";
+      return null;
     }
   }
-  return "coinbase";
+  return null;
 }
 async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
-  const provider = resolveProvider(explicitProvider, rozoPaymentId);
+  let provider = resolveProvider(explicitProvider, rozoPaymentId);
+  let prefetched = null;
+  if (!provider && rozoPaymentId && isRozoPaymentId(rozoPaymentId)) {
+    try {
+      prefetched = await getPayment(rozoPaymentId);
+      provider = providerFromPayment(prefetched);
+    } catch {
+      prefetched = null;
+    }
+  }
+  provider = provider === "bitrefill" ? "bitrefill" : "coinbase";
   let status = null;
   let statusError = null;
   if (provider !== "bitrefill") {
@@ -572,7 +602,9 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   }
   let payment = null;
   let paymentError = null;
-  if (id && isRozoPaymentId(id)) {
+  if (prefetched && id === rozoPaymentId) {
+    payment = prefetched;
+  } else if (id && isRozoPaymentId(id)) {
     try {
       payment = await getPayment(id);
     } catch (err) {

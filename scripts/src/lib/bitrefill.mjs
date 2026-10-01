@@ -25,8 +25,59 @@ export const PROVIDER_COINBASE = 'coinbase';
 /** Bitrefill pays out on Base, in USDC. Nothing else is accepted. */
 export const BITREFILL_DESTINATION = Object.freeze({ chainId: '8453', tokenSymbol: 'USDC' });
 
-/** Refuse an invoice with less than this much life left. */
+/** Refuse to CREATE an order for an invoice with less than this much life left. */
 export const BITREFILL_MIN_EXPIRY_MS = 5 * 60 * 1000;
+
+/** Refuse to SHOW a deposit or SEND with less than this much life left. */
+export const BITREFILL_MIN_PAY_WINDOW_MS = 2 * 60 * 1000;
+
+/** The router rejects an expiry further out than this; mirror it locally. */
+export const BITREFILL_MAX_EXPIRY_AHEAD_MS = 30 * 60 * 1000;
+
+/** Router error codes, with what the user should do about each. */
+export const BITREFILL_ROUTER_HINTS = {
+  BITREFILL_DISABLED: 'Bitrefill payments are switched off on the router right now. Try again later.',
+  BITREFILL_NOT_CONFIGURED: 'The router is not configured for Bitrefill payments yet (503). Nothing was created; try again later.',
+  RETRY_LATER: 'The router is temporarily unable to create the order (503). Nothing was created; wait a minute and retry the same command.',
+  INVALID_INPUT: 'The router rejected the invoice details (400). Check the invoice id, address, amount and expiry against Bitrefill.',
+  INVALID_ADDRESS: 'The router rejected the receiving address. Copy it again from the Bitrefill invoice.',
+  INVALID_AMOUNT: 'The router rejected the amount. Use the exact USDC amount Bitrefill shows.',
+  AMOUNT_OUT_OF_RANGE: 'The amount is outside what the router accepts for Bitrefill invoices.',
+  INVOICE_EXPIRING: 'The invoice expires too soon (or too far out) for the router. Create a fresh Bitrefill invoice.',
+  BLOCKED_ADDRESS: 'The router refused this receiving address. Do not pay it; report it.',
+  UNSUPPORTED_SOURCE: 'The router does not accept this coin for Bitrefill invoices. Choose another coin.',
+};
+
+/** Re-throw a router error with a clear, actionable message; code unchanged. */
+export function explainRouterError(err) {
+  const hint = BITREFILL_ROUTER_HINTS[err?.code];
+  if (!hint) return err;
+  return new SkillError(err.code, `${hint}${err.message ? ` (router: ${err.message})` : ''}`, err.details);
+}
+
+/**
+ * Expiry for a Bitrefill order comes from the invoice ONLY — never from the
+ * Rozo intent's own expiresAt. Shape mirrors checkExpiry for the callers.
+ */
+export function checkBitrefillExpiry(expiresAt, now = Date.now(), minMs = BITREFILL_MIN_PAY_WINDOW_MS) {
+  const ms = parseDeadline(expiresAt);
+  const base = { marginMs: minMs, deadlines: { invoiceMs: ms } };
+  if (ms === null) {
+    return { ...base, ok: false, code: 'EXPIRY_UNPARSABLE', reason: 'The Bitrefill invoice expiry is missing or unreadable.', effectiveDeadlineMs: null, msRemaining: null, msOfSlack: null };
+  }
+  const msRemaining = ms - now;
+  const out = { ...base, effectiveDeadlineMs: ms, msRemaining, msOfSlack: msRemaining - minMs };
+  if (msRemaining <= 0) return { ...out, ok: false, code: 'EXPIRED', reason: 'The Bitrefill invoice has expired.' };
+  if (msRemaining < minMs) {
+    return {
+      ...out,
+      ok: false,
+      code: 'INVOICE_EXPIRING',
+      reason: `Only ${Math.floor(msRemaining / 1000)}s left on the Bitrefill invoice; at least ${Math.round(minMs / 60000)} min is required. Create a fresh invoice.`,
+    };
+  }
+  return { ...out, ok: true, code: null, reason: null };
+}
 
 const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const AMOUNT_RE = /^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/;
@@ -36,7 +87,11 @@ const INVOICE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/;
  * Validate the user-supplied invoice facts before anything touches the network.
  * Returns a normalized copy; throws SkillError on the first problem.
  */
-export function validateBitrefillInput({ invoiceId, address, amount, expiresAt }, now = Date.now()) {
+export function validateBitrefillInput(
+  { invoiceId, address, amount, expiresAt },
+  now = Date.now(),
+  minMs = BITREFILL_MIN_EXPIRY_MS,
+) {
   const id = String(invoiceId ?? '').trim();
   if (!INVOICE_ID_RE.test(id)) {
     throw new SkillError(
@@ -58,21 +113,28 @@ export function validateBitrefillInput({ invoiceId, address, amount, expiresAt }
       'The amount must be a positive USDC amount with at most 6 decimals, exactly as Bitrefill shows it.',
     );
   }
-  let expiresIso = null;
-  if (expiresAt !== undefined && expiresAt !== null && expiresAt !== '') {
-    const ms = parseDeadline(expiresAt);
-    if (ms === null) {
-      throw new SkillError('INVOICE_EXPIRING', 'The invoice expiry could not be read.');
-    }
-    if (ms - now < BITREFILL_MIN_EXPIRY_MS) {
-      throw new SkillError(
-        'INVOICE_EXPIRING',
-        'The Bitrefill invoice expires in less than 5 minutes. Create a fresh invoice on Bitrefill.',
-        { expiresAt: new Date(ms).toISOString() },
-      );
-    }
-    expiresIso = new Date(ms).toISOString();
+  if (expiresAt === undefined || expiresAt === null || expiresAt === '') {
+    throw new SkillError('INVOICE_EXPIRY_REQUIRED', 'The Bitrefill invoice expiry is required (--expires-at <ISO>), exactly as Bitrefill shows it.');
   }
+  const ms = parseDeadline(expiresAt);
+  if (ms === null) {
+    throw new SkillError('INVOICE_EXPIRING', 'The invoice expiry could not be read.');
+  }
+  if (ms - now < minMs) {
+    throw new SkillError(
+      'INVOICE_EXPIRING',
+      `The Bitrefill invoice expires in less than ${Math.round(minMs / 60000)} minutes. Create a fresh invoice on Bitrefill.`,
+      { expiresAt: new Date(ms).toISOString() },
+    );
+  }
+  if (ms - now > BITREFILL_MAX_EXPIRY_AHEAD_MS) {
+    throw new SkillError(
+      'INVOICE_EXPIRING',
+      'The invoice expiry is more than 30 minutes away, which a Bitrefill invoice never is. Check --expires-at.',
+      { expiresAt: new Date(ms).toISOString() },
+    );
+  }
+  const expiresIso = new Date(ms).toISOString();
   return { invoiceId: id, address: addr, amount: normalizeDecimal(amt), expiresAt: expiresIso };
 }
 
@@ -116,9 +178,8 @@ export function verifyBitrefillCreate({ requested, created }) {
 
 /**
  * The authoritative intent (GET payments/<id>) must deliver to the same place.
- * Fields the backend does not expose are reported as unverified, never passed
- * silently: chain, token and amount are required; the receiver address is
- * compared whenever present.
+ * Chain, token, amount and receiver address are all REQUIRED; a missing field
+ * is a mismatch.
  */
 export function verifyBitrefillDestination({ requested, payment }) {
   const dest = payment?.destination || {};
@@ -133,7 +194,9 @@ export function verifyBitrefillDestination({ requested, payment }) {
     drift.push({ field: 'destination.amount', requested: requested.amount, live: dest.amount ?? null });
   }
   const liveAddress = dest.receiverAddress ?? dest.address ?? null;
-  if (liveAddress !== null && !sameAddress(liveAddress, requested.address)) {
+  // Fail closed: an intent that does not say where it pays cannot be proved
+  // to pay Bitrefill.
+  if (!sameAddress(liveAddress, requested.address)) {
     drift.push({ field: 'destination.address', requested: requested.address, live: liveAddress });
   }
   return drift.length
@@ -144,7 +207,7 @@ export function verifyBitrefillDestination({ requested, payment }) {
         drift,
         addressVerified: false,
       }
-    : { ok: true, code: null, reason: null, drift, addressVerified: liveAddress !== null };
+    : { ok: true, code: null, reason: null, drift, addressVerified: true };
 }
 
 /**
@@ -156,4 +219,13 @@ export function duplicateInvoicePaymentId(err) {
   const body = err?.details?.body;
   const id = body?.rozoPaymentId ?? body?.existing?.rozoPaymentId ?? null;
   return typeof id === 'string' && id ? id : null;
+}
+
+/** Provider of an intent as the backend describes it (orderId prefix / metadata). */
+export function providerFromPayment(payment) {
+  if (!payment) return null;
+  if (String(payment.orderId ?? payment.order_id ?? '').startsWith('bitrefill_')) return PROVIDER_BITREFILL;
+  const meta = payment.metadata?.provider;
+  if (meta) return String(meta).toLowerCase();
+  return null;
 }

@@ -36,17 +36,23 @@ import {
   isSatsUnit,
   STELLAR_MEMO_TYPE,
 } from './lib/amounts.mjs';
-import { checkExpiry, formatRemaining } from './lib/expiry.mjs';
+import { formatRemaining } from './lib/expiry.mjs';
 import { reuseGuard } from './lib/guards.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
-import { createOrderRecord, recordConfirmation, readState } from './lib/state.mjs';
+import { createOrderRecord, recordConfirmation, readState, findByLinkId } from './lib/state.mjs';
 import {
   PROVIDER_BITREFILL,
   validateBitrefillInput,
   verifyBitrefillCreate,
   verifyBitrefillDestination,
   duplicateInvoicePaymentId,
+  explainRouterError,
+  checkBitrefillExpiry,
+  BITREFILL_MIN_PAY_WINDOW_MS,
 } from './lib/bitrefill.mjs';
+
+/** Local-record key for a Bitrefill invoice (records have no Coinbase link). */
+export const bitrefillRecordKey = (invoiceId) => `bitrefill:${invoiceId}`;
 
 function confirmTier(usdAmount) {
   const usd = Number(usdAmount);
@@ -77,12 +83,18 @@ async function main(argv) {
   const confirmed = Boolean(args.confirm);
 
   // --- 1. local validation -----------------------------------------------
-  const invoice = validateBitrefillInput({
+  // Showing a deposit needs BITREFILL_MIN_PAY_WINDOW_MS; creating a NEW
+  // order needs the stricter BITREFILL_MIN_EXPIRY_MS (checked below once we
+  // know whether this machine already created one for this invoice).
+  const rawInvoice = {
     invoiceId: args['invoice-id'],
     address: args.to,
     amount: args.amount,
     expiresAt: args['expires-at'],
-  });
+  };
+  const invoice = validateBitrefillInput(rawInvoice, Date.now(), BITREFILL_MIN_PAY_WINDOW_MS);
+  const priorRecord = findByLinkId(bitrefillRecordKey(invoice.invoiceId));
+  if (!priorRecord) validateBitrefillInput(rawInvoice);
 
   // --- 2. blacklist: fail closed, and check the destination first --------
   let blacklist;
@@ -101,7 +113,7 @@ async function main(argv) {
     created = await createBitrefillInvoice({ invoice, source: requested });
   } catch (err) {
     const existing = duplicateInvoicePaymentId(err);
-    if (!existing) throw err;
+    if (!existing) throw explainRouterError(err);
     rozoPaymentId = assertRozoPaymentId(existing);
     resumed = true;
   }
@@ -167,15 +179,10 @@ async function main(argv) {
   }
 
   // --- 6. expiry ------------------------------------------------------------
-  const invoiceExpiry = invoice.expiresAt ?? created?.expiresAt ?? local?.bitrefill?.expiresAt ?? payment?.expiresAt;
+  // Expiry comes from the Bitrefill invoice only, never from the intent.
+  const invoiceExpiry = invoice.expiresAt;
   const lightning = String(source.chainId) === 'lightning';
-  const expiry = checkExpiry({
-    now: Date.now(),
-    chainId: source.chainId ?? chainId,
-    intentExpiresAt: payment?.expiresAt,
-    coinbaseExpiry: invoiceExpiry,
-    ...(lightning ? { bolt11ExpiresAt: payment?.expiresAt } : {}),
-  });
+  const expiry = checkBitrefillExpiry(invoiceExpiry, Date.now());
   if (!expiry.ok) {
     abort('expiry-guard', expiry.code, expiry.reason, {
       details: expiry,
@@ -191,12 +198,12 @@ async function main(argv) {
   }
 
   // --- 8. persist, then print ---------------------------------------------
-  const bitrefill = { ...invoice, expiresAt: invoiceExpiry ? new Date(Date.parse(invoiceExpiry)).toISOString() : null };
+  const bitrefill = { ...invoice };
   createOrderRecord({
     rozoPaymentId,
     provider: PROVIDER_BITREFILL,
     bitrefill,
-    linkId: null,
+    linkId: bitrefillRecordKey(invoice.invoiceId),
     paymentLink: null,
     merchant: 'Bitrefill',
     invoiceAmount: invoice.amount,

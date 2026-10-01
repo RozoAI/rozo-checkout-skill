@@ -29,6 +29,22 @@ import { assertNotBlacklisted, loadBlacklist } from './blacklist.mjs';
 import { readState, depositDigest } from './state.mjs';
 import { chainFamily } from './amounts.mjs';
 import { SkillError } from './output.mjs';
+import { verifyBitrefillDestination, checkBitrefillExpiry } from './bitrefill.mjs';
+
+/**
+ * Bitrefill orders: the live intent must still pay exactly the recorded
+ * invoice, and the invoice (only) must have time left. Throws on any doubt.
+ */
+function assertBitrefillLive(state, payment) {
+  if (!state.bitrefill) {
+    throw new SkillError('BITREFILL_ECHO_MISMATCH', 'This Bitrefill order has no recorded invoice. Refusing to send.');
+  }
+  const dest = verifyBitrefillDestination({ requested: state.bitrefill, payment });
+  if (!dest.ok) throw new SkillError(dest.code, dest.reason, { drift: dest.drift });
+  const expiry = checkBitrefillExpiry(state.bitrefill.expiresAt, Date.now());
+  if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
+  return expiry;
+}
 
 /**
  * @param {object} args
@@ -156,13 +172,7 @@ export async function preflight({
   let statusNow = null;
   let expiry;
   if (state.provider === 'bitrefill') {
-    expiry = checkExpiry({
-      now: Date.now(),
-      chainId: source.chainId,
-      intentExpiresAt: payment?.expiresAt,
-      coinbaseExpiry: state.bitrefill?.expiresAt ?? payment?.expiresAt,
-    });
-    if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
+    expiry = assertBitrefillLive(state, payment);
   } else {
     statusNow = await invoiceStatus({ linkId: state.linkId });
     expiry = checkExpiry({
@@ -219,13 +229,7 @@ export async function finalPayabilityCheck({ linkId, chainId, intentExpiresAt, s
     if (!guard.ok) {
       throw new SkillError(guard.code, guard.reason, { ...guard.evidence, moneyDetected: guard.moneyDetected });
     }
-    const expiry = checkExpiry({
-      now: Date.now(),
-      chainId,
-      intentExpiresAt: payment?.expiresAt ?? intentExpiresAt,
-      coinbaseExpiry: state.bitrefill?.expiresAt ?? payment?.expiresAt ?? intentExpiresAt,
-    });
-    if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
+    const expiry = assertBitrefillLive(state, payment);
     return { statusNow: null, payable: { ok: true }, expiry };
   }
 

@@ -45,7 +45,7 @@ Base", then pass its id, address and amount (Coinbase payment links and
 Bitrefill invoices are the two supported targets; Stripe is not):
 
 ```bash
-npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x…> --amount 7.90 --with usdc-stellar
+npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x…> --amount 7.90 --expires-at <ISO> --with usdc-stellar
 ```
 
 Know your coin already? Skip the question:

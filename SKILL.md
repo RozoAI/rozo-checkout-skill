@@ -90,19 +90,24 @@ Stripe checkout is not supported by this skill.
    exactly that USDC amount to the Bitrefill address (the skill never writes to
    payment-api directly). The deposit you send is that amount plus bridge fees.
 3. Rails, all hard aborts: the address must be a 0x EVM address, the amount a
-   positive USDC decimal (≤ 6 dp), at least 5 minutes must remain on the
-   invoice, and neither the Bitrefill address nor the deposit address may be on
+   positive USDC decimal (≤ 6 dp), `--expires-at` is required (the invoice
+   expiry, ≤ 30 min out); at least 5 minutes must remain to create an order and
+   2 minutes to show the deposit or send (the invoice expiry is the only clock
+   used), and neither the Bitrefill address nor the deposit address may be on
    the compromised-address list. The router's response and the live order must
    echo the same invoice id, address and amount (`BITREFILL_ECHO_MISMATCH`
    otherwise) before any deposit is shown or any send happens. Re-running for
    the same invoice resumes its order (router `DUPLICATE_INVOICE`).
 4. Same binding confirmation and `--send` rules as a Coinbase link. Status:
-   `rozo-checkout status <rozoPaymentId>` reports `settled` as soon as the Rozo
-   payout to the Bitrefill address completes (there is no Coinbase stage).
+   `rozo-checkout status <rozoPaymentId>` reports `settled` once the Rozo
+   payout to the Bitrefill address completes (`payment_payout_completed`, or
+   `payment_completed` with a payout tx hash); there is no Coinbase stage.
+   Works without a local record (provider read from the order).
 
 Router errors to relay as-is: `BITREFILL_DISABLED`, `INVALID_ADDRESS`,
 `INVALID_AMOUNT`, `AMOUNT_OUT_OF_RANGE`, `INVOICE_EXPIRING`, `BLOCKED_ADDRESS`,
-`UNSUPPORTED_SOURCE`.
+`UNSUPPORTED_SOURCE`, `INVALID_INPUT` (400), and `BITREFILL_NOT_CONFIGURED` /
+`RETRY_LATER` (503: nothing was created, retry later).
 
 ## OpenRouter top-up — when there is no link yet
 

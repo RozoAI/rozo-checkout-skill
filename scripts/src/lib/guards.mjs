@@ -514,13 +514,18 @@ export function classifyStatus({
   // Bitrefill: the Rozo payout IS the payment. Once the intent reports the
   // payout (or the whole payment) completed, the exact USDC amount has been
   // delivered to the Bitrefill address, so there is no paying_coinbase stage.
-  if (
-    bitrefill &&
-    (payment?.status === 'payment_payout_completed' || payment?.status === 'payment_completed')
-  ) {
-    return mk('settled', 'USDC delivered to the Bitrefill invoice address on Base.', {
-      terminal: true,
-    });
+  // payment_completed alone is not proof the payout landed; it counts only
+  // with a payout tx hash.
+  if (bitrefill) {
+    const payoutTx = Boolean(payment?.destination?.txHash);
+    if (payment?.status === 'payment_payout_completed' || (payment?.status === 'payment_completed' && payoutTx)) {
+      return mk('settled', 'USDC delivered to the Bitrefill invoice address on Base.', {
+        terminal: true,
+      });
+    }
+    if (payment?.status === 'payment_completed') {
+      return mk('bridging', 'Payment completed but no payout transaction is visible yet. Keep polling.');
+    }
   }
 
   switch (payment?.status) {

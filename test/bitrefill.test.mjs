@@ -26,7 +26,8 @@ import { readState } from '../scripts/src/lib/state.mjs';
 
 const ADDR = '0x1234567890abcdef1234567890ABCDEF12345678';
 const ID = '77777777-8888-4999-8aaa-bbbbbbbbbbbb';
-const ARGS = ['--invoice-id', 'bfr-test-7f3a2', '--to', ADDR, '--amount', '7.90', '--chain', '1500', '--token', 'USDC'];
+const inMin = (m) => new Date(Date.now() + m * 60_000).toISOString();
+const ARGS = ['--invoice-id', 'bfr-test-7f3a2', '--to', ADDR, '--amount', '7.90', '--expires-at', inMin(20), '--chain', '1500', '--token', 'USDC'];
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -57,12 +58,13 @@ async function withEnv(routes, fn) {
 // --- local validation ------------------------------------------------------
 
 test('valid invoice facts are normalized', () => {
-  const v = validateBitrefillInput({ invoiceId: 'bfr-1', address: ADDR, amount: '7.900' });
-  assert.deepEqual(v, { invoiceId: 'bfr-1', address: ADDR, amount: '7.9', expiresAt: null });
+  const now = Date.parse('2026-10-01T00:00:00Z');
+  const v = validateBitrefillInput({ invoiceId: 'bfr-1', address: ADDR, amount: '7.900', expiresAt: '2026-10-01T00:20:00Z' }, now);
+  assert.deepEqual(v, { invoiceId: 'bfr-1', address: ADDR, amount: '7.9', expiresAt: '2026-10-01T00:20:00.000Z' });
 });
 
 test('bad address, amount and id are refused locally', () => {
-  const base = { invoiceId: 'bfr-1', address: ADDR, amount: '7.90' };
+  const base = { invoiceId: 'bfr-1', address: ADDR, amount: '7.90', expiresAt: inMin(20) };
   for (const [patch, code] of [
     [{ address: '0x123' }, 'INVALID_ADDRESS'],
     [{ address: 'GCEXAMPLE' }, 'INVALID_ADDRESS'],
@@ -72,6 +74,8 @@ test('bad address, amount and id are refused locally', () => {
     [{ amount: '1e3' }, 'INVALID_AMOUNT'],
     [{ invoiceId: '' }, 'BAD_BITREFILL_INVOICE'],
     [{ invoiceId: 'a b' }, 'BAD_BITREFILL_INVOICE'],
+    [{ expiresAt: undefined }, 'INVOICE_EXPIRY_REQUIRED'],
+    [{ expiresAt: inMin(45) }, 'INVOICE_EXPIRING'],
   ]) {
     assert.throws(() => validateBitrefillInput({ ...base, ...patch }), (e) => e.code === code, JSON.stringify(patch));
   }
@@ -120,6 +124,11 @@ test('live intent destination must match too', () => {
   const bad = clone(payment);
   bad.destination.amount = '8';
   assert.equal(verifyBitrefillDestination({ requested, payment: bad }).ok, false);
+  const noAddr = clone(payment);
+  delete noAddr.destination.receiverAddress;
+  const v = verifyBitrefillDestination({ requested, payment: noAddr });
+  assert.equal(v.ok, false, 'missing live address fails closed');
+  assert.equal(v.code, 'BITREFILL_ECHO_MISMATCH');
 });
 
 test('DUPLICATE_INVOICE exposes the existing order id', () => {
@@ -142,7 +151,7 @@ test('create flow: posts the bitrefill contract, withholds deposit, records prov
       assert.equal(payload.deposit, null);
       assert.equal(payload.depositWithheld, true);
       const post = calls.find((c) => c.url === `${MPP_BASE}/create-invoice`);
-      assert.deepEqual(post.body.bitrefill, { invoiceId: 'bfr-test-7f3a2', address: ADDR, amount: '7.9' });
+      assert.deepEqual(post.body.bitrefill, { invoiceId: 'bfr-test-7f3a2', address: ADDR, amount: '7.9', expiresAt: ARGS[ARGS.indexOf('--expires-at') + 1] });
       assert.equal(post.body.provider, 'bitrefill');
       assert.deepEqual(post.body.source, { chainId: '1500', tokenSymbol: 'USDC' });
       assert.equal(post.body.client, CLIENT_LABEL);
@@ -219,11 +228,13 @@ test('create flow: blacklisted destination is refused before any request', async
 // --- status -----------------------------------------------------------------
 
 test('classifyStatus: bitrefill payout completed is settled, no paying_coinbase stage', () => {
-  for (const status of ['payment_payout_completed', 'payment_completed']) {
-    const v = classifyStatus({ payment: { status, source: {} }, provider: 'bitrefill' });
-    assert.equal(v.state, 'settled');
-    assert.equal(v.terminal, true);
-  }
+  const payout = classifyStatus({ payment: { status: 'payment_payout_completed', source: {} }, provider: 'bitrefill' });
+  assert.equal(payout.state, 'settled');
+  assert.equal(payout.terminal, true);
+  const doneNoTx = classifyStatus({ payment: { status: 'payment_completed', source: {}, destination: {} }, provider: 'bitrefill' });
+  assert.equal(doneNoTx.state, 'bridging');
+  const doneTx = classifyStatus({ payment: { status: 'payment_completed', source: {}, destination: { txHash: '0xabc' } }, provider: 'bitrefill' });
+  assert.equal(doneTx.state, 'settled');
   const cb = classifyStatus({ payment: { status: 'payment_completed', source: {} } });
   assert.equal(cb.state, 'paying_coinbase');
   const awaiting = classifyStatus({
@@ -235,7 +246,7 @@ test('classifyStatus: bitrefill payout completed is settled, no paying_coinbase 
 
 test('status command reads only the intent for a bitrefill order', async () => {
   const done = clone(readFixture('payment-bitrefill-unpaid-stellar.json'));
-  done.status = 'payment_completed';
+  done.status = 'payment_payout_completed';
   done.source.txHash = 'abc';
   done.source.amountReceived = done.source.amount;
   done.source.confirmedAt = '2026-10-01T00:00:00Z';
@@ -252,11 +263,12 @@ test('status command reads only the intent for a bitrefill order', async () => {
 
 test('CLI parses a bitrefill pay', () => {
   const o = parseCliArgs(['pay', '--bitrefill-invoice', 'bfr-1', '--to', ADDR, '--amount', '7.90', '--expires-at', '2099-01-01T00:00:00Z', '--from', 'stellar-usdc']);
+  assert.throws(() => parseCliArgs(['pay', '--bitrefill-invoice', 'bfr-1', '--to', ADDR, '--amount', '1', '--with', 'usdc-base']), CliError, 'expiry required');
   assert.equal(o.command, 'pay');
   assert.equal(o.target, null);
   assert.deepEqual(o.bitrefill, { invoiceId: 'bfr-1', address: ADDR, amount: '7.90', expiresAt: '2099-01-01T00:00:00Z' });
   assert.deepEqual(o.source, { chainId: '1500', tokenSymbol: 'USDC' });
-  const w = parseCliArgs(['pay', '--bitrefill-invoice', 'bfr-1', '--to', ADDR, '--amount', '1', '--with', 'usdt-solana']);
+  const w = parseCliArgs(['pay', '--bitrefill-invoice', 'bfr-1', '--to', ADDR, '--amount', '1', '--expires-at', 'x', '--with', 'usdt-solana']);
   assert.deepEqual(w.source, { chainId: '900', tokenSymbol: 'USDT' });
 });
 
@@ -273,7 +285,7 @@ test('presend final check for bitrefill re-reads the intent, never invoice-statu
     rozoPaymentId: ID,
     provider: 'bitrefill',
     source: { chainId: '1500', tokenSymbol: 'USDC' },
-    bitrefill: { expiresAt: '2099-01-01T00:00:00.000Z' },
+    bitrefill: { invoiceId: 'bfr-test-7f3a2', address: ADDR, amount: '7.9', expiresAt: inMin(20) },
   };
   await withEnv([[`/payments/${ID}`, () => json(readFixture('payment-bitrefill-unpaid-stellar.json'))]], async (calls) => {
     const r = await finalPayabilityCheck({ linkId: null, chainId: '1500', state, rozoPaymentId: ID });
@@ -288,11 +300,103 @@ test('presend final check for bitrefill re-reads the intent, never invoice-statu
       (e) => e.code === 'ORDER_ALREADY_FUNDED',
     );
   });
-  const expiring = { ...state, bitrefill: { expiresAt: new Date(Date.now() + 60_000).toISOString() } };
+  const expiring = { ...state, bitrefill: { ...state.bitrefill, expiresAt: inMin(1) } };
   await withEnv([[`/payments/${ID}`, () => json(readFixture('payment-bitrefill-unpaid-stellar.json'))]], async () => {
     await assert.rejects(
       finalPayabilityCheck({ linkId: null, chainId: '1500', state: expiring, rozoPaymentId: ID }),
       (e) => /EXPIR/.test(e.code),
     );
+  });
+});
+
+test('presend final check aborts when the live destination drifts or is missing', async () => {
+  const { finalPayabilityCheck } = await import('../scripts/src/lib/presend.mjs');
+  const state = {
+    rozoPaymentId: ID,
+    provider: 'bitrefill',
+    source: { chainId: '1500', tokenSymbol: 'USDC' },
+    bitrefill: { invoiceId: 'bfr-test-7f3a2', address: ADDR, amount: '7.9', expiresAt: inMin(20) },
+  };
+  for (const mutate of [
+    (p) => { p.destination.receiverAddress = '0x9999999999999999999999999999999999999999'; },
+    (p) => { delete p.destination.receiverAddress; },
+    (p) => { p.destination.amount = '8'; },
+    (p) => { p.destination.chainId = '1'; },
+  ]) {
+    const live = clone(readFixture('payment-bitrefill-unpaid-stellar.json'));
+    mutate(live);
+    await withEnv([[`/payments/${ID}`, () => json(live)]], async () => {
+      await assert.rejects(
+        finalPayabilityCheck({ linkId: null, chainId: '1500', state, rozoPaymentId: ID }),
+        (e) => e.code === 'BITREFILL_ECHO_MISMATCH',
+      );
+    });
+  }
+});
+
+test('create flow: missing live destination address aborts (fresh and DUPLICATE resume)', async () => {
+  const live = clone(readFixture('payment-bitrefill-unpaid-stellar.json'));
+  delete live.destination.receiverAddress;
+  for (const create of [
+    () => json(readFixture('bitrefill-create-response.json')),
+    () => json({ ok: false, error: 'DUPLICATE_INVOICE', message: 'exists', rozoPaymentId: ID }, 409),
+  ]) {
+    await withEnv([['/create-invoice', create], [`/payments/${ID}`, () => json(live)]], async () => {
+      const { payload } = await capture(() => runBitrefill([...ARGS, '--confirm']));
+      assert.equal(payload.error.code, 'BITREFILL_ECHO_MISMATCH');
+      assert.equal(payload.deposit, undefined);
+      assert.equal(readState(ID), null);
+    });
+  }
+});
+
+test('create flow: expiry is the invoice only; under 5 min refuses to create, Rozo expiry ignored', async () => {
+  const args = [...ARGS];
+  args[args.indexOf('--expires-at') + 1] = inMin(4);
+  await withEnv([], async (calls) => {
+    const { payload } = await capture(() => runBitrefill(args));
+    assert.equal(payload.error.code, 'INVOICE_EXPIRING');
+    assert.equal(calls.length, 0);
+  });
+  // A Rozo intent that "expires" in the past does not matter; the invoice clock does.
+  const live = clone(readFixture('payment-bitrefill-unpaid-stellar.json'));
+  live.expiresAt = '2000-01-01T00:00:00Z';
+  await withEnv(
+    [['/create-invoice', () => json(readFixture('bitrefill-create-response.json'))], [`/payments/${ID}`, () => json(live)]],
+    async () => {
+      const { payload, exitCode } = await capture(() => runBitrefill(ARGS));
+      assert.equal(exitCode, 0, JSON.stringify(payload));
+      assert.equal(payload.expiry.invoiceExpiresAt, ARGS[ARGS.indexOf('--expires-at') + 1]);
+    },
+  );
+});
+
+test('create flow: 503 / 400 router errors get clear messages', async () => {
+  for (const [status, code, needle] of [
+    [503, 'BITREFILL_NOT_CONFIGURED', 'not configured'],
+    [503, 'RETRY_LATER', 'retry'],
+    [400, 'INVALID_INPUT', 'rejected the invoice details'],
+  ]) {
+    await withEnv([['/create-invoice', () => json({ ok: false, error: code, message: 'x' }, status)]], async () => {
+      const { payload } = await capture(() => runBitrefill(ARGS));
+      assert.equal(payload.error.code, code);
+      assert.match(payload.error.message, new RegExp(needle, 'i'));
+    });
+  }
+});
+
+test('status without a local record detects bitrefill from the orderId prefix', async () => {
+  const live = clone(readFixture('payment-bitrefill-unpaid-stellar.json'));
+  live.orderId = 'bitrefill_bfr-test-7f3a2';
+  live.status = 'payment_completed';
+  live.source.txHash = 'abc';
+  live.source.amountReceived = live.source.amount;
+  live.source.confirmedAt = '2026-10-01T00:00:00Z';
+  live.destination.txHash = '0xpayout';
+  await withEnv([[`/payments/${ID}`, () => json(live)]], async (calls) => {
+    const { payload } = await capture(() => runStatus(['--rozo-payment-id', ID]));
+    assert.equal(payload.provider, 'bitrefill');
+    assert.equal(payload.state, 'settled');
+    assert.ok(!calls.some((c) => c.url.includes('invoice-status')));
   });
 });

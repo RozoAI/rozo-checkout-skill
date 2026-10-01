@@ -291,10 +291,15 @@ export function parseCliArgs(argv) {
   );
   let bitrefill = null;
   if (bitrefillFlags.length) {
-    if (flags['bitrefill-invoice'] === undefined || flags.to === undefined || flags.amount === undefined) {
+    if (
+      flags['bitrefill-invoice'] === undefined ||
+      flags.to === undefined ||
+      flags.amount === undefined ||
+      flags['expires-at'] === undefined
+    ) {
       throw new CliError(
         'MISSING_VALUE',
-        'A Bitrefill invoice needs --bitrefill-invoice <id> --to <0x…> --amount <USDC>.',
+        'A Bitrefill invoice needs --bitrefill-invoice <id> --to <0x…> --amount <USDC> --expires-at <ISO>.',
       );
     }
     if (target) {
@@ -304,7 +309,7 @@ export function parseCliArgs(argv) {
       invoiceId: String(flags['bitrefill-invoice']).trim(),
       address: String(flags.to).trim(),
       amount: String(flags.amount).trim(),
-      expiresAt: flags['expires-at'] === undefined ? null : String(flags['expires-at']).trim(),
+      expiresAt: String(flags['expires-at']).trim(),
     };
   }
   if (flags.from !== undefined && flags.with !== undefined) {
@@ -377,7 +382,7 @@ export const HELP = `rozo-checkout — pay a Coinbase Payment Link or a Bitrefil
 USAGE
   npx @rozoai/checkout pay <coinbase-link>              (pick a coin from a list)
   npx @rozoai/checkout pay <coinbase-link> --with <coin>
-  npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x…> --amount <USDC> --with <coin>
+  npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x…> --amount <USDC> --expires-at <ISO> --with <coin>
   npx @rozoai/checkout quote <coinbase-link>
   npx @rozoai/checkout status <rozoPaymentId | coinbase-link>
 
@@ -410,8 +415,8 @@ OPTIONS
   --timeout <s>   how long to poll for settlement (default 900)
   --bitrefill-invoice <id>  pay a Bitrefill invoice created with "USDC on Base"
                   instead of a Coinbase link. Needs --to <0x… address Bitrefill
-                  shows> and --amount <exact USDC amount>; --expires-at <ISO>
-                  is optional but recommended (refused under 5 minutes).
+                  shows>, --amount <exact USDC amount> and --expires-at <ISO>
+                  (required; refused under 5 minutes or over 30 minutes out).
   --from <coin>   same as --with; also accepts chain-first, e.g. stellar-usdc
   --payer <addr>  optional. Check what this wallet holds and mark the coin
                   list accordingly. Display help only; it never changes what
@@ -425,7 +430,7 @@ EXAMPLES
   npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01...
   npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01... --with usdt-solana
   npx @rozoai/checkout pay pl_01... --with btc-lightning
-  npx @rozoai/checkout pay --bitrefill-invoice 8f3k2 --to 0xAbC…123 --amount 7.90 --with usdc-stellar
+  npx @rozoai/checkout pay --bitrefill-invoice 8f3k2 --to 0xAbC…123 --amount 7.90 --expires-at 2026-10-01T12:00:00Z --with usdc-stellar
   npx @rozoai/checkout status 11111111-2222-4333-8444-555555555555
 
 Creating an order moves no money; an unfunded order simply expires. Nothing is
