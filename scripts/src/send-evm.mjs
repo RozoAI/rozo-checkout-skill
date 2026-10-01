@@ -254,6 +254,8 @@ async function main(argv) {
     linkId: state.linkId,
     chainId: source.chainId,
     intentExpiresAt: payment?.expiresAt,
+    state,
+    rozoPaymentId,
   });
 
   // Claim (and charge the spend caps) atomically, BEFORE broadcasting.

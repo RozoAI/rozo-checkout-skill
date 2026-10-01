@@ -87,6 +87,28 @@ export async function createInvoice({ url, linkId, source, quoteReceipt }) {
   return postJson(`${MPP_BASE}/create-invoice`, body);
 }
 
+/**
+ * Bitrefill invoice (router contract of 2026-10-01). There is no quote step:
+ * the amount is fixed by the invoice, and the router creates an exactOut
+ * intent delivering exactly `amount` USDC on Base to `address`. Deposit
+ * details then come from getPayment(rozoPaymentId) as usual.
+ */
+export async function createBitrefillInvoice({ invoice, source }) {
+  const body = {
+    provider: 'bitrefill',
+    bitrefill: {
+      invoiceId: invoice.invoiceId,
+      address: invoice.address,
+      amount: invoice.amount,
+      ...(invoice.expiresAt ? { expiresAt: invoice.expiresAt } : {}),
+    },
+    source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
+    client: CLIENT_LABEL,
+    attribution: { client: ATTRIBUTION_CLIENT },
+  };
+  return postJson(`${MPP_BASE}/create-invoice`, body);
+}
+
 /** Step 7 / payability revalidation. `payment_id` takes the Coinbase linkId. */
 export async function invoiceStatus({ linkId, rozoPaymentId }) {
   const qs = new URLSearchParams();

@@ -172,6 +172,10 @@ function createOrderRecordUnlocked(record) {
   const next = {
     version: 1,
     rozoPaymentId,
+    // 'coinbase' (default, historical records) or 'bitrefill'. Drives which
+    // payability checks presend and status run.
+    provider: record.provider ?? existing?.provider ?? 'coinbase',
+    bitrefill: record.bitrefill ?? existing?.bitrefill ?? null,
     linkId: record.linkId,
     paymentLink: record.paymentLink ?? null,
     merchant: record.merchant ?? null,

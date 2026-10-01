@@ -23,19 +23,37 @@ import { invoiceStatus, getPayment } from './lib/api.mjs';
 import { chainName, formatAmount } from './lib/amounts.mjs';
 import { classifyStatus } from './lib/guards.mjs';
 import { formatRemaining } from './lib/expiry.mjs';
-import { findByLinkId } from './lib/state.mjs';
+import { findByLinkId, readState } from './lib/state.mjs';
 
 const POLL_INTERVAL_MS = 10_000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function snapshot({ rozoPaymentId, linkId }) {
+/** Provider from the flag, else from this machine's order record. */
+function resolveProvider(explicit, rozoPaymentId) {
+  if (explicit) return String(explicit).toLowerCase();
+  if (rozoPaymentId && isRozoPaymentId(rozoPaymentId)) {
+    try {
+      return readState(rozoPaymentId)?.provider ?? 'coinbase';
+    } catch {
+      return 'coinbase';
+    }
+  }
+  return 'coinbase';
+}
+
+async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
+  const provider = resolveProvider(explicitProvider, rozoPaymentId);
   let status = null;
   let statusError = null;
-  try {
-    status = await invoiceStatus({ linkId, rozoPaymentId });
-  } catch (err) {
-    statusError = { code: err.code, message: err.message };
+  // A Bitrefill order has no Coinbase resource and no router fulfilment
+  // state; the intent alone is authoritative.
+  if (provider !== 'bitrefill') {
+    try {
+      status = await invoiceStatus({ linkId, rozoPaymentId });
+    } catch (err) {
+      statusError = { code: err.code, message: err.message };
+    }
   }
 
   // The backend only echoes rozo_payment_id when it was given one (a
@@ -62,17 +80,19 @@ async function snapshot({ rozoPaymentId, linkId }) {
     }
   }
 
-  const viewsFailed = Boolean(statusError) && !payment;
+  const viewsFailed = provider === 'bitrefill' ? !payment : Boolean(statusError) && !payment;
   const verdict = classifyStatus({
     payment: payment || status?.rozoPayment || {},
     routerState: status?.routerState,
     coinbase: status?.coinbase,
     viewsFailed,
+    provider,
   });
 
   const source = payment?.source || status?.rozoPayment?.source || {};
 
   return {
+    provider,
     rozoPaymentId: id,
     rozoPaymentIdSource: idSource,
     // Without the authoritative payment object we are reading a partial view.
@@ -122,6 +142,13 @@ async function main(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = args['rozo-payment-id'] || (isRozoPaymentId(args._[0]) ? args._[0] : null);
   const linkId = args['link-id'] || (!rozoPaymentId ? args._[0] : null);
+  const provider = args.provider ? String(args.provider) : null;
+  if (provider && provider !== 'bitrefill' && provider !== 'coinbase') {
+    usage('--provider must be coinbase or bitrefill');
+  }
+  if (provider === 'bitrefill' && !rozoPaymentId) {
+    usage('A Bitrefill order is tracked by --rozo-payment-id <uuid>.');
+  }
   if (!rozoPaymentId && !linkId) {
     usage('Required: --rozo-payment-id <uuid> and/or --link-id <pl_* | paymentSession_*>');
   }
@@ -130,12 +157,12 @@ async function main(argv) {
   const timeoutMs = Math.max(0, Number(args.timeout ?? 600) * 1000);
   const deadline = Date.now() + timeoutMs;
 
-  let result = await snapshot({ rozoPaymentId, linkId });
+  let result = await snapshot({ rozoPaymentId, linkId, provider });
   const history = [{ at: new Date().toISOString(), state: result.state }];
 
   while (watch && !result.terminal && !result.escalate && !result.unknown && Date.now() < deadline) {
     await sleep(POLL_INTERVAL_MS);
-    const next = await snapshot({ rozoPaymentId: result.rozoPaymentId || rozoPaymentId, linkId });
+    const next = await snapshot({ rozoPaymentId: result.rozoPaymentId || rozoPaymentId, linkId, provider });
     if (next.state !== result.state) history.push({ at: new Date().toISOString(), state: next.state });
     result = next;
   }
@@ -151,7 +178,10 @@ async function main(argv) {
       : !result.authoritativeView
         ? 'Only the fulfilment view was readable; the pay-in view is unavailable, so the ' +
           'money-detected rule cannot be enforced. Pass --rozo-payment-id for a complete answer.'
-        : result.state === 'expired_unfunded'
+        : result.state === 'expired_unfunded' && result.provider === 'bitrefill'
+          ? 'Nothing was funded, so nothing was lost. Create a fresh Bitrefill invoice and run ' +
+            'rozo-checkout pay --bitrefill-invoice <id> --to <0x…> --amount <USDC> --with <coin>'
+          : result.state === 'expired_unfunded'
           ? 'Nothing was funded, so nothing was lost. Start a fresh order with: ' +
             'rozo-checkout pay <coinbase-link> --with <coin>  (or create-order.js ' +
             '--url <link> --chain <id> --token <SYMBOL>)'

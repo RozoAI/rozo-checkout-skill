@@ -433,7 +433,15 @@ export function checkPayable(statusResponse, now = Date.now()) {
  * @returns {{state:string, moneyDetected:boolean, terminal:boolean,
  *            escalate:boolean, detail:string}}
  */
-export function classifyStatus({ payment, routerState, coinbase, now = Date.now(), viewsFailed = false }) {
+export function classifyStatus({
+  payment,
+  routerState,
+  coinbase,
+  now = Date.now(),
+  viewsFailed = false,
+  provider = 'coinbase',
+}) {
+  const bitrefill = provider === 'bitrefill';
   const source = payment?.source || {};
   const hasTx = Boolean(source.txHash);
   const confirmed = Boolean(source.confirmedAt);
@@ -478,7 +486,7 @@ export function classifyStatus({ payment, routerState, coinbase, now = Date.now(
   // paid, or by Coinbase reporting the resource settled. The intents-side
   // `payment_completed` is the bridge lifecycle finishing, which happens
   // before (and independently of) the Coinbase leg.
-  if (routerStatus === 'paid' || coinbase?.settled === true) {
+  if (!bitrefill && (routerStatus === 'paid' || coinbase?.settled === true)) {
     return mk('settled', 'Coinbase invoice settled by the funder wallet.', { terminal: true });
   }
   if (routerStatus === 'failed_pay_invoice' || routerStatus === 'failed_insufficient_balance') {
@@ -500,6 +508,18 @@ export function classifyStatus({ payment, routerState, coinbase, now = Date.now(
   if (moneyDetected && receipt && receipt.state === 'overpaid') {
     return mk('payin_detected', 'More arrived than required; escalate for operator follow-up.', {
       escalate: true,
+    });
+  }
+
+  // Bitrefill: the Rozo payout IS the payment. Once the intent reports the
+  // payout (or the whole payment) completed, the exact USDC amount has been
+  // delivered to the Bitrefill address, so there is no paying_coinbase stage.
+  if (
+    bitrefill &&
+    (payment?.status === 'payment_payout_completed' || payment?.status === 'payment_completed')
+  ) {
+    return mk('settled', 'USDC delivered to the Bitrefill invoice address on Base.', {
+      terminal: true,
     });
   }
 

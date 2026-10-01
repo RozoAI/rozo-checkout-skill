@@ -1,0 +1,23 @@
+{
+  "id": "77777777-8888-4999-8aaa-bbbbbbbbbbbb",
+  "status": "payment_unpaid",
+  "expiresAt": "2099-01-01T00:00:00.000Z",
+  "source": {
+    "chainId": "1500",
+    "tokenSymbol": "USDC",
+    "tokenAddress": "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+    "amount": "7.9310000",
+    "receiverAddress": "GCEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAM64",
+    "receiverMemo": "rozo-9921",
+    "senderAddress": null,
+    "txHash": null,
+    "amountReceived": null,
+    "confirmedAt": null
+  },
+  "destination": {
+    "chainId": "8453",
+    "tokenSymbol": "USDC",
+    "receiverAddress": "0x1234567890abcdef1234567890abcdef12345678",
+    "amount": "7.900000"
+  }
+}

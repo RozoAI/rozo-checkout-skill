@@ -20541,7 +20541,7 @@ var require_dist = __commonJS({
           }
         }
       }
-      function* run6(value, struct2, options = {}) {
+      function* run7(value, struct2, options = {}) {
         const { path: path7 = [], branch = [value], coerce: coerce2 = false, mask: mask2 = false } = options;
         const ctx = { path: path7, branch, mask: mask2 };
         if (coerce2) {
@@ -20554,7 +20554,7 @@ var require_dist = __commonJS({
           yield [failure, void 0];
         }
         for (let [k, v, s] of struct2.entries(value, ctx)) {
-          const ts = run6(v, s, {
+          const ts = run7(v, s, {
             path: k === void 0 ? path7 : [...path7, k],
             branch: k === void 0 ? branch : [...branch, v],
             coerce: coerce2,
@@ -20682,7 +20682,7 @@ var require_dist = __commonJS({
         return !result[0];
       }
       function validate7(value, struct2, options = {}) {
-        const tuples = run6(value, struct2, options);
+        const tuples = run7(value, struct2, options);
         const tuple2 = shiftIterator(tuples);
         if (tuple2[0]) {
           const error = new StructError(tuple2[0], function* () {
@@ -21095,7 +21095,7 @@ var require_dist = __commonJS({
           validator(value, ctx) {
             const failures = [];
             for (const S of Structs) {
-              const [...tuples] = run6(value, S, ctx);
+              const [...tuples] = run7(value, S, ctx);
               const [first] = tuples;
               if (!first[0]) {
                 return [];
@@ -24067,29 +24067,29 @@ var require_lib3 = __commonJS({
       }
       let accum = [];
       let accumBytes = 0;
-      let abort = false;
+      let abort2 = false;
       return new Body.Promise(function(resolve, reject) {
         let resTimeout;
         if (_this4.timeout) {
           resTimeout = setTimeout(function() {
-            abort = true;
+            abort2 = true;
             reject(new FetchError(`Response timeout while trying to fetch ${_this4.url} (over ${_this4.timeout}ms)`, "body-timeout"));
           }, _this4.timeout);
         }
         body.on("error", function(err) {
           if (err.name === "AbortError") {
-            abort = true;
+            abort2 = true;
             reject(err);
           } else {
             reject(new FetchError(`Invalid response body while trying to fetch ${_this4.url}: ${err.message}`, "system", err));
           }
         });
         body.on("data", function(chunk) {
-          if (abort || chunk === null) {
+          if (abort2 || chunk === null) {
             return;
           }
           if (_this4.size && accumBytes + chunk.length > _this4.size) {
-            abort = true;
+            abort2 = true;
             reject(new FetchError(`content size at ${_this4.url} over limit: ${_this4.size}`, "max-size"));
             return;
           }
@@ -24097,7 +24097,7 @@ var require_lib3 = __commonJS({
           accum.push(chunk);
         });
         body.on("end", function() {
-          if (abort) {
+          if (abort2) {
             return;
           }
           clearTimeout(resTimeout);
@@ -24783,7 +24783,7 @@ var require_lib3 = __commonJS({
         const send = (options.protocol === "https:" ? https : http2).request;
         const signal = request2.signal;
         let response = null;
-        const abort = function abort2() {
+        const abort2 = function abort3() {
           let error = new AbortError("The user aborted a request.");
           reject(error);
           if (request2.body && request2.body instanceof Stream.Readable) {
@@ -24793,11 +24793,11 @@ var require_lib3 = __commonJS({
           response.body.emit("error", error);
         };
         if (signal && signal.aborted) {
-          abort();
+          abort2();
           return;
         }
         const abortAndFinalize = function abortAndFinalize2() {
-          abort();
+          abort2();
           finalize();
         };
         const req = send(options);
@@ -41819,7 +41819,37 @@ var BOOLEAN_FLAGS = /* @__PURE__ */ new Set([
   "watch",
   "fresh"
 ]);
-var VALUE_FLAGS = /* @__PURE__ */ new Set(["with", "chain", "token", "rpc", "timeout", "payer", "keyfile", "env-file"]);
+var VALUE_FLAGS = /* @__PURE__ */ new Set([
+  "with",
+  "from",
+  "chain",
+  "token",
+  "rpc",
+  "timeout",
+  "payer",
+  "keyfile",
+  "env-file",
+  // Bitrefill invoice (pay) and provider override (status)
+  "bitrefill-invoice",
+  "to",
+  "amount",
+  "expires-at",
+  "provider"
+]);
+function resolveFromPreset(value) {
+  try {
+    return resolvePreset(value);
+  } catch (err) {
+    const raw = String(value ?? "").trim();
+    const idx = raw.indexOf("-");
+    if (idx <= 0) throw err;
+    try {
+      return resolvePreset(`${raw.slice(idx + 1)}-${raw.slice(0, idx)}`);
+    } catch {
+      throw err;
+    }
+  }
+}
 function parseCliArgs(argv) {
   const positional = [];
   const flags = {};
@@ -41884,15 +41914,43 @@ function parseCliArgs(argv) {
         "Usage: rozo-checkout status <rozoPaymentId | coinbase-link>"
       );
     }
+    if (flags.provider !== void 0 && !["coinbase", "bitrefill"].includes(String(flags.provider))) {
+      throw new CliError("BAD_VALUE", "--provider must be coinbase or bitrefill.");
+    }
     return {
       command,
       target,
       json,
+      provider: flags.provider,
       watch: flags.watch === true,
       timeout: flags.timeout === void 0 ? 600 : Number(flags.timeout)
     };
   }
-  if (!target) {
+  const bitrefillFlags = ["bitrefill-invoice", "to", "amount", "expires-at"].filter(
+    (k) => flags[k] !== void 0
+  );
+  let bitrefill = null;
+  if (bitrefillFlags.length) {
+    if (flags["bitrefill-invoice"] === void 0 || flags.to === void 0 || flags.amount === void 0) {
+      throw new CliError(
+        "MISSING_VALUE",
+        "A Bitrefill invoice needs --bitrefill-invoice <id> --to <0x\u2026> --amount <USDC>."
+      );
+    }
+    if (target) {
+      throw new CliError("CONFLICTING_FLAGS", "Pass either a Coinbase link or --bitrefill-invoice, not both.");
+    }
+    bitrefill = {
+      invoiceId: String(flags["bitrefill-invoice"]).trim(),
+      address: String(flags.to).trim(),
+      amount: String(flags.amount).trim(),
+      expiresAt: flags["expires-at"] === void 0 ? null : String(flags["expires-at"]).trim()
+    };
+  }
+  if (flags.from !== void 0 && flags.with !== void 0) {
+    throw new CliError("CONFLICTING_FLAGS", "Use either --with or --from, not both.");
+  }
+  if (!target && !bitrefill) {
     throw new CliError(
       "MISSING_TARGET",
       "Usage: rozo-checkout pay <coinbase-link> --with usdt-solana"
@@ -41903,7 +41961,7 @@ function parseCliArgs(argv) {
     if (flags.chain === void 0 || flags.token === void 0) {
       throw new CliError("MISSING_VALUE", "--chain and --token must be given together.");
     }
-    if (flags.with !== void 0) {
+    if (flags.with !== void 0 || flags.from !== void 0) {
       throw new CliError("CONFLICTING_FLAGS", "Use either --with, or --chain plus --token.");
     }
     const chainId = String(flags.chain).trim();
@@ -41918,6 +41976,8 @@ function parseCliArgs(argv) {
     source = { chainId, tokenSymbol };
   } else if (flags.with !== void 0) {
     source = resolvePreset(flags.with);
+  } else if (flags.from !== void 0) {
+    source = resolveFromPreset(flags.from);
   } else {
     source = null;
   }
@@ -41927,7 +41987,8 @@ function parseCliArgs(argv) {
   }
   return {
     command: "pay",
-    target,
+    target: target ?? null,
+    bitrefill,
     json,
     source,
     send: flags.send === true,
@@ -41942,12 +42003,13 @@ function parseCliArgs(argv) {
     envFile: flags["env-file"]
   };
 }
-var HELP = `rozo-checkout \u2014 pay a Coinbase Payment Link with BTC Lightning,
-or USDT/USDC on Solana, BNB Chain, Ethereum, Polygon, Base or Stellar.
+var HELP = `rozo-checkout \u2014 pay a Coinbase Payment Link or a Bitrefill invoice
+(USDC on Base) with BTC Lightning, or USDT/USDC on Solana, BNB Chain, Ethereum, Polygon, Base or Stellar.
 
 USAGE
   npx @rozoai/checkout pay <coinbase-link>              (pick a coin from a list)
   npx @rozoai/checkout pay <coinbase-link> --with <coin>
+  npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x\u2026> --amount <USDC> --with <coin>
   npx @rozoai/checkout quote <coinbase-link>
   npx @rozoai/checkout status <rozoPaymentId | coinbase-link>
 
@@ -41978,6 +42040,11 @@ OPTIONS
   --json, -j      machine-readable output
   --no-watch      stop after showing the deposit instructions
   --timeout <s>   how long to poll for settlement (default 900)
+  --bitrefill-invoice <id>  pay a Bitrefill invoice created with "USDC on Base"
+                  instead of a Coinbase link. Needs --to <0x\u2026 address Bitrefill
+                  shows> and --amount <exact USDC amount>; --expires-at <ISO>
+                  is optional but recommended (refused under 5 minutes).
+  --from <coin>   same as --with; also accepts chain-first, e.g. stellar-usdc
   --payer <addr>  optional. Check what this wallet holds and mark the coin
                   list accordingly. Display help only; it never changes what
                   gets signed.
@@ -41990,6 +42057,7 @@ EXAMPLES
   npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01...
   npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01... --with usdt-solana
   npx @rozoai/checkout pay pl_01... --with btc-lightning
+  npx @rozoai/checkout pay --bitrefill-invoice 8f3k2 --to 0xAbC\u2026123 --amount 7.90 --with usdc-stellar
   npx @rozoai/checkout status 11111111-2222-4333-8444-555555555555
 
 Creating an order moves no money; an unfunded order simply expires. Nothing is
@@ -42247,6 +42315,10 @@ function createOrderRecordUnlocked(record) {
   const next = {
     version: 1,
     rozoPaymentId,
+    // 'coinbase' (default, historical records) or 'bitrefill'. Drives which
+    // payability checks presend and status run.
+    provider: record.provider ?? existing?.provider ?? "coinbase",
+    bitrefill: record.bitrefill ?? existing?.bitrefill ?? null,
     linkId: record.linkId,
     paymentLink: record.paymentLink ?? null,
     merchant: record.merchant ?? null,
@@ -54364,7 +54436,7 @@ async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS } = {
     }
   }
   if (!res.ok) {
-    const code = json?.code || json?.error?.code || (typeof json?.error === "string" ? null : null) || `HTTP_${res.status}`;
+    const code = json?.code || json?.error?.code || (typeof json?.error === "string" && /^[A-Z][A-Z0-9_]+$/.test(json.error) ? json.error : null) || `HTTP_${res.status}`;
     const message = json?.message || (typeof json?.error === "string" ? json.error : json?.error?.message) || `HTTP ${res.status}`;
     throw new SkillError(code, redact(String(message)), {
       httpStatus: res.status,
@@ -54420,6 +54492,21 @@ async function createInvoice({ url, linkId, source, quoteReceipt }) {
     ...url ? { url } : { payment_id: linkId },
     source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
     ...quoteReceipt ? { quoteReceipt } : {},
+    client: CLIENT_LABEL,
+    attribution: { client: ATTRIBUTION_CLIENT }
+  };
+  return postJson(`${MPP_BASE}/create-invoice`, body);
+}
+async function createBitrefillInvoice({ invoice, source }) {
+  const body = {
+    provider: "bitrefill",
+    bitrefill: {
+      invoiceId: invoice.invoiceId,
+      address: invoice.address,
+      amount: invoice.amount,
+      ...invoice.expiresAt ? { expiresAt: invoice.expiresAt } : {}
+    },
+    source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
     client: CLIENT_LABEL,
     attribution: { client: ATTRIBUTION_CLIENT }
   };
@@ -54734,7 +54821,15 @@ function checkPayable(statusResponse, now = Date.now()) {
   }
   return { ok: true, code: null, reason: null, derived };
 }
-function classifyStatus({ payment, routerState, coinbase, now = Date.now(), viewsFailed = false }) {
+function classifyStatus({
+  payment,
+  routerState,
+  coinbase,
+  now = Date.now(),
+  viewsFailed = false,
+  provider = "coinbase"
+}) {
+  const bitrefill = provider === "bitrefill";
   const source = payment?.source || {};
   const hasTx = Boolean(source.txHash);
   const confirmed = Boolean(source.confirmedAt);
@@ -54767,7 +54862,7 @@ function classifyStatus({ payment, routerState, coinbase, now = Date.now(), view
       { escalate: true }
     );
   }
-  if (routerStatus === "paid" || coinbase?.settled === true) {
+  if (!bitrefill && (routerStatus === "paid" || coinbase?.settled === true)) {
     return mk("settled", "Coinbase invoice settled by the funder wallet.", { terminal: true });
   }
   if (routerStatus === "failed_pay_invoice" || routerStatus === "failed_insufficient_balance") {
@@ -54787,6 +54882,11 @@ function classifyStatus({ payment, routerState, coinbase, now = Date.now(), view
   if (moneyDetected && receipt && receipt.state === "overpaid") {
     return mk("payin_detected", "More arrived than required; escalate for operator follow-up.", {
       escalate: true
+    });
+  }
+  if (bitrefill && (payment?.status === "payment_payout_completed" || payment?.status === "payment_completed")) {
+    return mk("settled", "USDC delivered to the Bitrefill invoice address on Base.", {
+      terminal: true
     });
   }
   switch (payment?.status) {
@@ -55227,16 +55327,359 @@ async function run2(argv = process.argv.slice(2)) {
   return main2(argv);
 }
 
+// scripts/src/lib/bitrefill.mjs
+var PROVIDER_BITREFILL = "bitrefill";
+var BITREFILL_DESTINATION = Object.freeze({ chainId: "8453", tokenSymbol: "USDC" });
+var BITREFILL_MIN_EXPIRY_MS = 5 * 60 * 1e3;
+var EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+var AMOUNT_RE = /^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/;
+var INVOICE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/;
+function validateBitrefillInput({ invoiceId, address, amount, expiresAt }, now = Date.now()) {
+  const id = String(invoiceId ?? "").trim();
+  if (!INVOICE_ID_RE.test(id)) {
+    throw new SkillError(
+      "BAD_BITREFILL_INVOICE",
+      'A Bitrefill invoice id is required (letters, digits, "-" or "_").'
+    );
+  }
+  const addr = String(address ?? "").trim();
+  if (!EVM_ADDRESS_RE.test(addr)) {
+    throw new SkillError(
+      "INVALID_ADDRESS",
+      "The Bitrefill receiving address must be a Base (EVM) address: 0x followed by 40 hex characters."
+    );
+  }
+  const amt = String(amount ?? "").trim();
+  if (!AMOUNT_RE.test(amt) || normalizeDecimal(amt) === "0") {
+    throw new SkillError(
+      "INVALID_AMOUNT",
+      "The amount must be a positive USDC amount with at most 6 decimals, exactly as Bitrefill shows it."
+    );
+  }
+  let expiresIso = null;
+  if (expiresAt !== void 0 && expiresAt !== null && expiresAt !== "") {
+    const ms = parseDeadline(expiresAt);
+    if (ms === null) {
+      throw new SkillError("INVOICE_EXPIRING", "The invoice expiry could not be read.");
+    }
+    if (ms - now < BITREFILL_MIN_EXPIRY_MS) {
+      throw new SkillError(
+        "INVOICE_EXPIRING",
+        "The Bitrefill invoice expires in less than 5 minutes. Create a fresh invoice on Bitrefill.",
+        { expiresAt: new Date(ms).toISOString() }
+      );
+    }
+    expiresIso = new Date(ms).toISOString();
+  }
+  return { invoiceId: id, address: addr, amount: normalizeDecimal(amt), expiresAt: expiresIso };
+}
+var sameAddress = (a, b) => typeof a === "string" && typeof b === "string" && a.trim().toLowerCase() === b.trim().toLowerCase();
+function verifyBitrefillCreate({ requested, created }) {
+  const drift = [];
+  const dest = created?.destination || {};
+  if (created?.provider !== PROVIDER_BITREFILL) {
+    drift.push({ field: "provider", requested: PROVIDER_BITREFILL, created: created?.provider ?? null });
+  }
+  if (String(created?.invoiceId ?? "") !== requested.invoiceId) {
+    drift.push({ field: "invoiceId", requested: requested.invoiceId, created: created?.invoiceId ?? null });
+  }
+  if (!sameAddress(dest.address, requested.address)) {
+    drift.push({ field: "destination.address", requested: requested.address, created: dest.address ?? null });
+  }
+  if (normalizeDecimal(dest.amount) !== normalizeDecimal(requested.amount)) {
+    drift.push({ field: "destination.amount", requested: requested.amount, created: dest.amount ?? null });
+  }
+  if (String(dest.chainId ?? "") !== BITREFILL_DESTINATION.chainId) {
+    drift.push({ field: "destination.chainId", requested: "8453", created: dest.chainId ?? null });
+  }
+  if (String(dest.tokenSymbol ?? "").toUpperCase() !== BITREFILL_DESTINATION.tokenSymbol) {
+    drift.push({ field: "destination.tokenSymbol", requested: "USDC", created: dest.tokenSymbol ?? null });
+  }
+  return drift.length ? {
+    ok: false,
+    code: "BITREFILL_ECHO_MISMATCH",
+    reason: "The router created an order that does not match the Bitrefill invoice. Refusing to continue.",
+    drift
+  } : { ok: true, code: null, reason: null, drift };
+}
+function verifyBitrefillDestination({ requested, payment }) {
+  const dest = payment?.destination || {};
+  const drift = [];
+  if (String(dest.chainId ?? "") !== BITREFILL_DESTINATION.chainId) {
+    drift.push({ field: "destination.chainId", requested: "8453", live: dest.chainId ?? null });
+  }
+  if (String(dest.tokenSymbol ?? "").toUpperCase() !== BITREFILL_DESTINATION.tokenSymbol) {
+    drift.push({ field: "destination.tokenSymbol", requested: "USDC", live: dest.tokenSymbol ?? null });
+  }
+  if (normalizeDecimal(dest.amount) !== normalizeDecimal(requested.amount)) {
+    drift.push({ field: "destination.amount", requested: requested.amount, live: dest.amount ?? null });
+  }
+  const liveAddress = dest.receiverAddress ?? dest.address ?? null;
+  if (liveAddress !== null && !sameAddress(liveAddress, requested.address)) {
+    drift.push({ field: "destination.address", requested: requested.address, live: liveAddress });
+  }
+  return drift.length ? {
+    ok: false,
+    code: "BITREFILL_ECHO_MISMATCH",
+    reason: "The live order does not deliver to the Bitrefill invoice. Refusing to continue.",
+    drift,
+    addressVerified: false
+  } : { ok: true, code: null, reason: null, drift, addressVerified: liveAddress !== null };
+}
+function duplicateInvoicePaymentId(err) {
+  if (err?.code !== "DUPLICATE_INVOICE") return null;
+  const body = err?.details?.body;
+  const id = body?.rozoPaymentId ?? body?.existing?.rozoPaymentId ?? null;
+  return typeof id === "string" && id ? id : null;
+}
+
+// scripts/src/create-bitrefill-order.mjs
+function confirmTier2(usdAmount) {
+  const usd = Number(usdAmount);
+  if (!Number.isFinite(usd)) return "explicit";
+  if (usd <= 1) return "silent";
+  if (usd <= 10) return "one-line";
+  return "explicit";
+}
+function abort(step2, code, message, extra = {}, guidance = "Do NOT fund this order.") {
+  emit(
+    { success: false, step: step2, provider: PROVIDER_BITREFILL, error: { code, message, ...extra.details ? { details: extra.details } : {} }, ...extra.fields, guidance },
+    EXIT_ERROR
+  );
+}
+async function main3(argv) {
+  const args = parseArgs(argv);
+  const chainId = String(args.chain ?? "").trim();
+  const tokenSymbol = String(args.token ?? "").trim().toUpperCase();
+  if (!chainId || !tokenSymbol) usage("Required: --chain <chainId> --token <SYMBOL>.");
+  if (!isSupportedSource(chainId, tokenSymbol)) {
+    throw new SkillError("UNSUPPORTED_SOURCE", `${tokenSymbol} on ${chainName(chainId)} is not a supported source.`, {
+      supported: SUPPORTED_SOURCES
+    });
+  }
+  const requested = { chainId, tokenSymbol };
+  const confirmed = Boolean(args.confirm);
+  const invoice = validateBitrefillInput({
+    invoiceId: args["invoice-id"],
+    address: args.to,
+    amount: args.amount,
+    expiresAt: args["expires-at"]
+  });
+  let blacklist;
+  try {
+    blacklist = loadBlacklist();
+  } catch (err) {
+    throw new SkillError("BLACKLIST_UNAVAILABLE", `Compromised-address list unusable: ${err.message} Refusing to proceed.`);
+  }
+  assertNotBlacklisted([{ address: invoice.address, family: "evm", role: "Bitrefill receiving address" }], blacklist);
+  let created = null;
+  let rozoPaymentId;
+  let resumed = false;
+  try {
+    created = await createBitrefillInvoice({ invoice, source: requested });
+  } catch (err) {
+    const existing = duplicateInvoicePaymentId(err);
+    if (!existing) throw err;
+    rozoPaymentId = assertRozoPaymentId(existing);
+    resumed = true;
+  }
+  if (created) {
+    if (created.ok === false || !created.rozoPaymentId) {
+      throw new SkillError(created?.error || "CREATE_FAILED", created?.message || "create-invoice returned no rozoPaymentId.");
+    }
+    rozoPaymentId = assertRozoPaymentId(created.rozoPaymentId);
+    const echo = verifyBitrefillCreate({ requested: invoice, created });
+    if (!echo.ok) {
+      abort("verify-create", echo.code, echo.reason, {
+        details: { drift: echo.drift },
+        fields: { rozoPaymentId, invoiceId: invoice.invoiceId }
+      }, "The order exists but was NOT validated. Do not fund it. Let it expire unfunded.");
+    }
+  }
+  const local = readState(rozoPaymentId);
+  if (local?.bitrefill) {
+    const prior = verifyBitrefillCreate({
+      requested: invoice,
+      created: { provider: PROVIDER_BITREFILL, invoiceId: local.bitrefill.invoiceId, destination: { chainId: "8453", tokenSymbol: "USDC", address: local.bitrefill.address, amount: local.bitrefill.amount } }
+    });
+    if (!prior.ok) {
+      abort("verify-local", prior.code, "This invoice id was recorded earlier with a different address or amount.", {
+        details: { drift: prior.drift },
+        fields: { rozoPaymentId, invoiceId: invoice.invoiceId }
+      });
+    }
+  }
+  const payment = await getPayment(rozoPaymentId);
+  const source = payment?.source || {};
+  const dest = verifyBitrefillDestination({ requested: invoice, payment });
+  if (!dest.ok) {
+    abort("verify-destination", dest.code, dest.reason, {
+      details: { drift: dest.drift },
+      fields: { rozoPaymentId, invoiceId: invoice.invoiceId }
+    });
+  }
+  const guard = reuseGuard({ payment, requested, reused: resumed });
+  if (!guard.ok) {
+    emit(
+      {
+        success: false,
+        step: "reuse-guard",
+        provider: PROVIDER_BITREFILL,
+        error: { code: guard.code, message: guard.reason, details: guard.evidence },
+        invoiceId: invoice.invoiceId,
+        rozoPaymentId,
+        moneyDetected: guard.moneyDetected,
+        guidance: guard.moneyDetected ? "MONEY DETECTED. Do not pay again. Preserve every id and tx hash above and escalate for manual reconciliation." : "Abort this run. Nothing was funded."
+      },
+      EXIT_ERROR
+    );
+  }
+  const invoiceExpiry = invoice.expiresAt ?? created?.expiresAt ?? local?.bitrefill?.expiresAt ?? payment?.expiresAt;
+  const lightning = String(source.chainId) === "lightning";
+  const expiry = checkExpiry({
+    now: Date.now(),
+    chainId: source.chainId ?? chainId,
+    intentExpiresAt: payment?.expiresAt,
+    coinbaseExpiry: invoiceExpiry,
+    ...lightning ? { bolt11ExpiresAt: payment?.expiresAt } : {}
+  });
+  if (!expiry.ok) {
+    abort("expiry-guard", expiry.code, expiry.reason, {
+      details: expiry,
+      fields: { rozoPaymentId, invoiceId: invoice.invoiceId }
+    }, "Not enough time remains to fund and settle safely. Create a fresh Bitrefill invoice. Do not fund this order.");
+  }
+  try {
+    assertNotBlacklisted([{ address: source.receiverAddress, family: chainFamily(source.chainId), role: "deposit address" }], blacklist);
+  } catch (err) {
+    abort("blacklist", err.code, err.message, { fields: { rozoPaymentId } }, "Do NOT send anything. Report this to the operator immediately.");
+  }
+  const bitrefill = { ...invoice, expiresAt: invoiceExpiry ? new Date(Date.parse(invoiceExpiry)).toISOString() : null };
+  createOrderRecord({
+    rozoPaymentId,
+    provider: PROVIDER_BITREFILL,
+    bitrefill,
+    linkId: null,
+    paymentLink: null,
+    merchant: "Bitrefill",
+    invoiceAmount: invoice.amount,
+    source: { chainId: source.chainId, tokenSymbol: source.tokenSymbol },
+    receiverAddress: source.receiverAddress,
+    receiverMemo: source.receiverMemo ?? null,
+    amount: source.amount,
+    amountUnit: source.amountUnit ?? null,
+    expiresAt: payment?.expiresAt ?? null
+  });
+  const tier = confirmTier2(invoice.amount);
+  if (confirmed) recordConfirmation(rozoPaymentId, { source, invoiceAmount: invoice.amount, tier });
+  const family = chainFamily(source.chainId);
+  const depositInfo = guard.deposit;
+  const bolt11 = source.lnInvoice ?? payment?.lnInvoice ?? null;
+  const memoRequirement = lightning ? "Lightning invoices carry their own routing data; there is no separate memo." : source.receiverMemo ? "This deposit REQUIRES the memo/tag below. Sending without it will very likely lose the funds." : "This deposit does not use a memo. Leave the memo field empty.";
+  emit({
+    success: true,
+    step: "create-order",
+    provider: PROVIDER_BITREFILL,
+    confirmed,
+    reused: resumed,
+    reusedNote: resumed ? `An order for this Bitrefill invoice already existed (${rozoPaymentId}); it was resumed. Nothing new was created.` : null,
+    orderCost: "Creating an order moves no money. An order you never fund simply expires and costs nothing.",
+    invoiceId: invoice.invoiceId,
+    rozoPaymentId,
+    merchant: "Bitrefill",
+    invoice: { amount: invoice.amount, currency: "USDC" },
+    bitrefill: {
+      invoiceId: invoice.invoiceId,
+      addressMasked: maskAddress2(invoice.address),
+      amount: invoice.amount,
+      chain: "Base",
+      token: "USDC",
+      expiresAt: bitrefill.expiresAt,
+      destinationAddressVerifiedOnIntent: dest.addressVerified
+    },
+    deposit: confirmed ? {
+      chainId: source.chainId,
+      chain: chainName(source.chainId),
+      tokenSymbol: source.tokenSymbol,
+      tokenAddress: source.tokenAddress || null,
+      receiverAddress: lightning ? null : source.receiverAddress,
+      receiverMemo: source.receiverMemo ?? null,
+      receiverMemoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
+      amount: source.amount,
+      amountUnit: source.amountUnit ?? null,
+      isSats: isSatsUnit(source.amountUnit),
+      lnInvoice: bolt11 || null,
+      payTo: depositInfo.payTo,
+      expiresAt: payment?.expiresAt ?? null,
+      expiresIn: formatRemaining(expiry.msRemaining)
+    } : null,
+    depositWithheld: !confirmed,
+    display: {
+      chain: chainName(source.chainId),
+      token: source.tokenSymbol,
+      amount: formatAmount(source),
+      isSats: isSatsUnit(source.amountUnit),
+      payToMasked: maskAddress2(depositInfo.payTo),
+      receiverMemoMasked: maskMemo(source.receiverMemo),
+      hasMemo: Boolean(source.receiverMemo),
+      memoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
+      memoRequirement
+    },
+    expiry: {
+      intentExpiresAt: payment?.expiresAt ?? null,
+      invoiceExpiresAt: bitrefill.expiresAt,
+      effectiveDeadlineIso: new Date(expiry.effectiveDeadlineMs).toISOString(),
+      expiresIn: formatRemaining(expiry.msRemaining),
+      msRemaining: expiry.msRemaining,
+      marginMinutes: Math.round(expiry.marginMs / 6e4),
+      minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4)
+    },
+    confirmation: {
+      required: tier,
+      satisfied: confirmed,
+      note: confirmed ? "Confirmation recorded. The send scripts will verify it against the live deposit data." : "BINDING CONFIRMATION POINT. Present the Bitrefill invoice id, the USDC amount Bitrefill receives, the coin and exact amount to send, the masked deposit address and the expiry, and get an explicit yes. Then re-run with --confirm to release the full deposit details.",
+      warnings: [
+        "Wrong token, wrong network, or wrong amount is usually unrecoverable.",
+        memoRequirement,
+        "Send exactly once. A second send to the same one-time address is not guaranteed to be credited.",
+        "The deposit amount can exceed the invoice: it includes the bridge and network fees."
+      ]
+    },
+    blacklist: { checked: true, addressesInList: blacklist.entries.length, digest: blacklist.provenance.addressesSha256 },
+    nextStep: confirmed ? {
+      modeA: "Give the user the `deposit` block, then poll: rozo-checkout status <rozoPaymentId>",
+      modeB: family === "evm" || family === "solana" ? "rozo-checkout pay \u2026 --send" : "not available for this chain \u2014 pay from a wallet (Mode A)"
+    } : { confirm: "Re-run this exact command with --confirm once the user has said yes." }
+  });
+}
+async function run3(argv = process.argv.slice(2)) {
+  return main3(argv);
+}
+
 // scripts/src/status.mjs
 var POLL_INTERVAL_MS = 1e4;
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function snapshot({ rozoPaymentId, linkId }) {
+function resolveProvider(explicit, rozoPaymentId) {
+  if (explicit) return String(explicit).toLowerCase();
+  if (rozoPaymentId && isRozoPaymentId(rozoPaymentId)) {
+    try {
+      return readState(rozoPaymentId)?.provider ?? "coinbase";
+    } catch {
+      return "coinbase";
+    }
+  }
+  return "coinbase";
+}
+async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
+  const provider = resolveProvider(explicitProvider, rozoPaymentId);
   let status = null;
   let statusError = null;
-  try {
-    status = await invoiceStatus({ linkId, rozoPaymentId });
-  } catch (err) {
-    statusError = { code: err.code, message: err.message };
+  if (provider !== "bitrefill") {
+    try {
+      status = await invoiceStatus({ linkId, rozoPaymentId });
+    } catch (err) {
+      statusError = { code: err.code, message: err.message };
+    }
   }
   let id = rozoPaymentId || status?.rozo_payment_id || null;
   let idSource = rozoPaymentId ? "argument" : status?.rozo_payment_id ? "invoice-status" : null;
@@ -55256,15 +55699,17 @@ async function snapshot({ rozoPaymentId, linkId }) {
       paymentError = { code: err.code, message: err.message };
     }
   }
-  const viewsFailed = Boolean(statusError) && !payment;
+  const viewsFailed = provider === "bitrefill" ? !payment : Boolean(statusError) && !payment;
   const verdict = classifyStatus({
     payment: payment || status?.rozoPayment || {},
     routerState: status?.routerState,
     coinbase: status?.coinbase,
-    viewsFailed
+    viewsFailed,
+    provider
   });
   const source = payment?.source || status?.rozoPayment?.source || {};
   return {
+    provider,
     rozoPaymentId: id,
     rozoPaymentIdSource: idSource,
     // Without the authoritative payment object we are reading a partial view.
@@ -55308,25 +55753,32 @@ async function snapshot({ rozoPaymentId, linkId }) {
     errors: [statusError, paymentError].filter(Boolean)
   };
 }
-async function main3(argv) {
+async function main4(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = args["rozo-payment-id"] || (isRozoPaymentId(args._[0]) ? args._[0] : null);
   const linkId = args["link-id"] || (!rozoPaymentId ? args._[0] : null);
+  const provider = args.provider ? String(args.provider) : null;
+  if (provider && provider !== "bitrefill" && provider !== "coinbase") {
+    usage("--provider must be coinbase or bitrefill");
+  }
+  if (provider === "bitrefill" && !rozoPaymentId) {
+    usage("A Bitrefill order is tracked by --rozo-payment-id <uuid>.");
+  }
   if (!rozoPaymentId && !linkId) {
     usage("Required: --rozo-payment-id <uuid> and/or --link-id <pl_* | paymentSession_*>");
   }
   const watch = Boolean(args.watch);
   const timeoutMs = Math.max(0, Number(args.timeout ?? 600) * 1e3);
   const deadline = Date.now() + timeoutMs;
-  let result = await snapshot({ rozoPaymentId, linkId });
+  let result = await snapshot({ rozoPaymentId, linkId, provider });
   const history = [{ at: (/* @__PURE__ */ new Date()).toISOString(), state: result.state }];
   while (watch && !result.terminal && !result.escalate && !result.unknown && Date.now() < deadline) {
     await sleep(POLL_INTERVAL_MS);
-    const next = await snapshot({ rozoPaymentId: result.rozoPaymentId || rozoPaymentId, linkId });
+    const next = await snapshot({ rozoPaymentId: result.rozoPaymentId || rozoPaymentId, linkId, provider });
     if (next.state !== result.state) history.push({ at: (/* @__PURE__ */ new Date()).toISOString(), state: next.state });
     result = next;
   }
-  const guidance = result.escalate ? "MONEY DETECTED and the order is not on a healthy path. Do NOT pay again and do NOT create a new order for this link. Preserve linkId, rozoPaymentId and every tx hash, then escalate to the operator for manual reconciliation." : result.unknown ? "The order state could not be established. This is NOT evidence that nothing was paid \u2014 do not create a new order and do not send again on the strength of it. Retry, or pass --rozo-payment-id so the authoritative pay-in view can be read." : !result.authoritativeView ? "Only the fulfilment view was readable; the pay-in view is unavailable, so the money-detected rule cannot be enforced. Pass --rozo-payment-id for a complete answer." : result.state === "expired_unfunded" ? "Nothing was funded, so nothing was lost. Start a fresh order with: rozo-checkout pay <coinbase-link> --with <coin>  (or create-order.js --url <link> --chain <id> --token <SYMBOL>)" : result.terminal ? "Done." : "Still in flight. Poll again in ~10s.";
+  const guidance = result.escalate ? "MONEY DETECTED and the order is not on a healthy path. Do NOT pay again and do NOT create a new order for this link. Preserve linkId, rozoPaymentId and every tx hash, then escalate to the operator for manual reconciliation." : result.unknown ? "The order state could not be established. This is NOT evidence that nothing was paid \u2014 do not create a new order and do not send again on the strength of it. Retry, or pass --rozo-payment-id so the authoritative pay-in view can be read." : !result.authoritativeView ? "Only the fulfilment view was readable; the pay-in view is unavailable, so the money-detected rule cannot be enforced. Pass --rozo-payment-id for a complete answer." : result.state === "expired_unfunded" && result.provider === "bitrefill" ? "Nothing was funded, so nothing was lost. Create a fresh Bitrefill invoice and run rozo-checkout pay --bitrefill-invoice <id> --to <0x\u2026> --amount <USDC> --with <coin>" : result.state === "expired_unfunded" ? "Nothing was funded, so nothing was lost. Start a fresh order with: rozo-checkout pay <coinbase-link> --with <coin>  (or create-order.js --url <link> --chain <id> --token <SYMBOL>)" : result.terminal ? "Done." : "Still in flight. Poll again in ~10s.";
   const unresolved = watch && !result.terminal && !result.escalate && !result.unknown;
   const failed = result.escalate || result.unknown || !result.authoritativeView;
   emit(
@@ -55341,8 +55793,8 @@ async function main3(argv) {
     failed ? EXIT_ERROR : unresolved ? EXIT_UNCONFIRMED : 0
   );
 }
-async function run3(argv = process.argv.slice(2)) {
-  return main3(argv);
+async function run4(argv = process.argv.slice(2)) {
+  return main4(argv);
 }
 
 // scripts/src/lib/passphrase.mjs
@@ -55477,16 +55929,28 @@ async function preflight({
   if ((source.receiverMemo ?? null) !== (state.receiverMemo ?? null)) {
     throw new SkillError("DEPOSIT_CHANGED", "The live deposit memo differs from the recorded one.");
   }
-  const statusNow = await invoiceStatus({ linkId: state.linkId });
-  const expiry = checkExpiry({
-    now: Date.now(),
-    chainId: source.chainId,
-    intentExpiresAt: payment?.expiresAt,
-    coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry
-  });
-  if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
-  const payable = checkPayable(statusNow, Date.now());
-  if (!payable.ok) throw new SkillError(payable.code, payable.reason, payable.derived);
+  let statusNow = null;
+  let expiry;
+  if (state.provider === "bitrefill") {
+    expiry = checkExpiry({
+      now: Date.now(),
+      chainId: source.chainId,
+      intentExpiresAt: payment?.expiresAt,
+      coinbaseExpiry: state.bitrefill?.expiresAt ?? payment?.expiresAt
+    });
+    if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
+  } else {
+    statusNow = await invoiceStatus({ linkId: state.linkId });
+    expiry = checkExpiry({
+      now: Date.now(),
+      chainId: source.chainId,
+      intentExpiresAt: payment?.expiresAt,
+      coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry
+    });
+    if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
+    const payable = checkPayable(statusNow, Date.now());
+    if (!payable.ok) throw new SkillError(payable.code, payable.reason, payable.derived);
+  }
   assertNotBlacklisted(
     [
       { address: source.receiverAddress, family, role: "deposit address" },
@@ -55505,7 +55969,23 @@ async function preflight({
     statusNow
   };
 }
-async function finalPayabilityCheck({ linkId, chainId, intentExpiresAt }) {
+async function finalPayabilityCheck({ linkId, chainId, intentExpiresAt, state = null, rozoPaymentId = null }) {
+  if (state?.provider === "bitrefill") {
+    const id = rozoPaymentId ?? state.rozoPaymentId;
+    const payment = await getPayment(id);
+    const guard = reuseGuard({ payment, requested: state.source });
+    if (!guard.ok) {
+      throw new SkillError(guard.code, guard.reason, { ...guard.evidence, moneyDetected: guard.moneyDetected });
+    }
+    const expiry2 = checkExpiry({
+      now: Date.now(),
+      chainId,
+      intentExpiresAt: payment?.expiresAt ?? intentExpiresAt,
+      coinbaseExpiry: state.bitrefill?.expiresAt ?? payment?.expiresAt ?? intentExpiresAt
+    });
+    if (!expiry2.ok) throw new SkillError(expiry2.code, expiry2.reason, expiry2);
+    return { statusNow: null, payable: { ok: true }, expiry: expiry2 };
+  }
   const statusNow = await invoiceStatus({ linkId });
   const payable = checkPayable(statusNow, Date.now());
   if (!payable.ok) throw new SkillError(payable.code, payable.reason, payable.derived);
@@ -55751,7 +56231,7 @@ function chainDef(chainId, rpcUrl) {
     rpcUrls: { default: { http: [rpcUrl] } }
   });
 }
-async function main4(argv) {
+async function main5(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = assertRozoPaymentId(args["rozo-payment-id"] || args._[0]);
   assertNoTrackedDotEnv();
@@ -55869,7 +56349,9 @@ async function main4(argv) {
   await finalPayabilityCheck({
     linkId: state.linkId,
     chainId: source.chainId,
-    intentExpiresAt: payment?.expiresAt
+    intentExpiresAt: payment?.expiresAt,
+    state,
+    rozoPaymentId
   });
   claimSend(
     rozoPaymentId,
@@ -55977,8 +56459,8 @@ async function main4(argv) {
     outcome.exitCode
   );
 }
-async function run4(argv = process.argv.slice(2)) {
-  return main4(argv);
+async function run5(argv = process.argv.slice(2)) {
+  return main5(argv);
 }
 
 // scripts/src/send-sol.mjs
@@ -56048,7 +56530,7 @@ function createTransferCheckedInstruction(source, mint, destination, owner, amou
 var MEMO_PROGRAM_ID = new import_web32.PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 var MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 var B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-async function main5(argv) {
+async function main6(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = assertRozoPaymentId(args["rozo-payment-id"] || args._[0]);
   assertNoTrackedDotEnv();
@@ -56197,7 +56679,9 @@ async function main5(argv) {
   await finalPayabilityCheck({
     linkId: state.linkId,
     chainId: source.chainId,
-    intentExpiresAt: payment?.expiresAt
+    intentExpiresAt: payment?.expiresAt,
+    state,
+    rozoPaymentId
   });
   claimSend(
     rozoPaymentId,
@@ -56339,8 +56823,8 @@ function base58Encode(buf) {
   }
   return out2;
 }
-async function run5(argv = process.argv.slice(2)) {
-  return main5(argv);
+async function run6(argv = process.argv.slice(2)) {
+  return main6(argv);
 }
 
 // scripts/src/cli.mjs
@@ -56514,9 +56998,10 @@ async function cmdQuote(opts) {
 }
 async function cmdStatus(opts) {
   const argv = [...targetToArgs(opts.target), "--timeout", String(opts.timeout ?? 600)];
+  if (opts.provider) argv.push("--provider", opts.provider);
   if (opts.watch) argv.push("--watch");
   if (!opts.json) out(dim("  Checking payment status\u2026 (no money moves)"));
-  const { payload, exitCode } = await step(run3, argv);
+  const { payload, exitCode } = await step(run4, argv);
   if (opts.json) {
     printJson(payload);
     return exitCode;
@@ -56555,7 +57040,9 @@ async function cmdPay(opts) {
   let chosenPreset = null;
   let payer = null;
   let invoiceUsd = null;
-  if (!opts.source || opts.payer) {
+  if (opts.bitrefill) {
+    invoiceUsd = Number(opts.bitrefill.amount);
+  } else if (!opts.source || opts.payer) {
     if (!opts.json) out(dim("  Reading the payment link\u2026"));
     const q = await step(run, ["--url", opts.target]);
     if (!q.payload.success) {
@@ -56605,7 +57092,20 @@ async function cmdPay(opts) {
     payer = { address: opts.payer, family };
   }
   const { chainId, tokenSymbol } = opts.source;
-  const baseArgs = ["--url", opts.target, "--chain", chainId, "--token", tokenSymbol];
+  const createFlow = opts.bitrefill ? run3 : run2;
+  const baseArgs = opts.bitrefill ? [
+    "--invoice-id",
+    opts.bitrefill.invoiceId,
+    "--to",
+    opts.bitrefill.address,
+    "--amount",
+    opts.bitrefill.amount,
+    ...opts.bitrefill.expiresAt ? ["--expires-at", opts.bitrefill.expiresAt] : [],
+    "--chain",
+    chainId,
+    "--token",
+    tokenSymbol
+  ] : ["--url", opts.target, "--chain", chainId, "--token", tokenSymbol];
   if (opts.send) {
     const family = chainFamily(chainId);
     if (family === "evm" || family === "solana") {
@@ -56618,7 +57118,7 @@ async function cmdPay(opts) {
     }
   }
   if (!opts.json) out(dim("  Creating a one-time order\u2026 (no money moves)"));
-  const created = await step(run2, baseArgs);
+  const created = await step(createFlow, baseArgs);
   if (!created.payload.success) {
     if (opts.json) printJson(created.payload);
     else {
@@ -56638,6 +57138,9 @@ async function cmdPay(opts) {
     out();
     out(`  ${bold(p.merchant ?? "Unknown merchant")}`);
     out(`  Invoice   ${bold(`${p.invoice?.amount} ${p.invoice?.currency ?? "USD"}`)}`);
+    if (p.provider === "bitrefill") {
+      out(`  Bitrefill ${p.bitrefill?.invoiceId} ${dim(`\u2192 ${p.bitrefill?.amount} USDC on Base to ${p.bitrefill?.addressMasked}`)}`);
+    }
     out(`  You send  ${bold(p.display?.amount)} on ${bold(p.display?.chain)}`);
     out(`  To        ${p.display?.payToMasked} ${dim("(full address shown after you confirm)")}`);
     if (p.display?.hasMemo) {
@@ -56674,7 +57177,7 @@ async function cmdPay(opts) {
     }
   }
   if (!opts.json) out(dim("  Confirming and releasing the deposit details\u2026 (no money moves yet)"));
-  const confirmed = await step(run2, [...baseArgs, "--confirm"]);
+  const confirmed = await step(createFlow, [...baseArgs, "--confirm"]);
   if (!confirmed.payload.success) {
     if (opts.json) printJson(confirmed.payload);
     else {
@@ -56689,7 +57192,7 @@ async function cmdPay(opts) {
   }
   if (opts.send) {
     const family = chainFamily(deposit.chainId);
-    const sender = family === "evm" ? run4 : family === "solana" ? run5 : null;
+    const sender = family === "evm" ? run5 : family === "solana" ? run6 : null;
     if (!sender) {
       const payload = formatFailure({
         code: "SEND_UNSUPPORTED_CHAIN",
@@ -56744,7 +57247,7 @@ async function cmdPay(opts) {
     return EXIT_OK;
   }
   if (!opts.json) out(dim("  Waiting for settlement\u2026 (Ctrl-C to stop; the payment continues)"));
-  const watched = await step(run3, [
+  const watched = await step(run4, [
     "--rozo-payment-id",
     rozoPaymentId,
     "--watch",
@@ -56799,7 +57302,7 @@ function printDeposit(deposit, opts) {
   out(dim("  Send it exactly once."));
   out();
 }
-async function main6() {
+async function main7() {
   let opts;
   try {
     opts = parseCliArgs(process.argv.slice(2));
@@ -56848,7 +57351,7 @@ async function main6() {
       return EXIT_USAGE;
   }
 }
-main6().then((code) => process.exit(code ?? EXIT_OK)).catch((err) => {
+main7().then((code) => process.exit(code ?? EXIT_OK)).catch((err) => {
   const payload = formatFailure(err);
   if (process.argv.includes("--json")) printJson(payload);
   else printError(payload);

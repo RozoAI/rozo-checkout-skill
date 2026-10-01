@@ -193,7 +193,7 @@ async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS } = {
     }
   }
   if (!res.ok) {
-    const code = json?.code || json?.error?.code || (typeof json?.error === "string" ? null : null) || `HTTP_${res.status}`;
+    const code = json?.code || json?.error?.code || (typeof json?.error === "string" && /^[A-Z][A-Z0-9_]+$/.test(json.error) ? json.error : null) || `HTTP_${res.status}`;
     const message = json?.message || (typeof json?.error === "string" ? json.error : json?.error?.message) || `HTTP ${res.status}`;
     throw new SkillError(code, redact(String(message)), {
       httpStatus: res.status,
@@ -1064,6 +1064,10 @@ function createOrderRecordUnlocked(record) {
   const next = {
     version: 1,
     rozoPaymentId,
+    // 'coinbase' (default, historical records) or 'bitrefill'. Drives which
+    // payability checks presend and status run.
+    provider: record.provider ?? existing?.provider ?? "coinbase",
+    bitrefill: record.bitrefill ?? existing?.bitrefill ?? null,
     linkId: record.linkId,
     paymentLink: record.paymentLink ?? null,
     merchant: record.merchant ?? null,

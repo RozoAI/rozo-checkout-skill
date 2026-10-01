@@ -159,7 +159,43 @@ const BOOLEAN_FLAGS = new Set([
 ]);
 
 /** Flags that take a value. */
-const VALUE_FLAGS = new Set(['with', 'chain', 'token', 'rpc', 'timeout', 'payer', 'keyfile', 'env-file']);
+const VALUE_FLAGS = new Set([
+  'with',
+  'from',
+  'chain',
+  'token',
+  'rpc',
+  'timeout',
+  'payer',
+  'keyfile',
+  'env-file',
+  // Bitrefill invoice (pay) and provider override (status)
+  'bitrefill-invoice',
+  'to',
+  'amount',
+  'expires-at',
+  'provider',
+]);
+
+/**
+ * --from accepts the preset in either order ("usdc-stellar" or
+ * "stellar-usdc"), since people naturally say "pay from Stellar USDC".
+ * Still exact: each half must resolve to a known token / chain.
+ */
+export function resolveFromPreset(value) {
+  try {
+    return resolvePreset(value);
+  } catch (err) {
+    const raw = String(value ?? '').trim();
+    const idx = raw.indexOf('-');
+    if (idx <= 0) throw err;
+    try {
+      return resolvePreset(`${raw.slice(idx + 1)}-${raw.slice(0, idx)}`);
+    } catch {
+      throw err;
+    }
+  }
+}
 
 /**
  * Parse a full argv tail (everything after the binary name) into a normalized
@@ -236,17 +272,46 @@ export function parseCliArgs(argv) {
         'Usage: rozo-checkout status <rozoPaymentId | coinbase-link>',
       );
     }
+    if (flags.provider !== undefined && !['coinbase', 'bitrefill'].includes(String(flags.provider))) {
+      throw new CliError('BAD_VALUE', '--provider must be coinbase or bitrefill.');
+    }
     return {
       command,
       target,
       json,
+      provider: flags.provider,
       watch: flags.watch === true,
       timeout: flags.timeout === undefined ? 600 : Number(flags.timeout),
     };
   }
 
-  // pay
-  if (!target) {
+  // pay — a Bitrefill invoice is described by flags, not by a link.
+  const bitrefillFlags = ['bitrefill-invoice', 'to', 'amount', 'expires-at'].filter(
+    (k) => flags[k] !== undefined,
+  );
+  let bitrefill = null;
+  if (bitrefillFlags.length) {
+    if (flags['bitrefill-invoice'] === undefined || flags.to === undefined || flags.amount === undefined) {
+      throw new CliError(
+        'MISSING_VALUE',
+        'A Bitrefill invoice needs --bitrefill-invoice <id> --to <0x…> --amount <USDC>.',
+      );
+    }
+    if (target) {
+      throw new CliError('CONFLICTING_FLAGS', 'Pass either a Coinbase link or --bitrefill-invoice, not both.');
+    }
+    bitrefill = {
+      invoiceId: String(flags['bitrefill-invoice']).trim(),
+      address: String(flags.to).trim(),
+      amount: String(flags.amount).trim(),
+      expiresAt: flags['expires-at'] === undefined ? null : String(flags['expires-at']).trim(),
+    };
+  }
+  if (flags.from !== undefined && flags.with !== undefined) {
+    throw new CliError('CONFLICTING_FLAGS', 'Use either --with or --from, not both.');
+  }
+
+  if (!target && !bitrefill) {
     throw new CliError(
       'MISSING_TARGET',
       'Usage: rozo-checkout pay <coinbase-link> --with usdt-solana',
@@ -258,7 +323,7 @@ export function parseCliArgs(argv) {
     if (flags.chain === undefined || flags.token === undefined) {
       throw new CliError('MISSING_VALUE', '--chain and --token must be given together.');
     }
-    if (flags.with !== undefined) {
+    if (flags.with !== undefined || flags.from !== undefined) {
       throw new CliError('CONFLICTING_FLAGS', 'Use either --with, or --chain plus --token.');
     }
     const chainId = String(flags.chain).trim();
@@ -273,6 +338,8 @@ export function parseCliArgs(argv) {
     source = { chainId, tokenSymbol };
   } else if (flags.with !== undefined) {
     source = resolvePreset(flags.with);
+  } else if (flags.from !== undefined) {
+    source = resolveFromPreset(flags.from);
   } else {
     // No coin given. On a terminal the CLI offers a picker; for a non-TTY
     // caller this stays an error, decided in cli.mjs — an agent must be
@@ -287,7 +354,8 @@ export function parseCliArgs(argv) {
 
   return {
     command: 'pay',
-    target,
+    target: target ?? null,
+    bitrefill,
     json,
     source,
     send: flags.send === true,
@@ -303,12 +371,13 @@ export function parseCliArgs(argv) {
   };
 }
 
-export const HELP = `rozo-checkout — pay a Coinbase Payment Link with BTC Lightning,
-or USDT/USDC on Solana, BNB Chain, Ethereum, Polygon, Base or Stellar.
+export const HELP = `rozo-checkout — pay a Coinbase Payment Link or a Bitrefill invoice
+(USDC on Base) with BTC Lightning, or USDT/USDC on Solana, BNB Chain, Ethereum, Polygon, Base or Stellar.
 
 USAGE
   npx @rozoai/checkout pay <coinbase-link>              (pick a coin from a list)
   npx @rozoai/checkout pay <coinbase-link> --with <coin>
+  npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x…> --amount <USDC> --with <coin>
   npx @rozoai/checkout quote <coinbase-link>
   npx @rozoai/checkout status <rozoPaymentId | coinbase-link>
 
@@ -339,6 +408,11 @@ OPTIONS
   --json, -j      machine-readable output
   --no-watch      stop after showing the deposit instructions
   --timeout <s>   how long to poll for settlement (default 900)
+  --bitrefill-invoice <id>  pay a Bitrefill invoice created with "USDC on Base"
+                  instead of a Coinbase link. Needs --to <0x… address Bitrefill
+                  shows> and --amount <exact USDC amount>; --expires-at <ISO>
+                  is optional but recommended (refused under 5 minutes).
+  --from <coin>   same as --with; also accepts chain-first, e.g. stellar-usdc
   --payer <addr>  optional. Check what this wallet holds and mark the coin
                   list accordingly. Display help only; it never changes what
                   gets signed.
@@ -351,6 +425,7 @@ EXAMPLES
   npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01...
   npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01... --with usdt-solana
   npx @rozoai/checkout pay pl_01... --with btc-lightning
+  npx @rozoai/checkout pay --bitrefill-invoice 8f3k2 --to 0xAbC…123 --amount 7.90 --with usdc-stellar
   npx @rozoai/checkout status 11111111-2222-4333-8444-555555555555
 
 Creating an order moves no money; an unfunded order simply expires. Nothing is

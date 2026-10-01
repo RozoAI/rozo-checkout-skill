@@ -156,7 +156,7 @@ async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS } = {
     }
   }
   if (!res.ok) {
-    const code = json?.code || json?.error?.code || (typeof json?.error === "string" ? null : null) || `HTTP_${res.status}`;
+    const code = json?.code || json?.error?.code || (typeof json?.error === "string" && /^[A-Z][A-Z0-9_]+$/.test(json.error) ? json.error : null) || `HTTP_${res.status}`;
     const message = json?.message || (typeof json?.error === "string" ? json.error : json?.error?.message) || `HTTP ${res.status}`;
     throw new SkillError(code, redact(String(message)), {
       httpStatus: res.status,
@@ -342,7 +342,15 @@ function receiptSignal(source) {
     return { money: true, receipt: null, unparsable: true };
   }
 }
-function classifyStatus({ payment, routerState, coinbase, now = Date.now(), viewsFailed = false }) {
+function classifyStatus({
+  payment,
+  routerState,
+  coinbase,
+  now = Date.now(),
+  viewsFailed = false,
+  provider = "coinbase"
+}) {
+  const bitrefill = provider === "bitrefill";
   const source = payment?.source || {};
   const hasTx = Boolean(source.txHash);
   const confirmed = Boolean(source.confirmedAt);
@@ -375,7 +383,7 @@ function classifyStatus({ payment, routerState, coinbase, now = Date.now(), view
       { escalate: true }
     );
   }
-  if (routerStatus === "paid" || coinbase?.settled === true) {
+  if (!bitrefill && (routerStatus === "paid" || coinbase?.settled === true)) {
     return mk("settled", "Coinbase invoice settled by the funder wallet.", { terminal: true });
   }
   if (routerStatus === "failed_pay_invoice" || routerStatus === "failed_insufficient_balance") {
@@ -395,6 +403,11 @@ function classifyStatus({ payment, routerState, coinbase, now = Date.now(), view
   if (moneyDetected && receipt && receipt.state === "overpaid") {
     return mk("payin_detected", "More arrived than required; escalate for operator follow-up.", {
       escalate: true
+    });
+  }
+  if (bitrefill && (payment?.status === "payment_payout_completed" || payment?.status === "payment_completed")) {
+    return mk("settled", "USDC delivered to the Bitrefill invoice address on Base.", {
+      terminal: true
     });
   }
   switch (payment?.status) {
@@ -479,6 +492,30 @@ import os from "node:os";
 function stateRoot() {
   return process.env.ROZO_CHECKOUT_STATE_DIR || path.join(os.homedir(), ".rozo-checkout", "state");
 }
+function statePath(rozoPaymentId) {
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(String(rozoPaymentId || ""))) {
+    throw new SkillError("BAD_ROZO_PAYMENT_ID", "Refusing to build a state path from that id.");
+  }
+  return path.join(stateRoot(), `${rozoPaymentId}.json`);
+}
+function readState(rozoPaymentId) {
+  const file = statePath(rozoPaymentId);
+  let raw;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return null;
+    throw new SkillError("STATE_UNREADABLE", `Cannot read local state: ${err.code}`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new SkillError(
+      "STATE_CORRUPT",
+      "The local state file for this order is corrupt. Refusing to act; inspect it manually."
+    );
+  }
+}
 function findByLinkId(linkId) {
   const dir = stateRoot();
   let files = [];
@@ -502,13 +539,27 @@ function findByLinkId(linkId) {
 // scripts/src/status.mjs
 var POLL_INTERVAL_MS = 1e4;
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function snapshot({ rozoPaymentId, linkId }) {
+function resolveProvider(explicit, rozoPaymentId) {
+  if (explicit) return String(explicit).toLowerCase();
+  if (rozoPaymentId && isRozoPaymentId(rozoPaymentId)) {
+    try {
+      return readState(rozoPaymentId)?.provider ?? "coinbase";
+    } catch {
+      return "coinbase";
+    }
+  }
+  return "coinbase";
+}
+async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
+  const provider = resolveProvider(explicitProvider, rozoPaymentId);
   let status = null;
   let statusError = null;
-  try {
-    status = await invoiceStatus({ linkId, rozoPaymentId });
-  } catch (err) {
-    statusError = { code: err.code, message: err.message };
+  if (provider !== "bitrefill") {
+    try {
+      status = await invoiceStatus({ linkId, rozoPaymentId });
+    } catch (err) {
+      statusError = { code: err.code, message: err.message };
+    }
   }
   let id = rozoPaymentId || status?.rozo_payment_id || null;
   let idSource = rozoPaymentId ? "argument" : status?.rozo_payment_id ? "invoice-status" : null;
@@ -528,15 +579,17 @@ async function snapshot({ rozoPaymentId, linkId }) {
       paymentError = { code: err.code, message: err.message };
     }
   }
-  const viewsFailed = Boolean(statusError) && !payment;
+  const viewsFailed = provider === "bitrefill" ? !payment : Boolean(statusError) && !payment;
   const verdict = classifyStatus({
     payment: payment || status?.rozoPayment || {},
     routerState: status?.routerState,
     coinbase: status?.coinbase,
-    viewsFailed
+    viewsFailed,
+    provider
   });
   const source = payment?.source || status?.rozoPayment?.source || {};
   return {
+    provider,
     rozoPaymentId: id,
     rozoPaymentIdSource: idSource,
     // Without the authoritative payment object we are reading a partial view.
@@ -584,21 +637,28 @@ async function main(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = args["rozo-payment-id"] || (isRozoPaymentId(args._[0]) ? args._[0] : null);
   const linkId = args["link-id"] || (!rozoPaymentId ? args._[0] : null);
+  const provider = args.provider ? String(args.provider) : null;
+  if (provider && provider !== "bitrefill" && provider !== "coinbase") {
+    usage("--provider must be coinbase or bitrefill");
+  }
+  if (provider === "bitrefill" && !rozoPaymentId) {
+    usage("A Bitrefill order is tracked by --rozo-payment-id <uuid>.");
+  }
   if (!rozoPaymentId && !linkId) {
     usage("Required: --rozo-payment-id <uuid> and/or --link-id <pl_* | paymentSession_*>");
   }
   const watch = Boolean(args.watch);
   const timeoutMs = Math.max(0, Number(args.timeout ?? 600) * 1e3);
   const deadline = Date.now() + timeoutMs;
-  let result = await snapshot({ rozoPaymentId, linkId });
+  let result = await snapshot({ rozoPaymentId, linkId, provider });
   const history = [{ at: (/* @__PURE__ */ new Date()).toISOString(), state: result.state }];
   while (watch && !result.terminal && !result.escalate && !result.unknown && Date.now() < deadline) {
     await sleep(POLL_INTERVAL_MS);
-    const next = await snapshot({ rozoPaymentId: result.rozoPaymentId || rozoPaymentId, linkId });
+    const next = await snapshot({ rozoPaymentId: result.rozoPaymentId || rozoPaymentId, linkId, provider });
     if (next.state !== result.state) history.push({ at: (/* @__PURE__ */ new Date()).toISOString(), state: next.state });
     result = next;
   }
-  const guidance = result.escalate ? "MONEY DETECTED and the order is not on a healthy path. Do NOT pay again and do NOT create a new order for this link. Preserve linkId, rozoPaymentId and every tx hash, then escalate to the operator for manual reconciliation." : result.unknown ? "The order state could not be established. This is NOT evidence that nothing was paid \u2014 do not create a new order and do not send again on the strength of it. Retry, or pass --rozo-payment-id so the authoritative pay-in view can be read." : !result.authoritativeView ? "Only the fulfilment view was readable; the pay-in view is unavailable, so the money-detected rule cannot be enforced. Pass --rozo-payment-id for a complete answer." : result.state === "expired_unfunded" ? "Nothing was funded, so nothing was lost. Start a fresh order with: rozo-checkout pay <coinbase-link> --with <coin>  (or create-order.js --url <link> --chain <id> --token <SYMBOL>)" : result.terminal ? "Done." : "Still in flight. Poll again in ~10s.";
+  const guidance = result.escalate ? "MONEY DETECTED and the order is not on a healthy path. Do NOT pay again and do NOT create a new order for this link. Preserve linkId, rozoPaymentId and every tx hash, then escalate to the operator for manual reconciliation." : result.unknown ? "The order state could not be established. This is NOT evidence that nothing was paid \u2014 do not create a new order and do not send again on the strength of it. Retry, or pass --rozo-payment-id so the authoritative pay-in view can be read." : !result.authoritativeView ? "Only the fulfilment view was readable; the pay-in view is unavailable, so the money-detected rule cannot be enforced. Pass --rozo-payment-id for a complete answer." : result.state === "expired_unfunded" && result.provider === "bitrefill" ? "Nothing was funded, so nothing was lost. Create a fresh Bitrefill invoice and run rozo-checkout pay --bitrefill-invoice <id> --to <0x\u2026> --amount <USDC> --with <coin>" : result.state === "expired_unfunded" ? "Nothing was funded, so nothing was lost. Start a fresh order with: rozo-checkout pay <coinbase-link> --with <coin>  (or create-order.js --url <link> --chain <id> --token <SYMBOL>)" : result.terminal ? "Done." : "Still in flight. Poll again in ~10s.";
   const unresolved = watch && !result.terminal && !result.escalate && !result.unknown;
   const failed = result.escalate || result.unknown || !result.authoritativeView;
   emit(

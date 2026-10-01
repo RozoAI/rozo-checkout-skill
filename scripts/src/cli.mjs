@@ -44,6 +44,7 @@ import { applyDotenv } from './lib/dotenv.mjs';
 
 import { run as runQuote } from './quote.mjs';
 import { run as runCreateOrder } from './create-order.mjs';
+import { run as runCreateBitrefill } from './create-bitrefill-order.mjs';
 import { run as runStatus } from './status.mjs';
 import { run as runSendEvm } from './send-evm.mjs';
 import { run as runSendSol } from './send-sol.mjs';
@@ -282,6 +283,7 @@ async function cmdQuote(opts) {
 
 async function cmdStatus(opts) {
   const argv = [...targetToArgs(opts.target), '--timeout', String(opts.timeout ?? 600)];
+  if (opts.provider) argv.push('--provider', opts.provider);
   if (opts.watch) argv.push('--watch');
   if (!opts.json) out(dim('  Checking payment status… (no money moves)'));
   const { payload, exitCode } = await step(runStatus, argv);
@@ -329,7 +331,10 @@ async function cmdPay(opts) {
 
   // The invoice amount drives the balance check, so quote before picking.
   let invoiceUsd = null;
-  if (!opts.source || opts.payer) {
+  if (opts.bitrefill) {
+    // No quote step: the invoice fixes the USDC amount Bitrefill must receive.
+    invoiceUsd = Number(opts.bitrefill.amount);
+  } else if (!opts.source || opts.payer) {
     if (!opts.json) out(dim('  Reading the payment link…'));
     const q = await step(runQuote, ['--url', opts.target]);
     if (!q.payload.success) {
@@ -397,7 +402,17 @@ async function cmdPay(opts) {
   }
 
   const { chainId, tokenSymbol } = opts.source;
-  const baseArgs = ['--url', opts.target, '--chain', chainId, '--token', tokenSymbol];
+  const createFlow = opts.bitrefill ? runCreateBitrefill : runCreateOrder;
+  const baseArgs = opts.bitrefill
+    ? [
+        '--invoice-id', opts.bitrefill.invoiceId,
+        '--to', opts.bitrefill.address,
+        '--amount', opts.bitrefill.amount,
+        ...(opts.bitrefill.expiresAt ? ['--expires-at', opts.bitrefill.expiresAt] : []),
+        '--chain', chainId,
+        '--token', tokenSymbol,
+      ]
+    : ['--url', opts.target, '--chain', chainId, '--token', tokenSymbol];
 
   // --- 0. Mode B preflight: can this machine actually sign? ----------------
   // Resolving the key source is local and cheap, but it used to happen inside
@@ -432,7 +447,7 @@ async function cmdPay(opts) {
 
   // --- 1. create the order; the deposit address is withheld at this point ---
   if (!opts.json) out(dim('  Creating a one-time order… (no money moves)'));
-  const created = await step(runCreateOrder, baseArgs);
+  const created = await step(createFlow, baseArgs);
   if (!created.payload.success) {
     if (opts.json) printJson(created.payload);
     else {
@@ -457,6 +472,9 @@ async function cmdPay(opts) {
     out();
     out(`  ${bold(p.merchant ?? 'Unknown merchant')}`);
     out(`  Invoice   ${bold(`${p.invoice?.amount} ${p.invoice?.currency ?? 'USD'}`)}`);
+    if (p.provider === 'bitrefill') {
+      out(`  Bitrefill ${p.bitrefill?.invoiceId} ${dim(`→ ${p.bitrefill?.amount} USDC on Base to ${p.bitrefill?.addressMasked}`)}`);
+    }
     out(`  You send  ${bold(p.display?.amount)} on ${bold(p.display?.chain)}`);
     out(`  To        ${p.display?.payToMasked} ${dim('(full address shown after you confirm)')}`);
     if (p.display?.hasMemo) {
@@ -506,7 +524,7 @@ async function cmdPay(opts) {
 
   // --- 3. confirm phase: releases the full deposit block -------------------
   if (!opts.json) out(dim('  Confirming and releasing the deposit details… (no money moves yet)'));
-  const confirmed = await step(runCreateOrder, [...baseArgs, '--confirm']);
+  const confirmed = await step(createFlow, [...baseArgs, '--confirm']);
   if (!confirmed.payload.success) {
     if (opts.json) printJson(confirmed.payload);
     else {

@@ -40,6 +40,14 @@ prompt and it will mark which coins you can actually afford — then prints a
 deposit address for you to pay from any wallet — **no private key, no environment variable, no
 configuration** — and waits until the invoice is settled.
 
+Paying a **Bitrefill** invoice instead? Create it on Bitrefill with "USDC on
+Base", then pass its id, address and amount (Coinbase payment links and
+Bitrefill invoices are the two supported targets; Stripe is not):
+
+```bash
+npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x…> --amount 7.90 --with usdc-stellar
+```
+
 Know your coin already? Skip the question:
 
 ```bash

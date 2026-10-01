@@ -149,19 +149,33 @@ export async function preflight({
     throw new SkillError('DEPOSIT_CHANGED', 'The live deposit memo differs from the recorded one.');
   }
 
-  // 5. Expiry margins.
-  const statusNow = await invoiceStatus({ linkId: state.linkId });
-  const expiry = checkExpiry({
-    now: Date.now(),
-    chainId: source.chainId,
-    intentExpiresAt: payment?.expiresAt,
-    coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry,
-  });
-  if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
+  // 5-6. Expiry margins and payability. Coinbase orders re-read the Coinbase
+  //      resource; Bitrefill orders have no Coinbase leg, so the invoice expiry
+  //      recorded at create time takes its place and payability is the live
+  //      intent status already enforced by the reuse guard above.
+  let statusNow = null;
+  let expiry;
+  if (state.provider === 'bitrefill') {
+    expiry = checkExpiry({
+      now: Date.now(),
+      chainId: source.chainId,
+      intentExpiresAt: payment?.expiresAt,
+      coinbaseExpiry: state.bitrefill?.expiresAt ?? payment?.expiresAt,
+    });
+    if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
+  } else {
+    statusNow = await invoiceStatus({ linkId: state.linkId });
+    expiry = checkExpiry({
+      now: Date.now(),
+      chainId: source.chainId,
+      intentExpiresAt: payment?.expiresAt,
+      coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry,
+    });
+    if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
 
-  // 6. Payability revalidation immediately before signing.
-  const payable = checkPayable(statusNow, Date.now());
-  if (!payable.ok) throw new SkillError(payable.code, payable.reason, payable.derived);
+    const payable = checkPayable(statusNow, Date.now());
+    if (!payable.ok) throw new SkillError(payable.code, payable.reason, payable.derived);
+  }
 
   // 7. Blacklist: destination AND sender.
   assertNotBlacklisted(
@@ -195,7 +209,26 @@ export async function preflight({
  * by another payer in that window. Both send scripts call this immediately
  * before they broadcast.
  */
-export async function finalPayabilityCheck({ linkId, chainId, intentExpiresAt }) {
+export async function finalPayabilityCheck({ linkId, chainId, intentExpiresAt, state = null, rozoPaymentId = null }) {
+  if (state?.provider === 'bitrefill') {
+    // No Coinbase resource to re-read. Re-prove instead that the intent is
+    // still unpaid and unfunded, and that the invoice has not run out.
+    const id = rozoPaymentId ?? state.rozoPaymentId;
+    const payment = await getPayment(id);
+    const guard = reuseGuard({ payment, requested: state.source });
+    if (!guard.ok) {
+      throw new SkillError(guard.code, guard.reason, { ...guard.evidence, moneyDetected: guard.moneyDetected });
+    }
+    const expiry = checkExpiry({
+      now: Date.now(),
+      chainId,
+      intentExpiresAt: payment?.expiresAt ?? intentExpiresAt,
+      coinbaseExpiry: state.bitrefill?.expiresAt ?? payment?.expiresAt ?? intentExpiresAt,
+    });
+    if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
+    return { statusNow: null, payable: { ok: true }, expiry };
+  }
+
   const statusNow = await invoiceStatus({ linkId });
   const payable = checkPayable(statusNow, Date.now());
   if (!payable.ok) throw new SkillError(payable.code, payable.reason, payable.derived);

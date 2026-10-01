@@ -10,6 +10,10 @@ description: >
   payment-sessions/paymentSession_*) URL, on "rozo-checkout" / "pay this link
   with bitcoin", or when a user asks to top up OpenRouter credits with crypto
   and has no link yet (OpenRouter's crypto credits API returns 410 Gone).
+  Also pays a Bitrefill invoice created with "USDC on Base": triggers on
+  "pay bitrefill", "bitrefill invoice", or an invoice id plus a Base USDC
+  address and amount from Bitrefill. Supports Coinbase payment links and
+  Bitrefill invoices only (not Stripe).
 metadata:
   version: 1.1.0
 
@@ -65,6 +69,40 @@ order with a deposit address for the coin you chose, and once your deposit
 lands, a funder wallet pays the Coinbase invoice. **There is no discount** —
 `callerPays` equals the invoice amount. If a response ever shows a discount, or
 `callerPays` differs from the invoice, stop and explain; do not proceed.
+
+## Bitrefill invoice
+
+Supported targets are **Coinbase payment links** and **Bitrefill invoices**.
+Stripe checkout is not supported by this skill.
+
+1. The user (or their agent, via Bitrefill's site or MCP) creates a Bitrefill
+   invoice and chooses **USDC on Base** as the payment method. Bitrefill shows
+   an invoice id, a Base receiving address (`0x…`), an exact USDC amount and an
+   expiry.
+2. Run, with the coin the user actually holds:
+
+   ```bash
+   npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x…> --amount <USDC> \
+     --expires-at <ISO> --with usdc-stellar      # or --from stellar-usdc, usdt-solana, …
+   ```
+
+   There is no quote step: mpprouter creates a Rozo exactOut order delivering
+   exactly that USDC amount to the Bitrefill address (the skill never writes to
+   payment-api directly). The deposit you send is that amount plus bridge fees.
+3. Rails, all hard aborts: the address must be a 0x EVM address, the amount a
+   positive USDC decimal (≤ 6 dp), at least 5 minutes must remain on the
+   invoice, and neither the Bitrefill address nor the deposit address may be on
+   the compromised-address list. The router's response and the live order must
+   echo the same invoice id, address and amount (`BITREFILL_ECHO_MISMATCH`
+   otherwise) before any deposit is shown or any send happens. Re-running for
+   the same invoice resumes its order (router `DUPLICATE_INVOICE`).
+4. Same binding confirmation and `--send` rules as a Coinbase link. Status:
+   `rozo-checkout status <rozoPaymentId>` reports `settled` as soon as the Rozo
+   payout to the Bitrefill address completes (there is no Coinbase stage).
+
+Router errors to relay as-is: `BITREFILL_DISABLED`, `INVALID_ADDRESS`,
+`INVALID_AMOUNT`, `AMOUNT_OUT_OF_RANGE`, `INVOICE_EXPIRING`, `BLOCKED_ADDRESS`,
+`UNSUPPORTED_SOURCE`.
 
 ## OpenRouter top-up — when there is no link yet
 

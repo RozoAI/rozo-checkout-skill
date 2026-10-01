@@ -21857,7 +21857,7 @@ async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS } = {
     }
   }
   if (!res.ok) {
-    const code = json?.code || json?.error?.code || (typeof json?.error === "string" ? null : null) || `HTTP_${res.status}`;
+    const code = json?.code || json?.error?.code || (typeof json?.error === "string" && /^[A-Z][A-Z0-9_]+$/.test(json.error) ? json.error : null) || `HTTP_${res.status}`;
     const message = json?.message || (typeof json?.error === "string" ? json.error : json?.error?.message) || `HTTP ${res.status}`;
     throw new SkillError(code, redact(String(message)), {
       httpStatus: res.status,
@@ -22626,16 +22626,28 @@ async function preflight({
   if ((source.receiverMemo ?? null) !== (state.receiverMemo ?? null)) {
     throw new SkillError("DEPOSIT_CHANGED", "The live deposit memo differs from the recorded one.");
   }
-  const statusNow = await invoiceStatus({ linkId: state.linkId });
-  const expiry = checkExpiry({
-    now: Date.now(),
-    chainId: source.chainId,
-    intentExpiresAt: payment?.expiresAt,
-    coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry
-  });
-  if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
-  const payable = checkPayable(statusNow, Date.now());
-  if (!payable.ok) throw new SkillError(payable.code, payable.reason, payable.derived);
+  let statusNow = null;
+  let expiry;
+  if (state.provider === "bitrefill") {
+    expiry = checkExpiry({
+      now: Date.now(),
+      chainId: source.chainId,
+      intentExpiresAt: payment?.expiresAt,
+      coinbaseExpiry: state.bitrefill?.expiresAt ?? payment?.expiresAt
+    });
+    if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
+  } else {
+    statusNow = await invoiceStatus({ linkId: state.linkId });
+    expiry = checkExpiry({
+      now: Date.now(),
+      chainId: source.chainId,
+      intentExpiresAt: payment?.expiresAt,
+      coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry
+    });
+    if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
+    const payable = checkPayable(statusNow, Date.now());
+    if (!payable.ok) throw new SkillError(payable.code, payable.reason, payable.derived);
+  }
   assertNotBlacklisted(
     [
       { address: source.receiverAddress, family, role: "deposit address" },
@@ -22654,7 +22666,23 @@ async function preflight({
     statusNow
   };
 }
-async function finalPayabilityCheck({ linkId, chainId, intentExpiresAt }) {
+async function finalPayabilityCheck({ linkId, chainId, intentExpiresAt, state = null, rozoPaymentId = null }) {
+  if (state?.provider === "bitrefill") {
+    const id = rozoPaymentId ?? state.rozoPaymentId;
+    const payment = await getPayment(id);
+    const guard = reuseGuard({ payment, requested: state.source });
+    if (!guard.ok) {
+      throw new SkillError(guard.code, guard.reason, { ...guard.evidence, moneyDetected: guard.moneyDetected });
+    }
+    const expiry2 = checkExpiry({
+      now: Date.now(),
+      chainId,
+      intentExpiresAt: payment?.expiresAt ?? intentExpiresAt,
+      coinbaseExpiry: state.bitrefill?.expiresAt ?? payment?.expiresAt ?? intentExpiresAt
+    });
+    if (!expiry2.ok) throw new SkillError(expiry2.code, expiry2.reason, expiry2);
+    return { statusNow: null, payable: { ok: true }, expiry: expiry2 };
+  }
   const statusNow = await invoiceStatus({ linkId });
   const payable = checkPayable(statusNow, Date.now());
   if (!payable.ok) throw new SkillError(payable.code, payable.reason, payable.derived);
@@ -23018,7 +23046,9 @@ async function main(argv) {
   await finalPayabilityCheck({
     linkId: state.linkId,
     chainId: source.chainId,
-    intentExpiresAt: payment?.expiresAt
+    intentExpiresAt: payment?.expiresAt,
+    state,
+    rozoPaymentId
   });
   claimSend(
     rozoPaymentId,

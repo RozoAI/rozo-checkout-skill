@@ -37,6 +37,19 @@ directory (or --env-file <path>): only ROZO_CHECKOUT_* keys are read from it, it
 is parsed as text and never shell-evaluated, and the real environment wins.
 Key files and .env must be chmod 600 and untracked by git.
 
+## Bitrefill invoices
+
+Also supported: a Bitrefill invoice created with "USDC on Base" (Stripe is not supported).
+No quote step; mpprouter creates an exactOut order paying exactly that amount to the
+Bitrefill address:
+
+  npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x…> --amount 7.90 --with usdc-stellar
+
+Router call: POST {MPP}/create-invoice {"provider":"bitrefill","bitrefill":{"invoiceId","address",
+"amount","expiresAt"},"source":{"chainId","tokenSymbol"}}. Verify the response echoes the same
+invoiceId/address/amount before showing the deposit (from GET payments/<rozoPaymentId>).
+409 DUPLICATE_INVOICE returns the existing rozoPaymentId: resume it. Settled = payout completed.
+
 ## Local wallet setup for --send (not needed for the default keyless path)
 
 .env keys (only ROZO_CHECKOUT_* are read; real env wins; chmod 600; gitignore):
