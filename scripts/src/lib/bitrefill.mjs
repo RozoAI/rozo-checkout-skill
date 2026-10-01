@@ -229,3 +229,14 @@ export function providerFromPayment(payment) {
   if (meta) return String(meta).toLowerCase();
   return null;
 }
+
+/** Earliest of the given deadlines as ISO, ignoring blanks; null if none parse. */
+export function earliestExpiry(...values) {
+  const ms = values.map((v) => parseDeadline(v)).filter((v) => v !== null);
+  return ms.length ? new Date(Math.min(...ms)).toISOString() : null;
+}
+
+/** The invoice deadline the intent itself carries, if the router stored one. */
+export function intentBitrefillExpiry(payment) {
+  return payment?.metadata?.bitrefillExpiresAt ?? null;
+}

@@ -49,6 +49,8 @@ import {
   explainRouterError,
   checkBitrefillExpiry,
   BITREFILL_MIN_PAY_WINDOW_MS,
+  earliestExpiry,
+  intentBitrefillExpiry,
 } from './lib/bitrefill.mjs';
 
 /** Local-record key for a Bitrefill invoice (records have no Coinbase link). */
@@ -179,8 +181,15 @@ async function main(argv) {
   }
 
   // --- 6. expiry ------------------------------------------------------------
-  // Expiry comes from the Bitrefill invoice only, never from the intent.
-  const invoiceExpiry = invoice.expiresAt;
+  // Expiry comes from the Bitrefill invoice only, never from the intent's own
+  // expiresAt. A resume can never extend it: take the earliest of what this
+  // machine recorded, what the intent recorded, and what was just supplied.
+  const invoiceExpiry = earliestExpiry(
+    invoice.expiresAt,
+    local?.bitrefill?.expiresAt,
+    priorRecord?.bitrefill?.expiresAt,
+    intentBitrefillExpiry(payment),
+  );
   const lightning = String(source.chainId) === 'lightning';
   const expiry = checkBitrefillExpiry(invoiceExpiry, Date.now());
   if (!expiry.ok) {
@@ -198,13 +207,12 @@ async function main(argv) {
   }
 
   // --- 8. persist, then print ---------------------------------------------
-  const bitrefill = { ...invoice };
+  const bitrefill = { ...invoice, expiresAt: invoiceExpiry };
   createOrderRecord({
     rozoPaymentId,
     provider: PROVIDER_BITREFILL,
     bitrefill,
     linkId: bitrefillRecordKey(invoice.invoiceId),
-    paymentLink: null,
     merchant: 'Bitrefill',
     invoiceAmount: invoice.amount,
     source: { chainId: source.chainId, tokenSymbol: source.tokenSymbol },

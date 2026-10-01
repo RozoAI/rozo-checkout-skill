@@ -400,3 +400,59 @@ test('status without a local record detects bitrefill from the orderId prefix', 
     assert.ok(!calls.some((c) => c.url.includes('invoice-status')));
   });
 });
+
+test('resume never extends the deadline (local record, intent metadata, supplied)', async () => {
+  await withEnv(
+    [
+      ['/create-invoice', () => json({ ok: false, error: 'DUPLICATE_INVOICE', message: 'exists', rozoPaymentId: ID }, 409)],
+      [`/payments/${ID}`, () => json(readFixture('payment-bitrefill-unpaid-stellar.json'))],
+    ],
+    async () => {
+      const early = inMin(10);
+      const first = [...ARGS];
+      first[first.indexOf('--expires-at') + 1] = early;
+      assert.equal((await capture(() => runBitrefill(first))).exitCode, 0);
+      // A later --expires-at on resume must not move the stored deadline.
+      const later = [...ARGS];
+      later[later.indexOf('--expires-at') + 1] = inMin(25);
+      const r = await capture(() => runBitrefill(later));
+      assert.equal(r.payload.expiry.invoiceExpiresAt, early);
+      assert.equal(readState(ID).bitrefill.expiresAt, early);
+    },
+  );
+  const live = clone(readFixture('payment-bitrefill-unpaid-stellar.json'));
+  const metaExp = inMin(3);
+  live.metadata = { bitrefillExpiresAt: metaExp };
+  await withEnv(
+    [['/create-invoice', () => json(readFixture('bitrefill-create-response.json'))], [`/payments/${ID}`, () => json(live)]],
+    async () => {
+      const r = await capture(() => runBitrefill(ARGS));
+      assert.equal(r.payload.expiry.invoiceExpiresAt, metaExp);
+      assert.equal(JSON.stringify(r.payload).includes('paymentLink'), false, 'no Rozo hosted link for bitrefill');
+    },
+  );
+});
+
+test('status: bitrefill deadline unknown is not payable; past deadline is invoice_expired', async () => {
+  const live = clone(readFixture('payment-bitrefill-unpaid-stellar.json'));
+  live.orderId = 'bitrefill_x';
+  await withEnv([[`/payments/${ID}`, () => json(live)]], async () => {
+    const { payload } = await capture(() => runStatus(['--rozo-payment-id', ID]));
+    assert.equal(payload.state, 'deadline_unknown');
+    assert.equal(payload.expiry.deadlineUnknown, true);
+  });
+  const past = clone(live);
+  past.metadata = { bitrefillExpiresAt: '2020-01-01T00:00:00Z' };
+  await withEnv([[`/payments/${ID}`, () => json(past)]], async () => {
+    const { payload } = await capture(() => runStatus(['--rozo-payment-id', ID]));
+    assert.equal(payload.state, 'invoice_expired');
+    assert.equal(payload.terminal, true);
+  });
+  const ok = clone(live);
+  ok.metadata = { bitrefillExpiresAt: inMin(15) };
+  await withEnv([[`/payments/${ID}`, () => json(ok)]], async () => {
+    const { payload } = await capture(() => runStatus(['--rozo-payment-id', ID]));
+    assert.equal(payload.state, 'awaiting_deposit');
+    assert.equal(payload.expiry.expiresAt, ok.metadata.bitrefillExpiresAt);
+  });
+});

@@ -318,7 +318,7 @@ function presetFor(chainId, tokenSymbol) {
 function stateLabel(state) {
   if (state === 'settled') return green(bold(state));
   if (['underpaid', 'stuck_after_payment', 'unknown'].includes(state)) return red(bold(state));
-  if (state === 'expired_unfunded') return yellow(bold(state));
+  if (['expired_unfunded', 'invoice_expired', 'deadline_unknown'].includes(state)) return yellow(bold(state));
   return bold(state);
 }
 
