@@ -394,6 +394,10 @@ The full list of what this refuses to do, and why, is in
 
 ## Changelog
 
+- **0.1.12**: pay Bitrefill invoices. `pay --bitrefill-invoice <id> --to <0x…>
+  --amount <USDC> --expires-at <ISO>` creates a Rozo exactOut order through
+  mpprouter that delivers the exact USDC on Base straight to the Bitrefill
+  invoice address, payable from Stellar USDC or any supported coin.
 - **0.1.11**: each order now carries `attribution.client`
   (`rozo-checkout-skill/<version>`) so skill-created orders can be told apart
   from the web checkout. Installable as a Claude Code plugin
