@@ -166,12 +166,25 @@ export function createOrderRecord(record) {
   return withLock(() => createOrderRecordUnlocked(record));
 }
 
+/** A stored invoice expiry may only move earlier, never later. */
+function mergeBitrefill(prev, next) {
+  if (!next) return prev ?? null;
+  if (!prev?.expiresAt || !next.expiresAt) return { ...next, expiresAt: next.expiresAt ?? prev?.expiresAt ?? null };
+  const a = Date.parse(prev.expiresAt);
+  const b = Date.parse(next.expiresAt);
+  return { ...next, expiresAt: Number.isFinite(a) && (!Number.isFinite(b) || a < b) ? prev.expiresAt : next.expiresAt };
+}
+
 function createOrderRecordUnlocked(record) {
   const { rozoPaymentId } = record;
   const existing = readState(rozoPaymentId);
   const next = {
     version: 1,
     rozoPaymentId,
+    // 'coinbase' (default, historical records) or 'bitrefill'. Drives which
+    // payability checks presend and status run.
+    provider: record.provider ?? existing?.provider ?? 'coinbase',
+    bitrefill: mergeBitrefill(existing?.bitrefill, record.bitrefill),
     linkId: record.linkId,
     paymentLink: record.paymentLink ?? null,
     merchant: record.merchant ?? null,

@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "provider": "bitrefill",
+  "invoiceId": "bfr-test-7f3a2",
+  "rozoPaymentId": "77777777-8888-4999-8aaa-bbbbbbbbbbbb",
+  "destination": {
+    "chainId": "8453",
+    "tokenSymbol": "USDC",
+    "address": "0x1234567890abcdef1234567890ABCDEF12345678",
+    "amount": "7.90"
+  },
+  "expiresAt": "2099-01-01T00:00:00.000Z"
+}

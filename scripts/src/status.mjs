@@ -23,19 +23,50 @@ import { invoiceStatus, getPayment } from './lib/api.mjs';
 import { chainName, formatAmount } from './lib/amounts.mjs';
 import { classifyStatus } from './lib/guards.mjs';
 import { formatRemaining } from './lib/expiry.mjs';
-import { findByLinkId } from './lib/state.mjs';
+import { findByLinkId, readState } from './lib/state.mjs';
+import { providerFromPayment, earliestExpiry, intentBitrefillExpiry } from './lib/bitrefill.mjs';
 
 const POLL_INTERVAL_MS = 10_000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function snapshot({ rozoPaymentId, linkId }) {
+/** Provider from the flag, else from this machine's order record. */
+function resolveProvider(explicit, rozoPaymentId) {
+  if (explicit) return String(explicit).toLowerCase();
+  if (rozoPaymentId && isRozoPaymentId(rozoPaymentId)) {
+    try {
+      return readState(rozoPaymentId)?.provider ?? null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
+  let provider = resolveProvider(explicitProvider, rozoPaymentId);
+  // No flag and no local record: ask the intent itself first, so a Bitrefill
+  // order created elsewhere is still classified correctly.
+  let prefetched = null;
+  if (!provider && rozoPaymentId && isRozoPaymentId(rozoPaymentId)) {
+    try {
+      prefetched = await getPayment(rozoPaymentId);
+      provider = providerFromPayment(prefetched);
+    } catch {
+      prefetched = null;
+    }
+  }
+  provider = provider === 'bitrefill' ? 'bitrefill' : 'coinbase';
   let status = null;
   let statusError = null;
-  try {
-    status = await invoiceStatus({ linkId, rozoPaymentId });
-  } catch (err) {
-    statusError = { code: err.code, message: err.message };
+  // A Bitrefill order has no Coinbase resource and no router fulfilment
+  // state; the intent alone is authoritative.
+  if (provider !== 'bitrefill') {
+    try {
+      status = await invoiceStatus({ linkId, rozoPaymentId });
+    } catch (err) {
+      statusError = { code: err.code, message: err.message };
+    }
   }
 
   // The backend only echoes rozo_payment_id when it was given one (a
@@ -54,7 +85,9 @@ async function snapshot({ rozoPaymentId, linkId }) {
 
   let payment = null;
   let paymentError = null;
-  if (id && isRozoPaymentId(id)) {
+  if (prefetched && id === rozoPaymentId) {
+    payment = prefetched;
+  } else if (id && isRozoPaymentId(id)) {
     try {
       payment = await getPayment(id);
     } catch (err) {
@@ -62,28 +95,59 @@ async function snapshot({ rozoPaymentId, linkId }) {
     }
   }
 
-  const viewsFailed = Boolean(statusError) && !payment;
+  const viewsFailed = provider === 'bitrefill' ? !payment : Boolean(statusError) && !payment;
   const verdict = classifyStatus({
     payment: payment || status?.rozoPayment || {},
     routerState: status?.routerState,
     coinbase: status?.coinbase,
     viewsFailed,
+    provider,
   });
 
   const source = payment?.source || status?.rozoPayment?.source || {};
 
+  // Bitrefill: the invoice deadline is the only clock. Unknown → never call
+  // the order payable; past → invoice_expired (unless money already moved).
+  let bitrefillExpiry = null;
+  let state = verdict.state;
+  let terminal = verdict.terminal;
+  let detail = verdict.detail;
+  if (provider === 'bitrefill') {
+    let local = null;
+    try {
+      local = id && isRozoPaymentId(id) ? readState(id) : null;
+    } catch {
+      local = null;
+    }
+    bitrefillExpiry = earliestExpiry(local?.bitrefill?.expiresAt, intentBitrefillExpiry(payment));
+    if (!verdict.moneyDetected && ['awaiting_deposit', 'expired_unfunded'].includes(verdict.state)) {
+      const ms = bitrefillExpiry ? Date.parse(bitrefillExpiry) : NaN;
+      if (Number.isFinite(ms) && ms <= Date.now()) {
+        state = 'invoice_expired';
+        terminal = true;
+        detail = 'The Bitrefill invoice has expired. Do NOT fund this order; create a fresh invoice.';
+      } else if (!bitrefillExpiry && verdict.state === 'awaiting_deposit') {
+        state = 'deadline_unknown';
+        detail =
+          'The Bitrefill invoice deadline is unknown on this machine, so this order is NOT shown as ' +
+          'payable. Re-run pay with the invoice details, or create a fresh invoice.';
+      }
+    }
+  }
+
   return {
+    provider,
     rozoPaymentId: id,
     rozoPaymentIdSource: idSource,
     // Without the authoritative payment object we are reading a partial view.
     authoritativeView: Boolean(payment),
     linkId: linkId || status?.pl_id || null,
-    state: verdict.state,
+    state,
     unknown: verdict.unknown,
     moneyDetected: verdict.moneyDetected,
-    terminal: verdict.terminal,
+    terminal,
     escalate: verdict.escalate,
-    detail: verdict.detail,
+    detail,
     backend: {
       paymentStatus: payment?.status ?? status?.rozoPayment?.status ?? null,
       routerStatus: verdict.routerStatus,
@@ -100,7 +164,13 @@ async function snapshot({ rozoPaymentId, linkId }) {
       chain: source.chainId ? chainName(source.chainId) : null,
     },
     expiry: (() => {
-      const iso = payment?.expiresAt ?? status?.rozoPayment?.expiresAt ?? null;
+      if (provider === 'bitrefill' && !bitrefillExpiry) {
+        return { expiresAt: null, expiresIn: null, msRemaining: null, deadlineUnknown: true };
+      }
+      const iso =
+        provider === 'bitrefill'
+          ? bitrefillExpiry
+          : (payment?.expiresAt ?? status?.rozoPayment?.expiresAt ?? null);
       if (!iso) return { expiresAt: null, expiresIn: null, msRemaining: null };
       const ms = Date.parse(iso) - Date.now();
       return {
@@ -122,6 +192,13 @@ async function main(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = args['rozo-payment-id'] || (isRozoPaymentId(args._[0]) ? args._[0] : null);
   const linkId = args['link-id'] || (!rozoPaymentId ? args._[0] : null);
+  const provider = args.provider ? String(args.provider) : null;
+  if (provider && provider !== 'bitrefill' && provider !== 'coinbase') {
+    usage('--provider must be coinbase or bitrefill');
+  }
+  if (provider === 'bitrefill' && !rozoPaymentId) {
+    usage('A Bitrefill order is tracked by --rozo-payment-id <uuid>.');
+  }
   if (!rozoPaymentId && !linkId) {
     usage('Required: --rozo-payment-id <uuid> and/or --link-id <pl_* | paymentSession_*>');
   }
@@ -130,12 +207,12 @@ async function main(argv) {
   const timeoutMs = Math.max(0, Number(args.timeout ?? 600) * 1000);
   const deadline = Date.now() + timeoutMs;
 
-  let result = await snapshot({ rozoPaymentId, linkId });
+  let result = await snapshot({ rozoPaymentId, linkId, provider });
   const history = [{ at: new Date().toISOString(), state: result.state }];
 
   while (watch && !result.terminal && !result.escalate && !result.unknown && Date.now() < deadline) {
     await sleep(POLL_INTERVAL_MS);
-    const next = await snapshot({ rozoPaymentId: result.rozoPaymentId || rozoPaymentId, linkId });
+    const next = await snapshot({ rozoPaymentId: result.rozoPaymentId || rozoPaymentId, linkId, provider });
     if (next.state !== result.state) history.push({ at: new Date().toISOString(), state: next.state });
     result = next;
   }
@@ -151,7 +228,10 @@ async function main(argv) {
       : !result.authoritativeView
         ? 'Only the fulfilment view was readable; the pay-in view is unavailable, so the ' +
           'money-detected rule cannot be enforced. Pass --rozo-payment-id for a complete answer.'
-        : result.state === 'expired_unfunded'
+        : (result.state === 'expired_unfunded' || result.state === 'invoice_expired') && result.provider === 'bitrefill'
+          ? 'Nothing was funded, so nothing was lost. Create a fresh Bitrefill invoice and run ' +
+            'rozo-checkout pay --bitrefill-invoice <id> --to <0x…> --amount <USDC> --with <coin>'
+          : result.state === 'expired_unfunded'
           ? 'Nothing was funded, so nothing was lost. Start a fresh order with: ' +
             'rozo-checkout pay <coinbase-link> --with <coin>  (or create-order.js ' +
             '--url <link> --chain <id> --token <SYMBOL>)'

@@ -46,7 +46,7 @@ async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS } = {
     const code =
       json?.code ||
       json?.error?.code ||
-      (typeof json?.error === 'string' ? null : null) ||
+      (typeof json?.error === 'string' && /^[A-Z][A-Z0-9_]+$/.test(json.error) ? json.error : null) ||
       `HTTP_${res.status}`;
     const message =
       json?.message ||

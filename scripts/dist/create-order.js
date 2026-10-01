@@ -193,7 +193,7 @@ async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS } = {
     }
   }
   if (!res.ok) {
-    const code = json?.code || json?.error?.code || (typeof json?.error === "string" ? null : null) || `HTTP_${res.status}`;
+    const code = json?.code || json?.error?.code || (typeof json?.error === "string" && /^[A-Z][A-Z0-9_]+$/.test(json.error) ? json.error : null) || `HTTP_${res.status}`;
     const message = json?.message || (typeof json?.error === "string" ? json.error : json?.error?.message) || `HTTP ${res.status}`;
     throw new SkillError(code, redact(String(message)), {
       httpStatus: res.status,
@@ -1058,12 +1058,23 @@ function readState(rozoPaymentId) {
 function createOrderRecord(record) {
   return withLock(() => createOrderRecordUnlocked(record));
 }
+function mergeBitrefill(prev, next) {
+  if (!next) return prev ?? null;
+  if (!prev?.expiresAt || !next.expiresAt) return { ...next, expiresAt: next.expiresAt ?? prev?.expiresAt ?? null };
+  const a = Date.parse(prev.expiresAt);
+  const b = Date.parse(next.expiresAt);
+  return { ...next, expiresAt: Number.isFinite(a) && (!Number.isFinite(b) || a < b) ? prev.expiresAt : next.expiresAt };
+}
 function createOrderRecordUnlocked(record) {
   const { rozoPaymentId } = record;
   const existing = readState(rozoPaymentId);
   const next = {
     version: 1,
     rozoPaymentId,
+    // 'coinbase' (default, historical records) or 'bitrefill'. Drives which
+    // payability checks presend and status run.
+    provider: record.provider ?? existing?.provider ?? "coinbase",
+    bitrefill: mergeBitrefill(existing?.bitrefill, record.bitrefill),
     linkId: record.linkId,
     paymentLink: record.paymentLink ?? null,
     merchant: record.merchant ?? null,
