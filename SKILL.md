@@ -36,6 +36,7 @@ metadata:
         - ROZO_CHECKOUT_MPP_BASE         # endpoint overrides (testing/self-host)
         - ROZO_CHECKOUT_INTENTS_BASE
         - ROZO_CHECKOUT_INTENT_API
+        - ROZO_CHECKOUT_UTM_SOURCE       # optional channel label for reporting
     filesystem:
       - "~/.rozo-checkout/  (state + prefs + optional .env; created by this tool)"
       - ".env in the working directory or a --env-file path (ROZO_CHECKOUT_* keys only)"

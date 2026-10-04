@@ -224,6 +224,14 @@ function postJson(url, body, opts) {
   return request("POST", url, { ...opts, body });
 }
 
+// scripts/src/lib/utm.mjs
+function normalizeUtmSource(value) {
+  if (typeof value !== "string") return null;
+  const s = value.trim().toLowerCase();
+  if (!s || s.length > 100 || !/^[a-z0-9._-]+$/.test(s)) return null;
+  return s;
+}
+
 // scripts/src/lib/api.mjs
 var PKG_VERSION = (() => {
   const requireFrom = createRequire(import.meta.url);
@@ -239,18 +247,23 @@ var PKG_VERSION = (() => {
 var MPP_BASE = process.env.ROZO_CHECKOUT_MPP_BASE || "https://apiserver.mpprouter.dev/v1/services/rozo-agent-api";
 var CLIENT_LABEL = `rozo-checkout-cli/${PKG_VERSION}`;
 var ATTRIBUTION_CLIENT = `rozo-checkout-skill/${PKG_VERSION}`;
+function buildAttribution({ utmSource } = {}) {
+  const raw = utmSource !== void 0 ? utmSource : process.env.ROZO_CHECKOUT_UTM_SOURCE;
+  const utm_source = normalizeUtmSource(raw);
+  return { client: ATTRIBUTION_CLIENT, ...utm_source ? { utm_source } : {} };
+}
 var INTENTS_BASE = process.env.ROZO_CHECKOUT_INTENTS_BASE || "https://intentapiv4.rozo.ai/functions/v1/payment-api";
 async function quoteInvoice({ url, linkId }) {
   const body = url ? { url } : { payment_id: linkId };
   return postJson(`${MPP_BASE}/quote-invoice`, body);
 }
-async function createInvoice({ url, linkId, source, quoteReceipt }) {
+async function createInvoice({ url, linkId, source, quoteReceipt, utmSource }) {
   const body = {
     ...url ? { url } : { payment_id: linkId },
     source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
     ...quoteReceipt ? { quoteReceipt } : {},
     client: CLIENT_LABEL,
-    attribution: { client: ATTRIBUTION_CLIENT }
+    attribution: buildAttribution({ utmSource })
   };
   return postJson(`${MPP_BASE}/create-invoice`, body);
 }
@@ -1169,7 +1182,8 @@ async function main(argv) {
   const created = await createInvoice({
     url: String(url),
     source: requested,
-    quoteReceipt
+    quoteReceipt,
+    utmSource: typeof args["utm-source"] === "string" ? args["utm-source"] : void 0
   });
   if (!created?.rozoPaymentId) {
     throw new SkillError("CREATE_FAILED", "create-invoice returned no rozoPaymentId.", {

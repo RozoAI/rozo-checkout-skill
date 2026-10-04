@@ -116,6 +116,8 @@ the optional `--send` flag signs locally: on Solana it uses the
 encrypted JSON keystore whose passphrase is prompted. A raw key in the
 environment (or a gitignored `.env`) still works for unattended automation.
 
+Distributing this CLI? `--utm-source <label>` (or `ROZO_CHECKOUT_UTM_SOURCE`) is an optional channel label for reporting; no identity, no privilege.
+
 <details>
 <summary><b>Set up a local wallet for <code>--send</code></b> — .env template and per-wallet export steps</summary>
 
@@ -394,6 +396,9 @@ The full list of what this refuses to do, and why, is in
 
 ## Changelog
 
+- **0.1.13**: optional `--utm-source <label>` / `ROZO_CHECKOUT_UTM_SOURCE`
+  adds `attribution.utm_source` to created orders so distribution channels can
+  be measured. Invalid values are dropped, never failing an order.
 - **0.1.12**: pay Bitrefill invoices. `pay --bitrefill-invoice <id> --to <0x…>
   --amount <USDC> --expires-at <ISO>` creates a Rozo exactOut order through
   mpprouter that delivers the exact USDC on Base straight to the Bitrefill
