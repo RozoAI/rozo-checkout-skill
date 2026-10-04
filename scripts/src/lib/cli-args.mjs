@@ -7,6 +7,7 @@
  */
 
 import { SUPPORTED_SOURCES, isSupportedSource, chainName } from './amounts.mjs';
+import { normalizeUtmSource } from './utm.mjs';
 
 export const COMMANDS = ['pay', 'quote', 'status', 'help', 'version'];
 
@@ -175,6 +176,8 @@ const VALUE_FLAGS = new Set([
   'amount',
   'expires-at',
   'provider',
+  // Optional channel label for reporting (pay, quote)
+  'utm-source',
 ]);
 
 /**
@@ -260,9 +263,22 @@ export function parseCliArgs(argv) {
   const target = positional[1];
   const json = Boolean(flags.json);
 
+  // Optional channel label. Validated here so a typo is reported before any
+  // order exists; undefined means "fall back to ROZO_CHECKOUT_UTM_SOURCE".
+  let utmSource;
+  if (flags['utm-source'] !== undefined && (command === 'pay' || command === 'quote')) {
+    utmSource = normalizeUtmSource(String(flags['utm-source']));
+    if (!utmSource) {
+      throw new CliError(
+        'BAD_VALUE',
+        '--utm-source must be 1-100 characters of a-z, 0-9, ".", "_" or "-", starting with a letter or digit.',
+      );
+    }
+  }
+
   if (command === 'quote') {
     if (!target) throw new CliError('MISSING_TARGET', 'Usage: rozo-checkout quote <coinbase-link>');
-    return { command, target, json };
+    return { command, target, json, ...(utmSource ? { utmSource } : {}) };
   }
 
   if (command === 'status') {
@@ -373,6 +389,7 @@ export function parseCliArgs(argv) {
     fresh: flags.fresh === true,
     keyfile: flags.keyfile,
     envFile: flags['env-file'],
+    ...(utmSource ? { utmSource } : {}),
   };
 }
 
@@ -423,6 +440,8 @@ OPTIONS
                   gets signed.
   --fresh         ignore the remembered wallet address and coin for this run
   --rpc <url>     override the RPC endpoint for --send
+  --utm-source <s>  optional channel label for reporting; no identity, no
+                  privilege. Overrides ROZO_CHECKOUT_UTM_SOURCE.
   --help, -h      this text
   --version, -v   print the version
 

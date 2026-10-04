@@ -112,6 +112,7 @@ async function main(argv) {
     url: String(url),
     source: requested,
     quoteReceipt,
+    utmSource: typeof args['utm-source'] === 'string' ? args['utm-source'] : undefined,
   });
   if (!created?.rozoPaymentId) {
     throw new SkillError('CREATE_FAILED', 'create-invoice returned no rozoPaymentId.', {

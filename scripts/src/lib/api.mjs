@@ -16,6 +16,7 @@ import { createRequire } from 'node:module';
 
 import { getJson, postJson } from './http.mjs';
 import { SkillError } from './output.mjs';
+import { normalizeUtmSource } from './utm.mjs';
 
 // This module is published bundled into scripts/dist/, one directory shallower
 // than its home at scripts/src/lib/, so package.json sits at a different depth
@@ -62,6 +63,17 @@ export const CLIENT_LABEL = `rozo-checkout-cli/${PKG_VERSION}`;
  */
 export const ATTRIBUTION_CLIENT = `rozo-checkout-skill/${PKG_VERSION}`;
 
+/**
+ * The `attribution` object sent on create-invoice. An explicit `utmSource`
+ * (the --utm-source flag) wins over ROZO_CHECKOUT_UTM_SOURCE; an invalid or
+ * empty value omits the key rather than falling back or failing.
+ */
+export function buildAttribution({ utmSource } = {}) {
+  const raw = utmSource !== undefined ? utmSource : process.env.ROZO_CHECKOUT_UTM_SOURCE;
+  const utm_source = normalizeUtmSource(raw);
+  return { client: ATTRIBUTION_CLIENT, ...(utm_source ? { utm_source } : {}) };
+}
+
 export const INTENTS_BASE =
   process.env.ROZO_CHECKOUT_INTENTS_BASE ||
   'https://intentapiv4.rozo.ai/functions/v1/payment-api';
@@ -76,13 +88,13 @@ export async function quoteInvoice({ url, linkId }) {
 }
 
 /** Step 4. Creates (or reuses) the Rozo intent for this Coinbase link. */
-export async function createInvoice({ url, linkId, source, quoteReceipt }) {
+export async function createInvoice({ url, linkId, source, quoteReceipt, utmSource }) {
   const body = {
     ...(url ? { url } : { payment_id: linkId }),
     source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
     ...(quoteReceipt ? { quoteReceipt } : {}),
     client: CLIENT_LABEL,
-    attribution: { client: ATTRIBUTION_CLIENT },
+    attribution: buildAttribution({ utmSource }),
   };
   return postJson(`${MPP_BASE}/create-invoice`, body);
 }
@@ -93,7 +105,7 @@ export async function createInvoice({ url, linkId, source, quoteReceipt }) {
  * intent delivering exactly `amount` USDC on Base to `address`. Deposit
  * details then come from getPayment(rozoPaymentId) as usual.
  */
-export async function createBitrefillInvoice({ invoice, source }) {
+export async function createBitrefillInvoice({ invoice, source, utmSource }) {
   const body = {
     provider: 'bitrefill',
     bitrefill: {
@@ -104,7 +116,7 @@ export async function createBitrefillInvoice({ invoice, source }) {
     },
     source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
     client: CLIENT_LABEL,
-    attribution: { client: ATTRIBUTION_CLIENT },
+    attribution: buildAttribution({ utmSource }),
   };
   return postJson(`${MPP_BASE}/create-invoice`, body);
 }

@@ -403,6 +403,7 @@ async function cmdPay(opts) {
 
   const { chainId, tokenSymbol } = opts.source;
   const createFlow = opts.bitrefill ? runCreateBitrefill : runCreateOrder;
+  const utmArgs = opts.utmSource ? ['--utm-source', opts.utmSource] : [];
   const baseArgs = opts.bitrefill
     ? [
         '--invoice-id', opts.bitrefill.invoiceId,
@@ -411,8 +412,9 @@ async function cmdPay(opts) {
         ...(opts.bitrefill.expiresAt ? ['--expires-at', opts.bitrefill.expiresAt] : []),
         '--chain', chainId,
         '--token', tokenSymbol,
+        ...utmArgs,
       ]
-    : ['--url', opts.target, '--chain', chainId, '--token', tokenSymbol];
+    : ['--url', opts.target, '--chain', chainId, '--token', tokenSymbol, ...utmArgs];
 
   // --- 0. Mode B preflight: can this machine actually sign? ----------------
   // Resolving the key source is local and cheap, but it used to happen inside

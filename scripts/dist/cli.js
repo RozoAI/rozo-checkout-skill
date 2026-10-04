@@ -41704,6 +41704,14 @@ function isSupportedSource(chainId, tokenSymbol) {
   return SUPPORTED_SOURCES.some((s) => s.chainId === cid && s.tokens.includes(sym));
 }
 
+// scripts/src/lib/utm.mjs
+function normalizeUtmSource(value) {
+  if (typeof value !== "string") return null;
+  const s = value.trim().toLowerCase();
+  if (!s || s.length > 100 || !/^[a-z0-9][a-z0-9._-]*$/.test(s)) return null;
+  return s;
+}
+
 // scripts/src/lib/cli-args.mjs
 var COMMANDS = ["pay", "quote", "status", "help", "version"];
 var CHAIN_ALIASES = {
@@ -41834,7 +41842,9 @@ var VALUE_FLAGS = /* @__PURE__ */ new Set([
   "to",
   "amount",
   "expires-at",
-  "provider"
+  "provider",
+  // Optional channel label for reporting (pay, quote)
+  "utm-source"
 ]);
 function resolveFromPreset(value) {
   try {
@@ -41903,9 +41913,19 @@ function parseCliArgs(argv) {
   }
   const target = positional[1];
   const json = Boolean(flags.json);
+  let utmSource;
+  if (flags["utm-source"] !== void 0 && (command === "pay" || command === "quote")) {
+    utmSource = normalizeUtmSource(String(flags["utm-source"]));
+    if (!utmSource) {
+      throw new CliError(
+        "BAD_VALUE",
+        '--utm-source must be 1-100 characters of a-z, 0-9, ".", "_" or "-", starting with a letter or digit.'
+      );
+    }
+  }
   if (command === "quote") {
     if (!target) throw new CliError("MISSING_TARGET", "Usage: rozo-checkout quote <coinbase-link>");
-    return { command, target, json };
+    return { command, target, json, ...utmSource ? { utmSource } : {} };
   }
   if (command === "status") {
     if (!target) {
@@ -42000,7 +42020,8 @@ function parseCliArgs(argv) {
     payer: flags.payer,
     fresh: flags.fresh === true,
     keyfile: flags.keyfile,
-    envFile: flags["env-file"]
+    envFile: flags["env-file"],
+    ...utmSource ? { utmSource } : {}
   };
 }
 var HELP = `rozo-checkout \u2014 pay a Coinbase Payment Link or a Bitrefill invoice
@@ -42050,6 +42071,8 @@ OPTIONS
                   gets signed.
   --fresh         ignore the remembered wallet address and coin for this run
   --rpc <url>     override the RPC endpoint for --send
+  --utm-source <s>  optional channel label for reporting; no identity, no
+                  privilege. Overrides ROZO_CHECKOUT_UTM_SOURCE.
   --help, -h      this text
   --version, -v   print the version
 
@@ -54489,22 +54512,27 @@ var PKG_VERSION = (() => {
 var MPP_BASE = process.env.ROZO_CHECKOUT_MPP_BASE || "https://apiserver.mpprouter.dev/v1/services/rozo-agent-api";
 var CLIENT_LABEL = `rozo-checkout-cli/${PKG_VERSION}`;
 var ATTRIBUTION_CLIENT = `rozo-checkout-skill/${PKG_VERSION}`;
+function buildAttribution({ utmSource } = {}) {
+  const raw = utmSource !== void 0 ? utmSource : process.env.ROZO_CHECKOUT_UTM_SOURCE;
+  const utm_source = normalizeUtmSource(raw);
+  return { client: ATTRIBUTION_CLIENT, ...utm_source ? { utm_source } : {} };
+}
 var INTENTS_BASE = process.env.ROZO_CHECKOUT_INTENTS_BASE || "https://intentapiv4.rozo.ai/functions/v1/payment-api";
 async function quoteInvoice({ url, linkId }) {
   const body = url ? { url } : { payment_id: linkId };
   return postJson(`${MPP_BASE}/quote-invoice`, body);
 }
-async function createInvoice({ url, linkId, source, quoteReceipt }) {
+async function createInvoice({ url, linkId, source, quoteReceipt, utmSource }) {
   const body = {
     ...url ? { url } : { payment_id: linkId },
     source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
     ...quoteReceipt ? { quoteReceipt } : {},
     client: CLIENT_LABEL,
-    attribution: { client: ATTRIBUTION_CLIENT }
+    attribution: buildAttribution({ utmSource })
   };
   return postJson(`${MPP_BASE}/create-invoice`, body);
 }
-async function createBitrefillInvoice({ invoice, source }) {
+async function createBitrefillInvoice({ invoice, source, utmSource }) {
   const body = {
     provider: "bitrefill",
     bitrefill: {
@@ -54515,7 +54543,7 @@ async function createBitrefillInvoice({ invoice, source }) {
     },
     source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
     client: CLIENT_LABEL,
-    attribution: { client: ATTRIBUTION_CLIENT }
+    attribution: buildAttribution({ utmSource })
   };
   return postJson(`${MPP_BASE}/create-invoice`, body);
 }
@@ -55101,7 +55129,8 @@ async function main2(argv) {
   const created = await createInvoice({
     url: String(url),
     source: requested,
-    quoteReceipt
+    quoteReceipt,
+    utmSource: typeof args["utm-source"] === "string" ? args["utm-source"] : void 0
   });
   if (!created?.rozoPaymentId) {
     throw new SkillError("CREATE_FAILED", "create-invoice returned no rozoPaymentId.", {
@@ -55552,7 +55581,11 @@ async function main3(argv) {
   let rozoPaymentId;
   let resumed = false;
   try {
-    created = await createBitrefillInvoice({ invoice, source: requested });
+    created = await createBitrefillInvoice({
+      invoice,
+      source: requested,
+      utmSource: typeof args["utm-source"] === "string" ? args["utm-source"] : void 0
+    });
   } catch (err) {
     const existing = duplicateInvoicePaymentId(err);
     if (!existing) throw explainRouterError(err);
@@ -57204,6 +57237,7 @@ async function cmdPay(opts) {
   }
   const { chainId, tokenSymbol } = opts.source;
   const createFlow = opts.bitrefill ? run3 : run2;
+  const utmArgs = opts.utmSource ? ["--utm-source", opts.utmSource] : [];
   const baseArgs = opts.bitrefill ? [
     "--invoice-id",
     opts.bitrefill.invoiceId,
@@ -57215,8 +57249,9 @@ async function cmdPay(opts) {
     "--chain",
     chainId,
     "--token",
-    tokenSymbol
-  ] : ["--url", opts.target, "--chain", chainId, "--token", tokenSymbol];
+    tokenSymbol,
+    ...utmArgs
+  ] : ["--url", opts.target, "--chain", chainId, "--token", tokenSymbol, ...utmArgs];
   if (opts.send) {
     const family = chainFamily(chainId);
     if (family === "evm" || family === "solana") {

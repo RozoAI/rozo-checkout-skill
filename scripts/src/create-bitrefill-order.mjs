@@ -112,7 +112,11 @@ async function main(argv) {
   let rozoPaymentId;
   let resumed = false;
   try {
-    created = await createBitrefillInvoice({ invoice, source: requested });
+    created = await createBitrefillInvoice({
+      invoice,
+      source: requested,
+      utmSource: typeof args['utm-source'] === 'string' ? args['utm-source'] : undefined,
+    });
   } catch (err) {
     const existing = duplicateInvoicePaymentId(err);
     if (!existing) throw explainRouterError(err);
