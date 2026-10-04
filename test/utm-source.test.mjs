@@ -124,6 +124,20 @@ test('--utm-source absent leaves the descriptor without the key', () => {
   assert.equal('utmSource' in parseCliArgs(['quote', 'pl_x']), false);
 });
 
+test('a label can never be re-parsed as a control flag downstream', () => {
+  // The CLI forwards the label to the order flows as an argv element; their
+  // parser treats anything starting with "--" as a flag. "--confirm" would skip
+  // the confirmation phase, "--chain" would change the paying chain.
+  for (const v of ['--confirm', '-confirm', '--chain', '-', '.hidden', '_x']) {
+    assert.equal(normalizeUtmSource(v), null, v);
+    assert.throws(
+      () => parseCliArgs(['pay', 'pl_x', '--with', 'usdt-solana', `--utm-source=${v}`]),
+      (e) => e instanceof CliError && e.code === 'BAD_VALUE',
+      v,
+    );
+  }
+});
+
 test('an invalid --utm-source is a usage error before any order exists', () => {
   assert.throws(
     () => parseCliArgs(['pay', 'pl_x', '--with', 'usdt-solana', '--utm-source', 'a b']),

@@ -228,7 +228,7 @@ function postJson(url, body, opts) {
 function normalizeUtmSource(value) {
   if (typeof value !== "string") return null;
   const s = value.trim().toLowerCase();
-  if (!s || s.length > 100 || !/^[a-z0-9._-]+$/.test(s)) return null;
+  if (!s || s.length > 100 || !/^[a-z0-9][a-z0-9._-]*$/.test(s)) return null;
   return s;
 }
 

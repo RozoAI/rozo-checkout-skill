@@ -271,7 +271,7 @@ export function parseCliArgs(argv) {
     if (!utmSource) {
       throw new CliError(
         'BAD_VALUE',
-        '--utm-source must be 1-100 characters of a-z, 0-9, ".", "_" or "-".',
+        '--utm-source must be 1-100 characters of a-z, 0-9, ".", "_" or "-", starting with a letter or digit.',
       );
     }
   }

@@ -41708,7 +41708,7 @@ function isSupportedSource(chainId, tokenSymbol) {
 function normalizeUtmSource(value) {
   if (typeof value !== "string") return null;
   const s = value.trim().toLowerCase();
-  if (!s || s.length > 100 || !/^[a-z0-9._-]+$/.test(s)) return null;
+  if (!s || s.length > 100 || !/^[a-z0-9][a-z0-9._-]*$/.test(s)) return null;
   return s;
 }
 
@@ -41919,7 +41919,7 @@ function parseCliArgs(argv) {
     if (!utmSource) {
       throw new CliError(
         "BAD_VALUE",
-        '--utm-source must be 1-100 characters of a-z, 0-9, ".", "_" or "-".'
+        '--utm-source must be 1-100 characters of a-z, 0-9, ".", "_" or "-", starting with a letter or digit.'
       );
     }
   }
