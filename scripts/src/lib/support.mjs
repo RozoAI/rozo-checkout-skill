@@ -8,7 +8,8 @@
  * itself, and validated so a typo is caught before any order exists.
  */
 
-import { SkillError } from './output.mjs';
+// No import from output.mjs: output.mjs imports SUPPORT from here (to keep
+// these public links intact through redaction), so this module stays a leaf.
 
 export const SUPPORT = Object.freeze({
   email: 'hi@rozo.ai',
@@ -61,10 +62,12 @@ export function contactEmailFromArgs(args) {
   if (args.email === undefined) return null;
   const email = args.email === true ? undefined : normalizeContactEmail(String(args.email));
   if (email === undefined) {
-    throw new SkillError(
-      'INVALID_EMAIL',
+    // Same shape as SkillError (formatFailure reads .code and .message).
+    const err = new Error(
       '--email must be a valid email address, for example name@example.com. It is optional: leave it out to continue without one.',
     );
+    err.code = 'INVALID_EMAIL';
+    throw err;
   }
   return email;
 }

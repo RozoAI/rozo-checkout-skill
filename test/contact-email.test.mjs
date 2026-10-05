@@ -18,7 +18,7 @@ import {
   contactEmailFromArgs,
   maskEmail,
 } from '../scripts/src/lib/support.mjs';
-import { capture } from '../scripts/src/lib/output.mjs';
+import { capture, emit, redact, redactDeep } from '../scripts/src/lib/output.mjs';
 import { run as runCreateOrder } from '../scripts/src/create-order.mjs';
 import { run as runCreateBitrefill } from '../scripts/src/create-bitrefill-order.mjs';
 
@@ -130,6 +130,17 @@ test('the order scripts reject a bad --email before any network call', async () 
     globalThis.fetch = originalFetch;
   }
   assert.equal(calls, 0);
+});
+
+test('support links survive redaction; other URLs on those hosts do not', async () => {
+  assert.deepEqual(redactDeep({ support: SUPPORT }), { support: { ...SUPPORT } });
+  assert.equal(redact(SUPPORT_TEXT), SUPPORT_TEXT);
+  assert.equal(redact('https://x.com/ROZOai/status/1?token=abc'), 'https://x.com/<redacted>');
+  assert.equal(redact('https://discord.gg/other'), 'https://discord.gg/<redacted>');
+  assert.equal(redact('https://discord.gg/EfWejgTbuUx'), 'https://discord.gg/<redacted>');
+  // Through emit(), the path every JSON result takes.
+  const r = await capture(() => emit({ success: true, support: SUPPORT }));
+  assert.deepEqual(r.payload.support, { ...SUPPORT });
 });
 
 test('contactEmailFromArgs and maskEmail', () => {

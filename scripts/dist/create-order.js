@@ -6,7 +6,39 @@ const require = __rozoCreateRequire(import.meta.url);
 const __filename = __rozoFileURLToPath(import.meta.url);
 const __dirname = __rozoDirname(__filename);
 
+// scripts/src/lib/support.mjs
+var SUPPORT = Object.freeze({
+  email: "hi@rozo.ai",
+  x: "https://x.com/ROZOai",
+  discord: "https://discord.gg/EfWejgTbuU"
+});
+var SUPPORT_TEXT = `Need help? Email ${SUPPORT.email}, or reach ROZO on X ${SUPPORT.x} or Discord ${SUPPORT.discord}.`;
+var CONTACT_EMAIL_MAX_LENGTH = 254;
+var EMAIL_RE = /^[a-z0-9][^\s@]*@[^\s@.]+(\.[^\s@.]+)+$/;
+function normalizeContactEmail(raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "string") return void 0;
+  const email = raw.trim().toLowerCase();
+  if (email.length === 0) return null;
+  if (email.length > CONTACT_EMAIL_MAX_LENGTH) return void 0;
+  if (/[\x00-\x1f\x7f]/.test(email) || !EMAIL_RE.test(email)) return void 0;
+  return email;
+}
+function contactEmailFromArgs(args) {
+  if (args.email === void 0) return null;
+  const email = args.email === true ? void 0 : normalizeContactEmail(String(args.email));
+  if (email === void 0) {
+    const err = new Error(
+      "--email must be a valid email address, for example name@example.com. It is optional: leave it out to continue without one."
+    );
+    err.code = "INVALID_EMAIL";
+    throw err;
+  }
+  return email;
+}
+
 // scripts/src/lib/output.mjs
+var PUBLIC_SUPPORT_URLS = /* @__PURE__ */ new Set([SUPPORT.x, SUPPORT.discord]);
 var EXIT_OK = 0;
 var EXIT_ERROR = 1;
 var EXIT_USAGE = 2;
@@ -17,7 +49,8 @@ function redact(text) {
   s = s.replace(/\b[0-9a-fA-F]{64}\b/g, "<redacted>");
   s = s.replace(/\b[1-9A-HJ-NP-Za-km-z]{80,90}\b/g, "<redacted>");
   s = s.replace(/\[(?:\s*\d{1,3}\s*,){40,}\s*\d{1,3}\s*\]/g, "[<redacted>]");
-  s = s.replace(/\b([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^\s"'<>]+)/g, (_m, scheme, rest) => {
+  s = s.replace(/\b([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^\s"'<>]+)/g, (m, scheme, rest) => {
+    if (PUBLIC_SUPPORT_URLS.has(m.replace(/[.,;:!?)]+$/, ""))) return m;
     const withoutUserinfo = rest.includes("@") ? rest.slice(rest.indexOf("@") + 1) : rest;
     const host = withoutUserinfo.split(/[/?#]/)[0];
     const hadMore = withoutUserinfo.length > host.length;
@@ -1141,36 +1174,6 @@ function recordConfirmation(rozoPaymentId, { source, invoiceAmount, tier }) {
     writeAtomic(statePath(rozoPaymentId), next);
     return next;
   });
-}
-
-// scripts/src/lib/support.mjs
-var SUPPORT = Object.freeze({
-  email: "hi@rozo.ai",
-  x: "https://x.com/ROZOai",
-  discord: "https://discord.gg/EfWejgTbuU"
-});
-var SUPPORT_TEXT = `Need help? Email ${SUPPORT.email}, or reach ROZO on X ${SUPPORT.x} or Discord ${SUPPORT.discord}.`;
-var CONTACT_EMAIL_MAX_LENGTH = 254;
-var EMAIL_RE = /^[a-z0-9][^\s@]*@[^\s@.]+(\.[^\s@.]+)+$/;
-function normalizeContactEmail(raw) {
-  if (raw === void 0 || raw === null) return null;
-  if (typeof raw !== "string") return void 0;
-  const email = raw.trim().toLowerCase();
-  if (email.length === 0) return null;
-  if (email.length > CONTACT_EMAIL_MAX_LENGTH) return void 0;
-  if (/[\x00-\x1f\x7f]/.test(email) || !EMAIL_RE.test(email)) return void 0;
-  return email;
-}
-function contactEmailFromArgs(args) {
-  if (args.email === void 0) return null;
-  const email = args.email === true ? void 0 : normalizeContactEmail(String(args.email));
-  if (email === void 0) {
-    throw new SkillError(
-      "INVALID_EMAIL",
-      "--email must be a valid email address, for example name@example.com. It is optional: leave it out to continue without one."
-    );
-  }
-  return email;
 }
 
 // scripts/src/create-order.mjs

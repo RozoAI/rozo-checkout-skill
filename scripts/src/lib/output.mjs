@@ -9,6 +9,13 @@
  * PLAN §3 abort conditions instead of pattern-matching prose.
  */
 
+import { SUPPORT } from './support.mjs';
+
+// ROZO's own public support links. They carry no credential, and an agent
+// needs the full path to hand them to a user, so redaction leaves exactly
+// these URLs alone. Every other URL is still reduced to its host.
+const PUBLIC_SUPPORT_URLS = new Set([SUPPORT.x, SUPPORT.discord]);
+
 export const EXIT_OK = 0;
 export const EXIT_ERROR = 1;
 export const EXIT_USAGE = 2;
@@ -41,7 +48,9 @@ export function redact(text) {
   s = s.replace(/\[(?:\s*\d{1,3}\s*,){40,}\s*\d{1,3}\s*\]/g, '[<redacted>]');
 
   // Credential-bearing URLs: keep the host, drop userinfo, path and query.
-  s = s.replace(/\b([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^\s"'<>]+)/g, (_m, scheme, rest) => {
+  s = s.replace(/\b([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^\s"'<>]+)/g, (m, scheme, rest) => {
+    // Allow sentence punctuation right after the link ("... Discord <url>.").
+    if (PUBLIC_SUPPORT_URLS.has(m.replace(/[.,;:!?)]+$/, ''))) return m;
     const withoutUserinfo = rest.includes('@') ? rest.slice(rest.indexOf('@') + 1) : rest;
     const host = withoutUserinfo.split(/[/?#]/)[0];
     const hadMore = withoutUserinfo.length > host.length;
