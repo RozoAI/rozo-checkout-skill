@@ -300,7 +300,10 @@ node scripts/dist/create-order.js --url "<coinbase link>" --chain 900 --token US
 `--email` works the same on `create-bitrefill-order.js` and on
 `rozo-checkout pay`. The output reports `contactEmailProvided` (the address is
 never echoed) and a `support` block with ROZO's contact channels. An order that
-already existed for this link keeps whatever email it was created with.
+already existed for this link keeps whatever email it was created with, so
+`contactEmailProvided` is `false` for a reused order even when you passed
+`--email`. (On the standalone `--confirm` run the order is always reused, so
+read this field from the first run; `rozo-checkout pay` does that for you.)
 
 Chain ids: `1` Ethereum · `56` BNB Chain · `137` Polygon · `8453` Base ·
 `900` Solana · `1500` Stellar · `lightning` Bitcoin Lightning.

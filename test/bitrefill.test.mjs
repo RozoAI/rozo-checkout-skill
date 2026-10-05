@@ -203,6 +203,36 @@ test('create flow: DUPLICATE_INVOICE resumes the existing order', async () => {
   );
 });
 
+test('contactEmailProvided: true on a fresh order with --email, false when resumed or absent', async () => {
+  const fresh = [
+    ['/create-invoice', () => json(readFixture('bitrefill-create-response.json'))],
+    [`/payments/${ID}`, () => json(readFixture('payment-bitrefill-unpaid-stellar.json'))],
+  ];
+  await withEnv(fresh, async (calls) => {
+    const { payload, exitCode } = await capture(() => runBitrefill([...ARGS, '--email', 'Buyer@Example.com']));
+    assert.equal(exitCode, 0, JSON.stringify(payload));
+    assert.equal(payload.contactEmailProvided, true);
+    assert.equal(calls.find((c) => c.url === `${MPP_BASE}/create-invoice`).body.email, 'buyer@example.com');
+    assert.ok(!JSON.stringify(payload).includes('buyer@example.com'), 'address never echoed');
+  });
+  await withEnv(fresh, async () => {
+    const { payload } = await capture(() => runBitrefill(ARGS));
+    assert.equal(payload.contactEmailProvided, false);
+  });
+  await withEnv(
+    [
+      ['/create-invoice', () => json({ ok: false, error: 'DUPLICATE_INVOICE', message: 'exists', rozoPaymentId: ID }, 409)],
+      [`/payments/${ID}`, () => json(readFixture('payment-bitrefill-unpaid-stellar.json'))],
+    ],
+    async () => {
+      const { payload, exitCode } = await capture(() => runBitrefill([...ARGS, '--email', 'buyer@example.com']));
+      assert.equal(exitCode, 0, JSON.stringify(payload));
+      assert.equal(payload.reused, true);
+      assert.equal(payload.contactEmailProvided, false);
+    },
+  );
+});
+
 test('create flow: router error codes surface unchanged', async () => {
   await withEnv(
     [['/create-invoice', () => json({ ok: false, error: 'BITREFILL_DISABLED', message: 'off' }, 403)]],

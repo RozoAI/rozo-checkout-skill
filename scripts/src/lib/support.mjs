@@ -46,6 +46,15 @@ export function normalizeContactEmail(raw) {
   return email;
 }
 
+/**
+ * Whether a contact email actually went out with a NEW order. A reused or
+ * resumed order keeps whatever email it was first created with (the router
+ * never rebinds), so reporting true there would be a false promise.
+ */
+export function contactEmailAttached(email, reused) {
+  return Boolean(email) && !reused;
+}
+
 /** "alice@example.com" -> "a***@example.com", for anything printed. */
 export function maskEmail(email) {
   const at = String(email).lastIndexOf('@');

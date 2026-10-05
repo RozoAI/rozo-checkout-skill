@@ -60,7 +60,7 @@ import {
 } from './lib/guards.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
 import { createOrderRecord, recordConfirmation } from './lib/state.mjs';
-import { SUPPORT, contactEmailFromArgs } from './lib/support.mjs';
+import { SUPPORT, contactEmailFromArgs, contactEmailAttached } from './lib/support.mjs';
 
 function confirmTier(usdAmount) {
   const usd = Number(usdAmount);
@@ -323,9 +323,12 @@ async function main(argv) {
     success: true,
     step: 'create-order',
     confirmed,
-    // The address itself is never echoed. A reused order keeps the email (if
-    // any) it was first created with.
-    contactEmailProvided: Boolean(email),
+    // True only when an email went out with a NEW order. A reused order keeps
+    // whatever email it was first created with (the router never rebinds), so
+    // reporting true there would be a false promise. The address itself is
+    // never echoed. Note the --confirm run always sees the order as reused;
+    // the CLI carries the first run's value forward.
+    contactEmailProvided: contactEmailAttached(email, created.reused),
     support: SUPPORT,
     reused: Boolean(created.reused),
     reusedNote: created.reused

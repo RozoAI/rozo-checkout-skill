@@ -557,6 +557,10 @@ async function cmdPay(opts) {
     return confirmed.exitCode;
   }
   const deposit = confirmed.payload.deposit;
+  // The confirm run always sees this order as reused, so its
+  // contactEmailProvided is always false. Whether the email was attached was
+  // decided by the create run above; report that one.
+  confirmed.payload.contactEmailProvided = Boolean(p.contactEmailProvided);
 
   // Deliberately does NOT echo confirmed.payload.reused. That flag is true here
   // for the order this same run created seconds ago, so surfacing it reads as

@@ -17,6 +17,7 @@ import {
   normalizeContactEmail,
   contactEmailFromArgs,
   maskEmail,
+  contactEmailAttached,
 } from '../scripts/src/lib/support.mjs';
 import { capture, emit, redact, redactDeep } from '../scripts/src/lib/output.mjs';
 import { run as runCreateOrder } from '../scripts/src/create-order.mjs';
@@ -141,6 +142,13 @@ test('support links survive redaction; other URLs on those hosts do not', async 
   // Through emit(), the path every JSON result takes.
   const r = await capture(() => emit({ success: true, support: SUPPORT }));
   assert.deepEqual(r.payload.support, { ...SUPPORT });
+});
+
+test('contactEmailAttached: only a new order with an email counts', () => {
+  assert.equal(contactEmailAttached('a@example.com', false), true);
+  assert.equal(contactEmailAttached('a@example.com', true), false);
+  assert.equal(contactEmailAttached(null, false), false);
+  assert.equal(contactEmailAttached(null, true), false);
 });
 
 test('contactEmailFromArgs and maskEmail', () => {

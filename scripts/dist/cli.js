@@ -41463,6 +41463,9 @@ function normalizeContactEmail(raw) {
   if (/[\x00-\x1f\x7f]/.test(email) || !EMAIL_RE.test(email)) return void 0;
   return email;
 }
+function contactEmailAttached(email, reused) {
+  return Boolean(email) && !reused;
+}
 function maskEmail(email) {
   const at = String(email).lastIndexOf("@");
   if (at <= 0) return "***";
@@ -55350,9 +55353,12 @@ async function main2(argv) {
     success: true,
     step: "create-order",
     confirmed,
-    // The address itself is never echoed. A reused order keeps the email (if
-    // any) it was first created with.
-    contactEmailProvided: Boolean(email),
+    // True only when an email went out with a NEW order. A reused order keeps
+    // whatever email it was first created with (the router never rebinds), so
+    // reporting true there would be a false promise. The address itself is
+    // never echoed. Note the --confirm run always sees the order as reused;
+    // the CLI carries the first run's value forward.
+    contactEmailProvided: contactEmailAttached(email, created.reused),
     support: SUPPORT,
     reused: Boolean(created.reused),
     reusedNote: created.reused ? `An existing unpaid order for this link was reused (${rozoPaymentId}), valid for another ${formatRemaining(expiry.msRemaining)}. Nothing new was created.` : null,
@@ -55757,7 +55763,8 @@ async function main3(argv) {
     step: "create-order",
     provider: PROVIDER_BITREFILL,
     confirmed,
-    contactEmailProvided: Boolean(email),
+    // False on a resumed order: the router does not attach an email to it.
+    contactEmailProvided: contactEmailAttached(email, resumed),
     support: SUPPORT,
     reused: resumed,
     reusedNote: resumed ? `An order for this Bitrefill invoice already existed (${rozoPaymentId}); it was resumed. Nothing new was created.` : null,
@@ -57422,6 +57429,7 @@ async function cmdPay(opts) {
     return confirmed.exitCode;
   }
   const deposit = confirmed.payload.deposit;
+  confirmed.payload.contactEmailProvided = Boolean(p.contactEmailProvided);
   if (!opts.json) {
     out(`  ${dim(`Confirming order ${rozoPaymentId} \u2014 no second order was created.`)}`);
   }

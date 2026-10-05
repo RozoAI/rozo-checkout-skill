@@ -40,7 +40,7 @@ import { formatRemaining } from './lib/expiry.mjs';
 import { reuseGuard } from './lib/guards.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
 import { createOrderRecord, recordConfirmation, readState, findByLinkId } from './lib/state.mjs';
-import { SUPPORT, contactEmailFromArgs } from './lib/support.mjs';
+import { SUPPORT, contactEmailFromArgs, contactEmailAttached } from './lib/support.mjs';
 import {
   PROVIDER_BITREFILL,
   validateBitrefillInput,
@@ -248,7 +248,8 @@ async function main(argv) {
     step: 'create-order',
     provider: PROVIDER_BITREFILL,
     confirmed,
-    contactEmailProvided: Boolean(email),
+    // False on a resumed order: the router does not attach an email to it.
+    contactEmailProvided: contactEmailAttached(email, resumed),
     support: SUPPORT,
     reused: resumed,
     reusedNote: resumed ? `An order for this Bitrefill invoice already existed (${rozoPaymentId}); it was resumed. Nothing new was created.` : null,

@@ -24,6 +24,9 @@ function normalizeContactEmail(raw) {
   if (/[\x00-\x1f\x7f]/.test(email) || !EMAIL_RE.test(email)) return void 0;
   return email;
 }
+function contactEmailAttached(email, reused) {
+  return Boolean(email) && !reused;
+}
 function contactEmailFromArgs(args) {
   if (args.email === void 0) return null;
   const email = args.email === true ? void 0 : normalizeContactEmail(String(args.email));
@@ -1378,9 +1381,12 @@ async function main(argv) {
     success: true,
     step: "create-order",
     confirmed,
-    // The address itself is never echoed. A reused order keeps the email (if
-    // any) it was first created with.
-    contactEmailProvided: Boolean(email),
+    // True only when an email went out with a NEW order. A reused order keeps
+    // whatever email it was first created with (the router never rebinds), so
+    // reporting true there would be a false promise. The address itself is
+    // never echoed. Note the --confirm run always sees the order as reused;
+    // the CLI carries the first run's value forward.
+    contactEmailProvided: contactEmailAttached(email, created.reused),
     support: SUPPORT,
     reused: Boolean(created.reused),
     reusedNote: created.reused ? `An existing unpaid order for this link was reused (${rozoPaymentId}), valid for another ${formatRemaining(expiry.msRemaining)}. Nothing new was created.` : null,
