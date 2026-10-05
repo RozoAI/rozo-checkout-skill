@@ -467,6 +467,14 @@ function classifyStatus({
   );
 }
 
+// scripts/src/lib/support.mjs
+var SUPPORT = Object.freeze({
+  email: "hi@rozo.ai",
+  x: "https://x.com/ROZOai",
+  discord: "https://discord.gg/EfWejgTbuU"
+});
+var SUPPORT_TEXT = `Need help? Email ${SUPPORT.email}, or reach ROZO on X ${SUPPORT.x} or Discord ${SUPPORT.discord}.`;
+
 // scripts/src/lib/expiry.mjs
 var MINUTE = 6e4;
 var MARGINS_MS = {
@@ -747,7 +755,9 @@ async function main(argv) {
       ...result,
       history,
       guidance,
-      timedOut: unresolved
+      timedOut: unresolved,
+      // Anything short of a clean answer gets a human contact.
+      ...failed || unresolved ? { support: SUPPORT } : {}
     },
     failed ? EXIT_ERROR : unresolved ? EXIT_UNCONFIRMED : 0
   );

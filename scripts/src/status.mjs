@@ -22,6 +22,7 @@ import { isRozoPaymentId, maskAddress } from './lib/ids.mjs';
 import { invoiceStatus, getPayment } from './lib/api.mjs';
 import { chainName, formatAmount } from './lib/amounts.mjs';
 import { classifyStatus } from './lib/guards.mjs';
+import { SUPPORT } from './lib/support.mjs';
 import { formatRemaining } from './lib/expiry.mjs';
 import { findByLinkId, readState } from './lib/state.mjs';
 import { providerFromPayment, earliestExpiry, intentBitrefillExpiry } from './lib/bitrefill.mjs';
@@ -250,6 +251,8 @@ async function main(argv) {
       history,
       guidance,
       timedOut: unresolved,
+      // Anything short of a clean answer gets a human contact.
+      ...(failed || unresolved ? { support: SUPPORT } : {}),
     },
     failed ? EXIT_ERROR : unresolved ? EXIT_UNCONFIRMED : 0,
   );

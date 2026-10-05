@@ -8,6 +8,7 @@
 
 import { SUPPORTED_SOURCES, isSupportedSource, chainName } from './amounts.mjs';
 import { normalizeUtmSource } from './utm.mjs';
+import { normalizeContactEmail } from './support.mjs';
 
 export const COMMANDS = ['pay', 'quote', 'status', 'help', 'version'];
 
@@ -178,6 +179,8 @@ const VALUE_FLAGS = new Set([
   'provider',
   // Optional channel label for reporting (pay, quote)
   'utm-source',
+  // Optional contact email so ROZO can reach the payer (pay)
+  'email',
 ]);
 
 /**
@@ -368,6 +371,19 @@ export function parseCliArgs(argv) {
     source = null;
   }
 
+  // Optional contact email. Never required; a bad value is an error (not a
+  // silent drop) so the user learns before an order exists.
+  let email = null;
+  if (flags.email !== undefined) {
+    email = normalizeContactEmail(String(flags.email));
+    if (email === undefined) {
+      throw new CliError(
+        'INVALID_EMAIL',
+        '--email must be a valid email address, for example name@example.com. It is optional: leave it out to continue without one.',
+      );
+    }
+  }
+
   const timeout = flags.timeout === undefined ? 900 : Number(flags.timeout);
   if (!Number.isFinite(timeout) || timeout < 0) {
     throw new CliError('BAD_VALUE', '--timeout must be a non-negative number of seconds.');
@@ -390,6 +406,7 @@ export function parseCliArgs(argv) {
     keyfile: flags.keyfile,
     envFile: flags['env-file'],
     ...(utmSource ? { utmSource } : {}),
+    ...(email ? { email } : {}),
   };
 }
 
@@ -442,6 +459,8 @@ OPTIONS
   --rpc <url>     override the RPC endpoint for --send
   --utm-source <s>  optional channel label for reporting; no identity, no
                   privilege. Overrides ROZO_CHECKOUT_UTM_SOURCE.
+  --email <addr>  optional. A contact email stored with the order so ROZO can
+                  reach you if the payment needs attention. Never required.
   --help, -h      this text
   --version, -v   print the version
 
@@ -449,8 +468,12 @@ EXAMPLES
   npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01...
   npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01... --with usdt-solana
   npx @rozoai/checkout pay pl_01... --with btc-lightning
+  npx @rozoai/checkout pay pl_01... --with usdt-solana --email you@example.com
   npx @rozoai/checkout pay --bitrefill-invoice 8f3k2 --to 0xAbC…123 --amount 7.90 --expires-at 2026-10-01T12:00:00Z --with usdc-stellar
   npx @rozoai/checkout status 11111111-2222-4333-8444-555555555555
 
 Creating an order moves no money; an unfunded order simply expires. Nothing is
-paid until you confirm, and --send is required before anything is signed.`;
+paid until you confirm, and --send is required before anything is signed.
+
+SUPPORT
+  Email hi@rozo.ai, X https://x.com/ROZOai, Discord https://discord.gg/EfWejgTbuU`;

@@ -25,6 +25,10 @@ calls with every safety rule already enforced:
 usdc-ethereum, usdt-polygon, usdc-polygon, usdc-base, usdc-stellar, btc-lightning
 (or raw: --chain 900 --token USDT).
 
+Optional: --email <addr> stores a contact email with the order so ROZO can reach
+the user if the payment needs attention. Ask the user once if they are present;
+never required, proceed without it if they decline or no one is there.
+
 DEFAULT PATH NEEDS NO KEY: `pay` prints a deposit address for the user to pay from
 any wallet. No private key, no environment variable, no configuration. Only the
 optional --send flag signs locally. Its key comes from the first source that
@@ -117,6 +121,8 @@ private key (EVM and Solana only); every other path is keyless.
      -d '{"url":"https://payments.coinbase.com/payment-links/pl_XXXX",
           "source":{"chainId":"900","tokenSymbol":"USDT"}}'
    -> { ok, reused, linkId, rozoPaymentId, paymentLink, expiresAt, source, ... }
+   Optional "email":"you@example.com" in the body stores a contact email with a
+   newly created order (a malformed value returns 400 INVALID_EMAIL).
    WARNING: if an unexpired order already exists for this link it is REUSED as-is,
    even with a different chain/token than you asked for. Always verify the returned
    source matches your request; abort on mismatch.
@@ -162,4 +168,11 @@ private key (EVM and Solana only); every other path is keyless.
 
 409 = link already used · 410 = link expired · UNSUPPORTED_SOURCE = the response's
 "supported" object lists valid (chainId, tokenSymbol) pairs (Lightning is supported
-but omitted from that list) · RATE_LIMITED = per-IP creation cap, retry later.
+but omitted from that list) · RATE_LIMITED = per-IP creation cap, retry later ·
+INVALID_EMAIL = the optional email is malformed; fix it or omit it.
+
+## Support
+
+If an order is stuck or anything goes wrong: email hi@rozo.ai, X
+https://x.com/ROZOai, Discord https://discord.gg/EfWejgTbuU. Include linkId,
+rozoPaymentId and any tx hash.

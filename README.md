@@ -118,6 +118,10 @@ environment (or a gitignored `.env`) still works for unattended automation.
 
 Distributing this CLI? `--utm-source <label>` (or `ROZO_CHECKOUT_UTM_SOURCE`) is an optional channel label for reporting; no identity, no privilege.
 
+Want ROZO to be able to reach you if a payment needs attention? Add the optional `--email you@example.com` to `pay`.
+
+Need help? Email hi@rozo.ai, or reach us on [X](https://x.com/ROZOai) or [Discord](https://discord.gg/EfWejgTbuU).
+
 <details>
 <summary><b>Set up a local wallet for <code>--send</code></b> — .env template and per-wallet export steps</summary>
 
@@ -396,6 +400,11 @@ The full list of what this refuses to do, and why, is in
 
 ## Changelog
 
+- **0.1.14**: optional `--email <addr>` on `pay` (and on the create-order
+  scripts) stores a contact email with the order so ROZO can reach you if the
+  payment needs attention. Never required; an invalid address is rejected
+  before any order is created. Support channels (hi@rozo.ai, X, Discord) are
+  shown at order creation and whenever an order is not clean.
 - **0.1.13**: optional `--utm-source <label>` / `ROZO_CHECKOUT_UTM_SOURCE`
   adds `attribution.utm_source` to created orders so distribution channels can
   be measured. Invalid values are dropped, never failing an order.

@@ -60,6 +60,7 @@ import {
 } from './lib/guards.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
 import { createOrderRecord, recordConfirmation } from './lib/state.mjs';
+import { SUPPORT, contactEmailFromArgs } from './lib/support.mjs';
 
 function confirmTier(usdAmount) {
   const usd = Number(usdAmount);
@@ -87,6 +88,8 @@ async function main(argv) {
   }
   const requested = { chainId, tokenSymbol };
   const confirmed = Boolean(args.confirm);
+  // Optional; validated before any network call so a typo creates nothing.
+  const email = contactEmailFromArgs(args);
 
   // Fail closed on the blacklist before doing anything else, so a broken
   // vendored list can never be discovered only after an address is on screen.
@@ -113,6 +116,7 @@ async function main(argv) {
     source: requested,
     quoteReceipt,
     utmSource: typeof args['utm-source'] === 'string' ? args['utm-source'] : undefined,
+    email,
   });
   if (!created?.rozoPaymentId) {
     throw new SkillError('CREATE_FAILED', 'create-invoice returned no rozoPaymentId.', {
@@ -319,6 +323,10 @@ async function main(argv) {
     success: true,
     step: 'create-order',
     confirmed,
+    // The address itself is never echoed. A reused order keeps the email (if
+    // any) it was first created with.
+    contactEmailProvided: Boolean(email),
+    support: SUPPORT,
     reused: Boolean(created.reused),
     reusedNote: created.reused
       ? `An existing unpaid order for this link was reused (${rozoPaymentId}), valid for another ` +

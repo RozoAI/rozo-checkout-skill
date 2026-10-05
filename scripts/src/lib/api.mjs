@@ -88,13 +88,16 @@ export async function quoteInvoice({ url, linkId }) {
 }
 
 /** Step 4. Creates (or reuses) the Rozo intent for this Coinbase link. */
-export async function createInvoice({ url, linkId, source, quoteReceipt, utmSource }) {
+export async function createInvoice({ url, linkId, source, quoteReceipt, utmSource, email }) {
   const body = {
     ...(url ? { url } : { payment_id: linkId }),
     source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
     ...(quoteReceipt ? { quoteReceipt } : {}),
     client: CLIENT_LABEL,
     attribution: buildAttribution({ utmSource }),
+    // Optional payer contact email (validated by the caller). Omitted, never
+    // sent empty, when the user gave none.
+    ...(email ? { email } : {}),
   };
   return postJson(`${MPP_BASE}/create-invoice`, body);
 }
@@ -105,7 +108,7 @@ export async function createInvoice({ url, linkId, source, quoteReceipt, utmSour
  * intent delivering exactly `amount` USDC on Base to `address`. Deposit
  * details then come from getPayment(rozoPaymentId) as usual.
  */
-export async function createBitrefillInvoice({ invoice, source, utmSource }) {
+export async function createBitrefillInvoice({ invoice, source, utmSource, email }) {
   const body = {
     provider: 'bitrefill',
     bitrefill: {
@@ -117,6 +120,7 @@ export async function createBitrefillInvoice({ invoice, source, utmSource }) {
     source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
     client: CLIENT_LABEL,
     attribution: buildAttribution({ utmSource }),
+    ...(email ? { email } : {}),
   };
   return postJson(`${MPP_BASE}/create-invoice`, body);
 }

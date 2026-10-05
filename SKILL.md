@@ -15,7 +15,7 @@ description: >
   address and amount from Bitrefill. Supports Coinbase payment links and
   Bitrefill invoices only (not Stripe).
 metadata:
-  version: 1.1.0
+  version: 1.2.0
 
   # Declared capabilities — what this skill can actually do, so reviewers and
   # scanners do not have to reverse-engineer it from the bundle.
@@ -280,11 +280,27 @@ already told you. Narrate the plan: invoice amount, merchant, chosen
 chain/token, `callerPays` (equal to the invoice — no discount). **This is not
 the binding confirmation.**
 
+**Optional contact email.** If a user is present, you MAY ask once, in the
+same message: "Optional: an email so ROZO can reach you if the payment needs
+attention?" Pass it as `--email <addr>` in Step 3. It is never required. If the
+user declines, ignores the question, or no human is present (an unattended
+agent run), proceed without it and do not ask again. Never invent an address
+and never reuse one the user did not give for this purpose. An invalid
+address fails with `INVALID_EMAIL` before any order exists; fix it or drop the
+flag.
+
 ### Step 3 — create the order
 
 ```bash
 node scripts/dist/create-order.js --url "<coinbase link>" --chain 900 --token USDT
+# optional contact email (Step 2):
+node scripts/dist/create-order.js --url "<coinbase link>" --chain 900 --token USDT --email you@example.com
 ```
+
+`--email` works the same on `create-bitrefill-order.js` and on
+`rozo-checkout pay`. The output reports `contactEmailProvided` (the address is
+never echoed) and a `support` block with ROZO's contact channels. An order that
+already existed for this link keeps whatever email it was created with.
 
 Chain ids: `1` Ethereum · `56` BNB Chain · `137` Polygon · `8453` Base ·
 `900` Solana · `1500` Stellar · `lightning` Bitcoin Lightning.
@@ -438,6 +454,19 @@ reconciliation with this wording:
 > `{payin.txHash}` · state: `{state}`
 
 Then stop and hand off. Do not run any send script again.
+
+## Getting help
+
+If something goes wrong (an order is stuck, underpaid, expired after funds
+arrived, or the state is `unknown`), tell the user how to reach ROZO and give
+them the identifiers above:
+
+- Email: hi@rozo.ai
+- X: https://x.com/ROZOai
+- Discord: https://discord.gg/EfWejgTbuU
+
+The same channels appear in the `support` block of `create-order` output and
+of any `status` result that is not a clean answer.
 
 ## Troubleshooting
 

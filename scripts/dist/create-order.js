@@ -257,13 +257,16 @@ async function quoteInvoice({ url, linkId }) {
   const body = url ? { url } : { payment_id: linkId };
   return postJson(`${MPP_BASE}/quote-invoice`, body);
 }
-async function createInvoice({ url, linkId, source, quoteReceipt, utmSource }) {
+async function createInvoice({ url, linkId, source, quoteReceipt, utmSource, email }) {
   const body = {
     ...url ? { url } : { payment_id: linkId },
     source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
     ...quoteReceipt ? { quoteReceipt } : {},
     client: CLIENT_LABEL,
-    attribution: buildAttribution({ utmSource })
+    attribution: buildAttribution({ utmSource }),
+    // Optional payer contact email (validated by the caller). Omitted, never
+    // sent empty, when the user gave none.
+    ...email ? { email } : {}
   };
   return postJson(`${MPP_BASE}/create-invoice`, body);
 }
@@ -1140,6 +1143,36 @@ function recordConfirmation(rozoPaymentId, { source, invoiceAmount, tier }) {
   });
 }
 
+// scripts/src/lib/support.mjs
+var SUPPORT = Object.freeze({
+  email: "hi@rozo.ai",
+  x: "https://x.com/ROZOai",
+  discord: "https://discord.gg/EfWejgTbuU"
+});
+var SUPPORT_TEXT = `Need help? Email ${SUPPORT.email}, or reach ROZO on X ${SUPPORT.x} or Discord ${SUPPORT.discord}.`;
+var CONTACT_EMAIL_MAX_LENGTH = 254;
+var EMAIL_RE = /^[a-z0-9][^\s@]*@[^\s@.]+(\.[^\s@.]+)+$/;
+function normalizeContactEmail(raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "string") return void 0;
+  const email = raw.trim().toLowerCase();
+  if (email.length === 0) return null;
+  if (email.length > CONTACT_EMAIL_MAX_LENGTH) return void 0;
+  if (/[\x00-\x1f\x7f]/.test(email) || !EMAIL_RE.test(email)) return void 0;
+  return email;
+}
+function contactEmailFromArgs(args) {
+  if (args.email === void 0) return null;
+  const email = args.email === true ? void 0 : normalizeContactEmail(String(args.email));
+  if (email === void 0) {
+    throw new SkillError(
+      "INVALID_EMAIL",
+      "--email must be a valid email address, for example name@example.com. It is optional: leave it out to continue without one."
+    );
+  }
+  return email;
+}
+
 // scripts/src/create-order.mjs
 function confirmTier(usdAmount) {
   const usd = Number(usdAmount);
@@ -1166,6 +1199,7 @@ async function main(argv) {
   }
   const requested = { chainId, tokenSymbol };
   const confirmed = Boolean(args.confirm);
+  const email = contactEmailFromArgs(args);
   let blacklist;
   try {
     blacklist = loadBlacklist();
@@ -1183,7 +1217,8 @@ async function main(argv) {
     url: String(url),
     source: requested,
     quoteReceipt,
-    utmSource: typeof args["utm-source"] === "string" ? args["utm-source"] : void 0
+    utmSource: typeof args["utm-source"] === "string" ? args["utm-source"] : void 0,
+    email
   });
   if (!created?.rozoPaymentId) {
     throw new SkillError("CREATE_FAILED", "create-invoice returned no rozoPaymentId.", {
@@ -1340,6 +1375,10 @@ async function main(argv) {
     success: true,
     step: "create-order",
     confirmed,
+    // The address itself is never echoed. A reused order keeps the email (if
+    // any) it was first created with.
+    contactEmailProvided: Boolean(email),
+    support: SUPPORT,
     reused: Boolean(created.reused),
     reusedNote: created.reused ? `An existing unpaid order for this link was reused (${rozoPaymentId}), valid for another ${formatRemaining(expiry.msRemaining)}. Nothing new was created.` : null,
     orderCost: "Creating an order moves no money. An order you never fund simply expires and costs nothing.",
