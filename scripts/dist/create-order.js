@@ -6,7 +6,42 @@ const require = __rozoCreateRequire(import.meta.url);
 const __filename = __rozoFileURLToPath(import.meta.url);
 const __dirname = __rozoDirname(__filename);
 
+// scripts/src/lib/support.mjs
+var SUPPORT = Object.freeze({
+  email: "hi@rozo.ai",
+  x: "https://x.com/ROZOai",
+  discord: "https://discord.gg/EfWejgTbuU"
+});
+var SUPPORT_TEXT = `Need help? Email ${SUPPORT.email}, or reach ROZO on X ${SUPPORT.x} or Discord ${SUPPORT.discord}.`;
+var CONTACT_EMAIL_MAX_LENGTH = 254;
+var EMAIL_RE = /^[a-z0-9][^\s@]*@[^\s@.]+(\.[^\s@.]+)+$/;
+function normalizeContactEmail(raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "string") return void 0;
+  const email = raw.trim().toLowerCase();
+  if (email.length === 0) return null;
+  if (email.length > CONTACT_EMAIL_MAX_LENGTH) return void 0;
+  if (/[\x00-\x1f\x7f]/.test(email) || !EMAIL_RE.test(email)) return void 0;
+  return email;
+}
+function contactEmailAttached(email, reused) {
+  return Boolean(email) && !reused;
+}
+function contactEmailFromArgs(args) {
+  if (args.email === void 0) return null;
+  const email = args.email === true ? void 0 : normalizeContactEmail(String(args.email));
+  if (email === void 0) {
+    const err = new Error(
+      "--email must be a valid email address, for example name@example.com. It is optional: leave it out to continue without one."
+    );
+    err.code = "INVALID_EMAIL";
+    throw err;
+  }
+  return email;
+}
+
 // scripts/src/lib/output.mjs
+var PUBLIC_SUPPORT_URLS = /* @__PURE__ */ new Set([SUPPORT.x, SUPPORT.discord]);
 var EXIT_OK = 0;
 var EXIT_ERROR = 1;
 var EXIT_USAGE = 2;
@@ -17,7 +52,8 @@ function redact(text) {
   s = s.replace(/\b[0-9a-fA-F]{64}\b/g, "<redacted>");
   s = s.replace(/\b[1-9A-HJ-NP-Za-km-z]{80,90}\b/g, "<redacted>");
   s = s.replace(/\[(?:\s*\d{1,3}\s*,){40,}\s*\d{1,3}\s*\]/g, "[<redacted>]");
-  s = s.replace(/\b([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^\s"'<>]+)/g, (_m, scheme, rest) => {
+  s = s.replace(/\b([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^\s"'<>]+)/g, (m, scheme, rest) => {
+    if (PUBLIC_SUPPORT_URLS.has(m.replace(/[.,;:!?)]+$/, ""))) return m;
     const withoutUserinfo = rest.includes("@") ? rest.slice(rest.indexOf("@") + 1) : rest;
     const host = withoutUserinfo.split(/[/?#]/)[0];
     const hadMore = withoutUserinfo.length > host.length;
@@ -257,13 +293,16 @@ async function quoteInvoice({ url, linkId }) {
   const body = url ? { url } : { payment_id: linkId };
   return postJson(`${MPP_BASE}/quote-invoice`, body);
 }
-async function createInvoice({ url, linkId, source, quoteReceipt, utmSource }) {
+async function createInvoice({ url, linkId, source, quoteReceipt, utmSource, email }) {
   const body = {
     ...url ? { url } : { payment_id: linkId },
     source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
     ...quoteReceipt ? { quoteReceipt } : {},
     client: CLIENT_LABEL,
-    attribution: buildAttribution({ utmSource })
+    attribution: buildAttribution({ utmSource }),
+    // Optional payer contact email (validated by the caller). Omitted, never
+    // sent empty, when the user gave none.
+    ...email ? { email } : {}
   };
   return postJson(`${MPP_BASE}/create-invoice`, body);
 }
@@ -1166,6 +1205,7 @@ async function main(argv) {
   }
   const requested = { chainId, tokenSymbol };
   const confirmed = Boolean(args.confirm);
+  const email = contactEmailFromArgs(args);
   let blacklist;
   try {
     blacklist = loadBlacklist();
@@ -1183,7 +1223,8 @@ async function main(argv) {
     url: String(url),
     source: requested,
     quoteReceipt,
-    utmSource: typeof args["utm-source"] === "string" ? args["utm-source"] : void 0
+    utmSource: typeof args["utm-source"] === "string" ? args["utm-source"] : void 0,
+    email
   });
   if (!created?.rozoPaymentId) {
     throw new SkillError("CREATE_FAILED", "create-invoice returned no rozoPaymentId.", {
@@ -1340,6 +1381,13 @@ async function main(argv) {
     success: true,
     step: "create-order",
     confirmed,
+    // True only when an email went out with a NEW order. A reused order keeps
+    // whatever email it was first created with (the router never rebinds), so
+    // reporting true there would be a false promise. The address itself is
+    // never echoed. Note the --confirm run always sees the order as reused;
+    // the CLI carries the first run's value forward.
+    contactEmailProvided: contactEmailAttached(email, created.reused),
+    support: SUPPORT,
     reused: Boolean(created.reused),
     reusedNote: created.reused ? `An existing unpaid order for this link was reused (${rozoPaymentId}), valid for another ${formatRemaining(expiry.msRemaining)}. Nothing new was created.` : null,
     orderCost: "Creating an order moves no money. An order you never fund simply expires and costs nothing.",

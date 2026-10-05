@@ -6,7 +6,16 @@ const require = __rozoCreateRequire(import.meta.url);
 const __filename = __rozoFileURLToPath(import.meta.url);
 const __dirname = __rozoDirname(__filename);
 
+// scripts/src/lib/support.mjs
+var SUPPORT = Object.freeze({
+  email: "hi@rozo.ai",
+  x: "https://x.com/ROZOai",
+  discord: "https://discord.gg/EfWejgTbuU"
+});
+var SUPPORT_TEXT = `Need help? Email ${SUPPORT.email}, or reach ROZO on X ${SUPPORT.x} or Discord ${SUPPORT.discord}.`;
+
 // scripts/src/lib/output.mjs
+var PUBLIC_SUPPORT_URLS = /* @__PURE__ */ new Set([SUPPORT.x, SUPPORT.discord]);
 var EXIT_OK = 0;
 var EXIT_ERROR = 1;
 var EXIT_USAGE = 2;
@@ -18,7 +27,8 @@ function redact(text) {
   s = s.replace(/\b[0-9a-fA-F]{64}\b/g, "<redacted>");
   s = s.replace(/\b[1-9A-HJ-NP-Za-km-z]{80,90}\b/g, "<redacted>");
   s = s.replace(/\[(?:\s*\d{1,3}\s*,){40,}\s*\d{1,3}\s*\]/g, "[<redacted>]");
-  s = s.replace(/\b([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^\s"'<>]+)/g, (_m, scheme, rest) => {
+  s = s.replace(/\b([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^\s"'<>]+)/g, (m, scheme, rest) => {
+    if (PUBLIC_SUPPORT_URLS.has(m.replace(/[.,;:!?)]+$/, ""))) return m;
     const withoutUserinfo = rest.includes("@") ? rest.slice(rest.indexOf("@") + 1) : rest;
     const host = withoutUserinfo.split(/[/?#]/)[0];
     const hadMore = withoutUserinfo.length > host.length;
@@ -747,7 +757,9 @@ async function main(argv) {
       ...result,
       history,
       guidance,
-      timedOut: unresolved
+      timedOut: unresolved,
+      // Anything short of a clean answer gets a human contact.
+      ...failed || unresolved ? { support: SUPPORT } : {}
     },
     failed ? EXIT_ERROR : unresolved ? EXIT_UNCONFIRMED : 0
   );

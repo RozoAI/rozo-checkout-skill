@@ -41,6 +41,7 @@ import { extractLinkId, isRozoPaymentId } from './lib/ids.mjs';
 import { formatDeadline } from './lib/expiry.mjs';
 import { planSignability } from './lib/key-source.mjs';
 import { applyDotenv } from './lib/dotenv.mjs';
+import { SUPPORT_TEXT, maskEmail } from './lib/support.mjs';
 
 import { run as runQuote } from './quote.mjs';
 import { run as runCreateOrder } from './create-order.mjs';
@@ -88,6 +89,11 @@ function printError(payload) {
   out(`${red('✗')} ${bold(e.code || 'ERROR')}`);
   if (e.message) out(`  ${e.message}`);
   if (payload?.guidance) out(`  ${yellow(payload.guidance)}`);
+}
+
+/** How to reach ROZO. Shown at order creation and whenever an order is not clean. */
+function printSupport() {
+  out(`  ${dim(SUPPORT_TEXT)}`);
 }
 
 /** Money-detected results must never be shown as an ordinary failure. */
@@ -293,6 +299,7 @@ async function cmdStatus(opts) {
   }
   if (payload.error) {
     printError(payload);
+    printSupport();
     return exitCode;
   }
   out();
@@ -304,6 +311,7 @@ async function cmdStatus(opts) {
   if (payload.payin?.txHash) out(`  Pay-in  ${payload.payin.txHash}`);
   if (payload.guidance) out(`  ${payload.escalate ? red(payload.guidance) : dim(payload.guidance)}`);
   printMoneyWarning(payload);
+  if (payload.support) printSupport();
   out();
   return exitCode;
 }
@@ -403,7 +411,10 @@ async function cmdPay(opts) {
 
   const { chainId, tokenSymbol } = opts.source;
   const createFlow = opts.bitrefill ? runCreateBitrefill : runCreateOrder;
-  const utmArgs = opts.utmSource ? ['--utm-source', opts.utmSource] : [];
+  const utmArgs = [
+    ...(opts.utmSource ? ['--utm-source', opts.utmSource] : []),
+    ...(opts.email ? ['--email', opts.email] : []),
+  ];
   const baseArgs = opts.bitrefill
     ? [
         '--invoice-id', opts.bitrefill.invoiceId,
@@ -455,6 +466,7 @@ async function cmdPay(opts) {
     else {
       printError(created.payload);
       printMoneyWarning(created.payload);
+      printSupport();
     }
     return created.exitCode;
   }
@@ -496,6 +508,14 @@ async function cmdPay(opts) {
         : `  ${dim(`Order created: ${p.rozoPaymentId}`)}`,
     );
     out(`  ${dim('An order you never fund simply expires and costs nothing.')}`);
+    if (opts.email) {
+      out(
+        p.reused
+          ? `  ${dim(`Contact   ${maskEmail(opts.email)} was not attached: this order already existed.`)}`
+          : `  ${dim(`Contact   ${maskEmail(opts.email)}, so ROZO can reach you if this payment needs attention.`)}`,
+      );
+    }
+    printSupport();
     out();
     out(dim(`  The amount you send includes bridge and network fees, so it is`));
     out(dim(`  normally larger than the invoice.`));
@@ -532,10 +552,15 @@ async function cmdPay(opts) {
     else {
       printError(confirmed.payload);
       printMoneyWarning(confirmed.payload);
+      printSupport();
     }
     return confirmed.exitCode;
   }
   const deposit = confirmed.payload.deposit;
+  // The confirm run always sees this order as reused, so its
+  // contactEmailProvided is always false. Whether the email was attached was
+  // decided by the create run above; report that one.
+  confirmed.payload.contactEmailProvided = Boolean(p.contactEmailProvided);
 
   // Deliberately does NOT echo confirmed.payload.reused. That flag is true here
   // for the order this same run created seconds ago, so surfacing it reads as
@@ -582,6 +607,7 @@ async function cmdPay(opts) {
     } else if (!sent.payload.success) {
       printError(sent.payload);
       printMoneyWarning(sent.payload);
+      printSupport();
       return sent.exitCode;
     } else if (opts.dryRun) {
       if (sent.payload.keySource) out(`  ${dim(`would sign with ${sent.payload.keySource}`)}`);
@@ -635,6 +661,7 @@ async function cmdPay(opts) {
     out(`  ${watched.payload.escalate ? red(watched.payload.guidance) : dim(watched.payload.guidance)}`);
   }
   printMoneyWarning(watched.payload);
+  if (watched.payload.state !== 'settled') printSupport();
   out();
   return watched.exitCode;
 }
@@ -733,6 +760,9 @@ main()
   .catch((err) => {
     const payload = formatFailure(err);
     if (process.argv.includes('--json')) printJson(payload);
-    else printError(payload);
+    else {
+      printError(payload);
+      printSupport();
+    }
     process.exit(EXIT_ERROR);
   });

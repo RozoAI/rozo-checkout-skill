@@ -40,6 +40,7 @@ import { formatRemaining } from './lib/expiry.mjs';
 import { reuseGuard } from './lib/guards.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
 import { createOrderRecord, recordConfirmation, readState, findByLinkId } from './lib/state.mjs';
+import { SUPPORT, contactEmailFromArgs, contactEmailAttached } from './lib/support.mjs';
 import {
   PROVIDER_BITREFILL,
   validateBitrefillInput,
@@ -83,6 +84,8 @@ async function main(argv) {
   }
   const requested = { chainId, tokenSymbol };
   const confirmed = Boolean(args.confirm);
+  // Optional; validated before any network call so a typo creates nothing.
+  const email = contactEmailFromArgs(args);
 
   // --- 1. local validation -----------------------------------------------
   // Showing a deposit needs BITREFILL_MIN_PAY_WINDOW_MS; creating a NEW
@@ -116,6 +119,7 @@ async function main(argv) {
       invoice,
       source: requested,
       utmSource: typeof args['utm-source'] === 'string' ? args['utm-source'] : undefined,
+      email,
     });
   } catch (err) {
     const existing = duplicateInvoicePaymentId(err);
@@ -244,6 +248,9 @@ async function main(argv) {
     step: 'create-order',
     provider: PROVIDER_BITREFILL,
     confirmed,
+    // False on a resumed order: the router does not attach an email to it.
+    contactEmailProvided: contactEmailAttached(email, resumed),
+    support: SUPPORT,
     reused: resumed,
     reusedNote: resumed ? `An order for this Bitrefill invoice already existed (${rozoPaymentId}); it was resumed. Nothing new was created.` : null,
     orderCost: 'Creating an order moves no money. An order you never fund simply expires and costs nothing.',

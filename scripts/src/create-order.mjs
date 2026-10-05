@@ -60,6 +60,7 @@ import {
 } from './lib/guards.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
 import { createOrderRecord, recordConfirmation } from './lib/state.mjs';
+import { SUPPORT, contactEmailFromArgs, contactEmailAttached } from './lib/support.mjs';
 
 function confirmTier(usdAmount) {
   const usd = Number(usdAmount);
@@ -87,6 +88,8 @@ async function main(argv) {
   }
   const requested = { chainId, tokenSymbol };
   const confirmed = Boolean(args.confirm);
+  // Optional; validated before any network call so a typo creates nothing.
+  const email = contactEmailFromArgs(args);
 
   // Fail closed on the blacklist before doing anything else, so a broken
   // vendored list can never be discovered only after an address is on screen.
@@ -113,6 +116,7 @@ async function main(argv) {
     source: requested,
     quoteReceipt,
     utmSource: typeof args['utm-source'] === 'string' ? args['utm-source'] : undefined,
+    email,
   });
   if (!created?.rozoPaymentId) {
     throw new SkillError('CREATE_FAILED', 'create-invoice returned no rozoPaymentId.', {
@@ -319,6 +323,13 @@ async function main(argv) {
     success: true,
     step: 'create-order',
     confirmed,
+    // True only when an email went out with a NEW order. A reused order keeps
+    // whatever email it was first created with (the router never rebinds), so
+    // reporting true there would be a false promise. The address itself is
+    // never echoed. Note the --confirm run always sees the order as reused;
+    // the CLI carries the first run's value forward.
+    contactEmailProvided: contactEmailAttached(email, created.reused),
+    support: SUPPORT,
     reused: Boolean(created.reused),
     reusedNote: created.reused
       ? `An existing unpaid order for this link was reused (${rozoPaymentId}), valid for another ` +

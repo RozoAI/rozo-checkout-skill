@@ -41445,7 +41445,47 @@ process.on("warning", (warning) => {
 import readline2 from "node:readline";
 import { createRequire as createRequire2 } from "node:module";
 
+// scripts/src/lib/support.mjs
+var SUPPORT = Object.freeze({
+  email: "hi@rozo.ai",
+  x: "https://x.com/ROZOai",
+  discord: "https://discord.gg/EfWejgTbuU"
+});
+var SUPPORT_TEXT = `Need help? Email ${SUPPORT.email}, or reach ROZO on X ${SUPPORT.x} or Discord ${SUPPORT.discord}.`;
+var CONTACT_EMAIL_MAX_LENGTH = 254;
+var EMAIL_RE = /^[a-z0-9][^\s@]*@[^\s@.]+(\.[^\s@.]+)+$/;
+function normalizeContactEmail(raw) {
+  if (raw === void 0 || raw === null) return null;
+  if (typeof raw !== "string") return void 0;
+  const email = raw.trim().toLowerCase();
+  if (email.length === 0) return null;
+  if (email.length > CONTACT_EMAIL_MAX_LENGTH) return void 0;
+  if (/[\x00-\x1f\x7f]/.test(email) || !EMAIL_RE.test(email)) return void 0;
+  return email;
+}
+function contactEmailAttached(email, reused) {
+  return Boolean(email) && !reused;
+}
+function maskEmail(email) {
+  const at = String(email).lastIndexOf("@");
+  if (at <= 0) return "***";
+  return `${email[0]}***${email.slice(at)}`;
+}
+function contactEmailFromArgs(args) {
+  if (args.email === void 0) return null;
+  const email = args.email === true ? void 0 : normalizeContactEmail(String(args.email));
+  if (email === void 0) {
+    const err = new Error(
+      "--email must be a valid email address, for example name@example.com. It is optional: leave it out to continue without one."
+    );
+    err.code = "INVALID_EMAIL";
+    throw err;
+  }
+  return email;
+}
+
 // scripts/src/lib/output.mjs
+var PUBLIC_SUPPORT_URLS = /* @__PURE__ */ new Set([SUPPORT.x, SUPPORT.discord]);
 var EXIT_OK = 0;
 var EXIT_ERROR = 1;
 var EXIT_USAGE = 2;
@@ -41457,7 +41497,8 @@ function redact(text) {
   s = s.replace(/\b[0-9a-fA-F]{64}\b/g, "<redacted>");
   s = s.replace(/\b[1-9A-HJ-NP-Za-km-z]{80,90}\b/g, "<redacted>");
   s = s.replace(/\[(?:\s*\d{1,3}\s*,){40,}\s*\d{1,3}\s*\]/g, "[<redacted>]");
-  s = s.replace(/\b([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^\s"'<>]+)/g, (_m, scheme, rest) => {
+  s = s.replace(/\b([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^\s"'<>]+)/g, (m, scheme, rest) => {
+    if (PUBLIC_SUPPORT_URLS.has(m.replace(/[.,;:!?)]+$/, ""))) return m;
     const withoutUserinfo = rest.includes("@") ? rest.slice(rest.indexOf("@") + 1) : rest;
     const host = withoutUserinfo.split(/[/?#]/)[0];
     const hadMore = withoutUserinfo.length > host.length;
@@ -41844,7 +41885,9 @@ var VALUE_FLAGS = /* @__PURE__ */ new Set([
   "expires-at",
   "provider",
   // Optional channel label for reporting (pay, quote)
-  "utm-source"
+  "utm-source",
+  // Optional contact email so ROZO can reach the payer (pay)
+  "email"
 ]);
 function resolveFromPreset(value) {
   try {
@@ -42001,6 +42044,16 @@ function parseCliArgs(argv) {
   } else {
     source = null;
   }
+  let email = null;
+  if (flags.email !== void 0) {
+    email = normalizeContactEmail(String(flags.email));
+    if (email === void 0) {
+      throw new CliError(
+        "INVALID_EMAIL",
+        "--email must be a valid email address, for example name@example.com. It is optional: leave it out to continue without one."
+      );
+    }
+  }
   const timeout = flags.timeout === void 0 ? 900 : Number(flags.timeout);
   if (!Number.isFinite(timeout) || timeout < 0) {
     throw new CliError("BAD_VALUE", "--timeout must be a non-negative number of seconds.");
@@ -42021,7 +42074,8 @@ function parseCliArgs(argv) {
     fresh: flags.fresh === true,
     keyfile: flags.keyfile,
     envFile: flags["env-file"],
-    ...utmSource ? { utmSource } : {}
+    ...utmSource ? { utmSource } : {},
+    ...email ? { email } : {}
   };
 }
 var HELP = `rozo-checkout \u2014 pay a Coinbase Payment Link or a Bitrefill invoice
@@ -42073,6 +42127,8 @@ OPTIONS
   --rpc <url>     override the RPC endpoint for --send
   --utm-source <s>  optional channel label for reporting; no identity, no
                   privilege. Overrides ROZO_CHECKOUT_UTM_SOURCE.
+  --email <addr>  optional. A contact email stored with the order so ROZO can
+                  reach you if the payment needs attention. Never required.
   --help, -h      this text
   --version, -v   print the version
 
@@ -42080,11 +42136,15 @@ EXAMPLES
   npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01...
   npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01... --with usdt-solana
   npx @rozoai/checkout pay pl_01... --with btc-lightning
+  npx @rozoai/checkout pay pl_01... --with usdt-solana --email you@example.com
   npx @rozoai/checkout pay --bitrefill-invoice 8f3k2 --to 0xAbC\u2026123 --amount 7.90 --expires-at 2026-10-01T12:00:00Z --with usdc-stellar
   npx @rozoai/checkout status 11111111-2222-4333-8444-555555555555
 
 Creating an order moves no money; an unfunded order simply expires. Nothing is
-paid until you confirm, and --send is required before anything is signed.`;
+paid until you confirm, and --send is required before anything is signed.
+
+SUPPORT
+  Email hi@rozo.ai, X https://x.com/ROZOai, Discord https://discord.gg/EfWejgTbuU`;
 
 // scripts/src/lib/wallet-check.mjs
 var INTENT_API_BASE = process.env.ROZO_CHECKOUT_INTENT_API || "https://intentapi.rozo.ai";
@@ -54522,17 +54582,20 @@ async function quoteInvoice({ url, linkId }) {
   const body = url ? { url } : { payment_id: linkId };
   return postJson(`${MPP_BASE}/quote-invoice`, body);
 }
-async function createInvoice({ url, linkId, source, quoteReceipt, utmSource }) {
+async function createInvoice({ url, linkId, source, quoteReceipt, utmSource, email }) {
   const body = {
     ...url ? { url } : { payment_id: linkId },
     source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
     ...quoteReceipt ? { quoteReceipt } : {},
     client: CLIENT_LABEL,
-    attribution: buildAttribution({ utmSource })
+    attribution: buildAttribution({ utmSource }),
+    // Optional payer contact email (validated by the caller). Omitted, never
+    // sent empty, when the user gave none.
+    ...email ? { email } : {}
   };
   return postJson(`${MPP_BASE}/create-invoice`, body);
 }
-async function createBitrefillInvoice({ invoice, source, utmSource }) {
+async function createBitrefillInvoice({ invoice, source, utmSource, email }) {
   const body = {
     provider: "bitrefill",
     bitrefill: {
@@ -54543,7 +54606,8 @@ async function createBitrefillInvoice({ invoice, source, utmSource }) {
     },
     source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
     client: CLIENT_LABEL,
-    attribution: buildAttribution({ utmSource })
+    attribution: buildAttribution({ utmSource }),
+    ...email ? { email } : {}
   };
   return postJson(`${MPP_BASE}/create-invoice`, body);
 }
@@ -55113,6 +55177,7 @@ async function main2(argv) {
   }
   const requested = { chainId, tokenSymbol };
   const confirmed = Boolean(args.confirm);
+  const email = contactEmailFromArgs(args);
   let blacklist;
   try {
     blacklist = loadBlacklist();
@@ -55130,7 +55195,8 @@ async function main2(argv) {
     url: String(url),
     source: requested,
     quoteReceipt,
-    utmSource: typeof args["utm-source"] === "string" ? args["utm-source"] : void 0
+    utmSource: typeof args["utm-source"] === "string" ? args["utm-source"] : void 0,
+    email
   });
   if (!created?.rozoPaymentId) {
     throw new SkillError("CREATE_FAILED", "create-invoice returned no rozoPaymentId.", {
@@ -55287,6 +55353,13 @@ async function main2(argv) {
     success: true,
     step: "create-order",
     confirmed,
+    // True only when an email went out with a NEW order. A reused order keeps
+    // whatever email it was first created with (the router never rebinds), so
+    // reporting true there would be a false promise. The address itself is
+    // never echoed. Note the --confirm run always sees the order as reused;
+    // the CLI carries the first run's value forward.
+    contactEmailProvided: contactEmailAttached(email, created.reused),
+    support: SUPPORT,
     reused: Boolean(created.reused),
     reusedNote: created.reused ? `An existing unpaid order for this link was reused (${rozoPaymentId}), valid for another ${formatRemaining(expiry.msRemaining)}. Nothing new was created.` : null,
     orderCost: "Creating an order moves no money. An order you never fund simply expires and costs nothing.",
@@ -55561,6 +55634,7 @@ async function main3(argv) {
   }
   const requested = { chainId, tokenSymbol };
   const confirmed = Boolean(args.confirm);
+  const email = contactEmailFromArgs(args);
   const rawInvoice = {
     invoiceId: args["invoice-id"],
     address: args.to,
@@ -55584,7 +55658,8 @@ async function main3(argv) {
     created = await createBitrefillInvoice({
       invoice,
       source: requested,
-      utmSource: typeof args["utm-source"] === "string" ? args["utm-source"] : void 0
+      utmSource: typeof args["utm-source"] === "string" ? args["utm-source"] : void 0,
+      email
     });
   } catch (err) {
     const existing = duplicateInvoicePaymentId(err);
@@ -55688,6 +55763,9 @@ async function main3(argv) {
     step: "create-order",
     provider: PROVIDER_BITREFILL,
     confirmed,
+    // False on a resumed order: the router does not attach an email to it.
+    contactEmailProvided: contactEmailAttached(email, resumed),
+    support: SUPPORT,
     reused: resumed,
     reusedNote: resumed ? `An order for this Bitrefill invoice already existed (${rozoPaymentId}); it was resumed. Nothing new was created.` : null,
     orderCost: "Creating an order moves no money. An order you never fund simply expires and costs nothing.",
@@ -55934,7 +56012,9 @@ async function main4(argv) {
       ...result,
       history,
       guidance,
-      timedOut: unresolved
+      timedOut: unresolved,
+      // Anything short of a clean answer gets a human contact.
+      ...failed || unresolved ? { support: SUPPORT } : {}
     },
     failed ? EXIT_ERROR : unresolved ? EXIT_UNCONFIRMED : 0
   );
@@ -57004,6 +57084,9 @@ function printError(payload) {
   if (e.message) out(`  ${e.message}`);
   if (payload?.guidance) out(`  ${yellow(payload.guidance)}`);
 }
+function printSupport() {
+  out(`  ${dim(SUPPORT_TEXT)}`);
+}
 function printMoneyWarning(payload) {
   if (!payload?.moneyDetected) return;
   out();
@@ -57152,6 +57235,7 @@ async function cmdStatus(opts) {
   }
   if (payload.error) {
     printError(payload);
+    printSupport();
     return exitCode;
   }
   out();
@@ -57163,6 +57247,7 @@ async function cmdStatus(opts) {
   if (payload.payin?.txHash) out(`  Pay-in  ${payload.payin.txHash}`);
   if (payload.guidance) out(`  ${payload.escalate ? red(payload.guidance) : dim(payload.guidance)}`);
   printMoneyWarning(payload);
+  if (payload.support) printSupport();
   out();
   return exitCode;
 }
@@ -57237,7 +57322,10 @@ async function cmdPay(opts) {
   }
   const { chainId, tokenSymbol } = opts.source;
   const createFlow = opts.bitrefill ? run3 : run2;
-  const utmArgs = opts.utmSource ? ["--utm-source", opts.utmSource] : [];
+  const utmArgs = [
+    ...opts.utmSource ? ["--utm-source", opts.utmSource] : [],
+    ...opts.email ? ["--email", opts.email] : []
+  ];
   const baseArgs = opts.bitrefill ? [
     "--invoice-id",
     opts.bitrefill.invoiceId,
@@ -57270,6 +57358,7 @@ async function cmdPay(opts) {
     else {
       printError(created.payload);
       printMoneyWarning(created.payload);
+      printSupport();
     }
     return created.exitCode;
   }
@@ -57299,6 +57388,12 @@ async function cmdPay(opts) {
       p.reused ? `  ${dim(`Reusing existing unpaid order ${p.rozoPaymentId} \u2014 nothing new was created.`)}` : `  ${dim(`Order created: ${p.rozoPaymentId}`)}`
     );
     out(`  ${dim("An order you never fund simply expires and costs nothing.")}`);
+    if (opts.email) {
+      out(
+        p.reused ? `  ${dim(`Contact   ${maskEmail(opts.email)} was not attached: this order already existed.`)}` : `  ${dim(`Contact   ${maskEmail(opts.email)}, so ROZO can reach you if this payment needs attention.`)}`
+      );
+    }
+    printSupport();
     out();
     out(dim(`  The amount you send includes bridge and network fees, so it is`));
     out(dim(`  normally larger than the invoice.`));
@@ -57329,10 +57424,12 @@ async function cmdPay(opts) {
     else {
       printError(confirmed.payload);
       printMoneyWarning(confirmed.payload);
+      printSupport();
     }
     return confirmed.exitCode;
   }
   const deposit = confirmed.payload.deposit;
+  confirmed.payload.contactEmailProvided = Boolean(p.contactEmailProvided);
   if (!opts.json) {
     out(`  ${dim(`Confirming order ${rozoPaymentId} \u2014 no second order was created.`)}`);
   }
@@ -57368,6 +57465,7 @@ async function cmdPay(opts) {
     } else if (!sent.payload.success) {
       printError(sent.payload);
       printMoneyWarning(sent.payload);
+      printSupport();
       return sent.exitCode;
     } else if (opts.dryRun) {
       if (sent.payload.keySource) out(`  ${dim(`would sign with ${sent.payload.keySource}`)}`);
@@ -57417,6 +57515,7 @@ async function cmdPay(opts) {
     out(`  ${watched.payload.escalate ? red(watched.payload.guidance) : dim(watched.payload.guidance)}`);
   }
   printMoneyWarning(watched.payload);
+  if (watched.payload.state !== "settled") printSupport();
   out();
   return watched.exitCode;
 }
@@ -57500,6 +57599,9 @@ async function main7() {
 main7().then((code) => process.exit(code ?? EXIT_OK)).catch((err) => {
   const payload = formatFailure(err);
   if (process.argv.includes("--json")) printJson(payload);
-  else printError(payload);
+  else {
+    printError(payload);
+    printSupport();
+  }
   process.exit(EXIT_ERROR);
 });
