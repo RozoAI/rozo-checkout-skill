@@ -1,3 +1,5 @@
+# sync-all-version: 1
+# Managed by sync-all: edits here are overwritten by the next sync-all version.
 # Org secret-scan rules: gitleaks defaults plus patterns for the keys we actually hold.
 title = "org secret scan"
 [extend]
