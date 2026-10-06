@@ -372,6 +372,83 @@ keypair or an encrypted keystore, and supports EVM chains and Solana only —
 Stellar and Lightning are Mode A only.
 </details>
 
+## Paying many invoices (batch / resellers)
+
+Each OpenRouter top-up is its own Coinbase link, so paying many is a loop: one
+`pay` per link, one logged result per link. Install once
+(`npm i -g @rozoai/checkout`) so each run skips the npx download, and run the
+links one at a time.
+
+```bash
+#!/usr/bin/env bash
+# links.txt: one Coinbase link per line (payment-links/pl_* or payment-sessions/paymentSession_*)
+mkdir -p runs
+while IFS= read -r link; do
+  [ -n "$link" ] || continue
+  id="${link##*/}"
+  rozo-checkout pay "$link" --with btc-lightning --yes --json --no-watch \
+    --email you@example.com </dev/null > "runs/$id.json"
+  code=$?
+  jq -r --arg id "$id" --arg code "$code" '[$id, $code,
+      (.order.rozoPaymentId // .rozoPaymentId // "-"),
+      (if .success then "ok" else (.error.code // .send.error.code // "FAILED") end)] | @tsv' \
+    "runs/$id.json" >> runs/batch.tsv
+done < links.txt
+```
+
+- `--yes` is required when stdin is not a terminal, `--json` prints exactly one
+  JSON object, and `--no-watch` returns as soon as the deposit details exist.
+  Without `--no-watch`, `pay --json` first waits for settlement (up to
+  `--timeout`, default 900 s) and prints nothing until then, invoice included.
+- On success, `order.rozoPaymentId` names the order and `order.deposit` says
+  what to pay. Lightning: `deposit.lnInvoice` (the BOLT11) for `deposit.amount`
+  sats. Other coins: `deposit.receiverAddress` and `deposit.amount`, plus
+  `deposit.receiverMemo` on Stellar. Pay each one exactly once from your own
+  wallet before `deposit.expiresAt`. `--send` cannot pay Lightning or Stellar.
+
+Check settlement by `rozoPaymentId` (a link alone is only resolved from this
+machine's own records in `~/.rozo-checkout/state`):
+
+```bash
+rozo-checkout status <rozoPaymentId> --json | jq -r .state
+rozo-checkout status <rozoPaymentId> --watch --timeout 900 --json   # poll every 10 s
+```
+
+A link is paid only when `state` is `settled`. Exit 0 means the check itself
+ran cleanly, not that the invoice settled: `expired_unfunded` also exits 0.
+
+**Retrying without paying twice.** Running `pay` again on the same link does
+not create a second order: while its order is unpaid and unexpired you get the
+same order back (`reused: true`), and once money has arrived `pay` refuses
+with `ORDER_ALREADY_ACTIVE` or `ORDER_ALREADY_FUNDED`. The risk is paying a
+deposit twice, so before re-running `pay` for a link, run `status` on its
+`rozoPaymentId` and act on `state`:
+
+| `state` | What to do |
+| --- | --- |
+| `settled` | Done. Skip this link. |
+| `awaiting_deposit` | Still open. Pay the deposit you already have, once. |
+| `payin_detected`, `payin_confirmed`, `bridging`, `paying_coinbase` | Money is in flight. Wait and poll; do not pay again. |
+| `expired_unfunded` | Nothing arrived. Safe to run `pay` again; you get a new order. Discard the old invoice. |
+| `underpaid`, `stuck_after_payment`, or `moneyDetected: true` | Do not pay again. Contact support with the link and `rozoPaymentId`. |
+| `unknown` (exit 1) | The backend could not be read. Not proof that nothing was paid: retry `status`, not `pay`. |
+
+- Exit codes: `0` ok, `1` refused or failed (read `error.code`), `2` usage
+  error (nothing was created), `3` the watch window ended before a final
+  state. Exit 3 means money may still be in flight: keep polling, do not pay
+  again.
+- Use the same `--with` coin on every run for a link. A different coin can be
+  refused with `REUSED_SOURCE_MISMATCH` or change the open order's deposit.
+- `LINK_USED_OR_EXPIRED` or `LINK_NO_LONGER_PAYABLE`: the Coinbase link is
+  already paid or expired. Check your OpenRouter balance before asking
+  OpenRouter for a new link.
+- `RATE_LIMITED`: order creation is capped per IP per hour (currently 30
+  requests, and each `pay` makes two), so plan on about 15 links per hour from
+  one IP. Wait for the next hour and resume with the links not yet `settled`.
+
+Questions about a batch? Email hi@rozo.ai, or reach us on
+[X](https://x.com/ROZOai) or [Discord](https://discord.gg/EfWejgTbuU).
+
 ## Three rules worth knowing
 
 - **The deposit address is one-time.** Never reuse one from an older order, a
