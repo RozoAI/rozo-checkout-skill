@@ -330,7 +330,7 @@ Leer `error.code`. Los tres con los que es más probable toparse:
 | `error.code` | Qué ocurrió | Qué hacer |
 |---|---|---|
 | `LINK_NO_LONGER_PAYABLE` | alguien ya pagó el enlace, o expiró | pedir al comercio un enlace nuevo; no pagar nada |
-| `EXPIRY_MARGIN` | queda muy poco tiempo para fondear, puentear y liquidar de forma segura | dejar que la orden expire y volver a empezar desde el paso 1 |
+| `EXPIRY_MARGIN` | queda muy poco tiempo para fondear, puentear y liquidar de forma segura | no fondear esta orden; el enlace no se puede volver a pagar, así que pedir al comercio un enlace nuevo y volver a empezar desde el paso 1 |
 | `ALREADY_SENT` | ya hay un envío registrado para esta orden | **no** enviar de nuevo; ejecutar `status.js` y revisar primero la cadena |
 
 **Si algo de dinero ya salió de la billetera, nunca pagar de nuevo.** Conservar

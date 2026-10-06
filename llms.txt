@@ -163,6 +163,9 @@ private key (EVM and Solana only); every other path is keyless.
 - After any on-chain payment is detected, never retry into a new order and never
   label the payment a normal failure — keep the tx hash and rozoPaymentId, keep
   polling, and escalate if it stays stuck.
+- An order that expired unfunded still holds its link: creating an order for the same
+  Coinbase link again returns LINK_USED_OR_EXPIRED. That link cannot be paid again; ask
+  the merchant for a new link (after checking nothing was sent to the old deposit).
 
 ## Errors
 

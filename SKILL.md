@@ -424,6 +424,14 @@ States: `awaiting_deposit` → `payin_detected` → `payin_confirmed` →
 states: `expired_unfunded`, `underpaid`, `stuck_after_payment`, and `unknown`
 (the backend could not be read — **not** evidence that nothing was paid).
 
+`expired_unfunded` on a Coinbase link means the link is spent: the router keys
+the order on the link id and an expired order keeps that id, so re-running
+`pay` on the same link returns `LINK_USED_OR_EXPIRED`. Do not retry it. First
+check the user's wallet: if anything was sent to the old deposit, or a
+Lightning payment is still pending, contact support with `linkId` and
+`rozoPaymentId`. Otherwise ask the merchant (OpenRouter) for a new payment
+link and pay that one.
+
 `settled` is only reported on real settlement evidence. The bridge reaching
 `payment_completed` is not that evidence and shows as `paying_coinbase`.
 

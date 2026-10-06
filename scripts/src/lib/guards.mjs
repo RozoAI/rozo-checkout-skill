@@ -535,7 +535,7 @@ export function classifyStatus({
       }
       const exp = payment?.expiresAt ? Date.parse(payment.expiresAt) : NaN;
       if (Number.isFinite(exp) && exp < now) {
-        return mk('expired_unfunded', 'The order expired before any funds arrived. Safe to retry.', {
+        return mk('expired_unfunded', 'The order expired before any funds arrived. This order can no longer be paid.', {
           terminal: true,
         });
       }
@@ -567,7 +567,7 @@ export function classifyStatus({
         ? mk('stuck_after_payment', 'Order expired AFTER funds arrived — escalate immediately.', {
             escalate: true,
           })
-        : mk('expired_unfunded', 'Order expired unfunded. Safe to retry.', { terminal: true });
+        : mk('expired_unfunded', 'Order expired unfunded. This order can no longer be paid.', { terminal: true });
     case 'payment_bounced':
     case 'payment_refunded':
       return mk('stuck_after_payment', `Order ended as ${payment.status} — escalate.`, {
