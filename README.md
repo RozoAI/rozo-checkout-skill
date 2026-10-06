@@ -498,6 +498,14 @@ The full list of what this refuses to do, and why, is in
 
 ## Changelog
 
+- **0.1.15**: corrected guidance after an order expires unpaid. First check
+  your own wallet that nothing was sent to the old deposit and no Lightning
+  payment is pending; if nothing was sent, re-run the same `pay` on the same
+  link (the router opens a new order once it has verified the old one is
+  unfunded). `PAYMENT_EXPIRED` with `retryable: true` means try again in a few
+  minutes; `LINK_USED_OR_EXPIRED` or `PAYMENT_EXPIRED` with `confirmed: true`
+  means get a new link from the merchant. New README section on paying many
+  invoices (batch / resellers).
 - **0.1.14**: optional `--email <addr>` on `pay` (and on the create-order
   scripts) stores a contact email with the order so ROZO can reach you if the
   payment needs attention. Never required; an invalid address is rejected
