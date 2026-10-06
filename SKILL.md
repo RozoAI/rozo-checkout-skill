@@ -424,13 +424,22 @@ States: `awaiting_deposit` → `payin_detected` → `payin_confirmed` →
 states: `expired_unfunded`, `underpaid`, `stuck_after_payment`, and `unknown`
 (the backend could not be read — **not** evidence that nothing was paid).
 
-`expired_unfunded` on a Coinbase link means the link is spent: the router keys
-the order on the link id and an expired order keeps that id, so re-running
-`pay` on the same link returns `LINK_USED_OR_EXPIRED`. Do not retry it. First
-check the user's wallet: if anything was sent to the old deposit, or a
-Lightning payment is still pending, contact support with `linkId` and
-`rozoPaymentId`. Otherwise ask the merchant (OpenRouter) for a new payment
-link and pay that one.
+`expired_unfunded` on a Coinbase link does not spend the link. First check the
+user's wallet: if anything was sent to the old deposit, or a Lightning payment
+is still pending, do not pay again; contact support with `linkId` and
+`rozoPaymentId` (the router cannot see a pending Lightning payment). If nothing
+was sent, re-run the same `pay` on the same link with the same `--with`: the
+router creates a new order for the link once it has proved every earlier order
+unfunded. Then follow the error code, if any:
+
+- `PAYMENT_EXPIRED` with `retryable: true` (`confirmed: false`): the old order
+  cannot be verified yet; wait a few minutes and retry.
+- `PAYMENT_EXPIRED` with `confirmed: true`, or `LINK_USED_OR_EXPIRED`: the link
+  cannot be paid any more; ask the merchant (OpenRouter) for a new link.
+- `ORDER_ALREADY_ACTIVE`: a payment was found on an earlier order; do not pay
+  again, contact support.
+
+The extra fields are in `error.details.body`.
 
 `settled` is only reported on real settlement evidence. The bridge reaching
 `payment_completed` is not that evidence and shows as `paying_coinbase`.
@@ -493,6 +502,9 @@ of any `status` result that is not a clean answer.
 | `LOCK_TIMEOUT` | another rozo-checkout process holds the send lock | wait for it; never bypass by clearing the lock mid-flight |
 | `TRACKED_DOTENV_UNVERIFIABLE` | env files exist but git could not prove they are untracked | fix git, or run from a directory with no env files |
 | `TX_REVERTED` / `TX_FAILED` | the transfer landed and failed | no funds moved, but the order stays locked; investigate before retrying |
+| `ORDER_ALREADY_ACTIVE` | the router found an order for this link that is past awaiting payment, or a payment on an earlier order | **money-detected rule**: do not pay again, poll `status` or contact support |
+| `PAYMENT_EXPIRED` | an earlier order for this link expired; `retryable: true` means it cannot be proved unfunded yet, `confirmed: true` means every re-order slot is used | `retryable`: check the wallet, wait a few minutes, retry. `confirmed`: ask the merchant for a fresh link |
+| `LINK_USED_OR_EXPIRED` | the Coinbase link itself is paid or expired | ask the merchant for a fresh link; do not fund anything |
 | `ORDER_ALREADY_FUNDED` | an order for this link already shows money | **money-detected rule** — do not pay again, escalate |
 | `REUSED_SOURCE_MISMATCH` | an existing order expects a different chain/token than the caller chose | let it expire, or pay the chain the order actually expects after re-confirming with the user |
 | `CREATE_DRIFT` | the created order disagrees with the quote (merchant, amount or link) | do not fund it; let it expire unfunded and report the drift |

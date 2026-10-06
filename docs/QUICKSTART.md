@@ -322,7 +322,7 @@ Read `error.code`. The three you are most likely to hit:
 | `error.code` | What happened | What to do |
 |---|---|---|
 | `LINK_NO_LONGER_PAYABLE` | someone already paid the link, or it expired | ask the merchant for a fresh link; do not pay anything |
-| `EXPIRY_MARGIN` | too little time left to fund, bridge and settle safely | do not fund this order; the link cannot be paid again, so ask the merchant for a fresh link and start again from step 1 |
+| `EXPIRY_MARGIN` | too little time left to fund, bridge and settle safely | do not fund this order; let it expire, then re-run from step 1 on the same link (a new order is created once the old one is proved unfunded). If that answers `LINK_USED_OR_EXPIRED` or `PAYMENT_EXPIRED` with `confirmed: true`, ask the merchant for a fresh link |
 | `ALREADY_SENT` | a send is already recorded for this order | do **not** send again; run `status.js` and check the chain first |
 
 **If any money has already left your wallet, never pay again.** Keep the

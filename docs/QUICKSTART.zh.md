@@ -281,7 +281,7 @@ node scripts/dist/status.js --rozo-payment-id <rozoPaymentId> --watch --timeout 
 | `error.code` | 发生了什么 | 该怎么办 |
 |---|---|---|
 | `LINK_NO_LONGER_PAYABLE` | 这个链接已经被别人付过，或者已过期 | 找商家要一个新链接；不要付任何钱 |
-| `EXPIRY_MARGIN` | 剩余时间太短，不足以安全完成充值、跨桥和结清 | 不要给这个订单充值；这个链接无法再次支付，请找商家要一个新链接，再从第 1 步重新开始 |
+| `EXPIRY_MARGIN` | 剩余时间太短，不足以安全完成充值、跨桥和结清 | 不要给这个订单充值；等它过期后，用同一个链接从第 1 步重新开始（确认旧订单未收到付款后会生成新订单）。如果返回 `LINK_USED_OR_EXPIRED`，或 `PAYMENT_EXPIRED` 且 `confirmed: true`，就找商家要一个新链接 |
 | `ALREADY_SENT` | 这个订单已经记录过一次发送 | **不要**再发一次；先跑 `status.js` 并去链上核对 |
 
 **只要已经有钱离开了你的钱包，就绝不要再付一次。** 保留好 `linkId`、

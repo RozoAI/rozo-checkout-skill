@@ -55977,6 +55977,7 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
     errors: [statusError, paymentError].filter(Boolean)
   };
 }
+var EXPIRED_UNFUNDED_GUIDANCE = "This order expired before any funds arrived. First check your own wallet: if anything was sent to the old deposit address, or a Lightning payment is still pending, do not pay again; contact support with the linkId and rozoPaymentId (the router cannot see a pending Lightning payment). If nothing was sent, re-run the same pay on the same link with the same --with: it creates a new order for this link. If pay answers PAYMENT_EXPIRED with retryable: true, the old order cannot be verified yet; wait a few minutes and retry. If it answers LINK_USED_OR_EXPIRED, or PAYMENT_EXPIRED with confirmed: true, this link cannot be paid any more; get a new payment link from the merchant (OpenRouter). If it answers ORDER_ALREADY_ACTIVE, a payment was found: do not pay again; contact support.";
 function statusGuidance(result) {
   if (result.escalate) {
     return "MONEY DETECTED and the order is not on a healthy path. Do NOT pay again and do NOT create a new order for this link. Preserve linkId, rozoPaymentId and every tx hash, then escalate to the operator for manual reconciliation.";
@@ -55990,9 +55991,7 @@ function statusGuidance(result) {
   if ((result.state === "expired_unfunded" || result.state === "invoice_expired") && result.provider === "bitrefill") {
     return "Nothing was funded, so nothing was lost. Create a fresh Bitrefill invoice and run rozo-checkout pay --bitrefill-invoice <id> --to <0x\u2026> --amount <USDC> --with <coin>";
   }
-  if (result.state === "expired_unfunded") {
-    return "This order expired before any funds arrived. This payment link cannot be paid again: re-running pay on it returns LINK_USED_OR_EXPIRED. Get a new payment link from the merchant (OpenRouter) and pay that one. First check your own wallet: if anything was sent to the old deposit address, or a Lightning payment is still pending, do not pay the new link yet; contact support with the linkId and rozoPaymentId.";
-  }
+  if (result.state === "expired_unfunded") return EXPIRED_UNFUNDED_GUIDANCE;
   return result.terminal ? "Done." : "Still in flight. Poll again in ~10s.";
 }
 async function main4(argv) {
