@@ -372,6 +372,98 @@ keypair or an encrypted keystore, and supports EVM chains and Solana only —
 Stellar and Lightning are Mode A only.
 </details>
 
+## Paying many invoices (batch / resellers)
+
+Each OpenRouter top-up is its own Coinbase link, so paying many is a loop: one
+`pay` per link, one logged result per link. Install once
+(`npm i -g @rozoai/checkout`) so each run skips the npx download, run the links
+one at a time, and pay each deposit right after it is created.
+
+```bash
+#!/usr/bin/env bash
+# links.txt: one Coinbase link per line (payment-links/pl_* or payment-sessions/paymentSession_*)
+mkdir -p runs
+while IFS= read -r link; do
+  link="${link%$'\r'}"; link="${link%%\?*}"
+  [ -n "$link" ] || continue
+  id="${link##*/}"
+  rozo-checkout pay "$link" --with btc-lightning --yes --json --no-watch \
+    --email you@example.com </dev/null > "runs/$id.json"
+  code=$?
+  row=$(jq -r --arg id "$id" --arg code "$code" '[$id, $code,
+      (.order.rozoPaymentId // .error.details.body.rozoPaymentId // "-"),
+      (if .success then "pending: pay before " + (.order.expiry.effectiveDeadlineIso // "?")
+       else (.error.code // .send.error.code // "FAILED") end)] | @tsv' \
+    "runs/$id.json" 2>/dev/null) || row="$id	$code	-	NO_OUTPUT"
+  printf '%s\n' "$row" >> runs/batch.tsv
+done < links.txt
+```
+
+- `--yes` is required when stdin is not a terminal, `--json` prints exactly one
+  JSON object, and `--no-watch` returns as soon as the deposit details exist.
+  Without `--no-watch`, `pay --json` first waits for settlement (up to
+  `--timeout`, default 900 s) and prints nothing until then, invoice included.
+- Without `--send` (the loop above), a successful `pay --no-watch` means the
+  order and its deposit details exist. **No money has moved yet**, which is
+  why the log says `pending`. With `--send`, the CLI may already have
+  broadcast your payment, so never pay that deposit by hand as well. A link is
+  paid only when `status` later reports `settled`.
+- `order.rozoPaymentId` names the order and `order.deposit` says what to pay.
+  Lightning: `deposit.lnInvoice` (the BOLT11) for `deposit.amount` sats. Other
+  coins: `deposit.receiverAddress` and `deposit.amount`, plus
+  `deposit.receiverMemo` on Stellar. `--send` cannot pay Lightning or Stellar.
+- The deadline to watch is `order.expiry.effectiveDeadlineIso`, not
+  `deposit.expiresAt`: it is the earlier of our order expiry and the Coinbase
+  link expiry. Stop paying at least `order.expiry.marginMinutes` before it,
+  since settlement needs that much time.
+- If time has passed since you created the order, do not pay saved deposit
+  details blindly. Re-run the same `pay` command (same `--with`): while the
+  order is still payable it re-checks the link and the deadline and hands back
+  the same order. Pay only if that succeeds.
+
+Check settlement by `rozoPaymentId` (a link alone is only resolved from this
+machine's own records in `~/.rozo-checkout/state`):
+
+```bash
+rozo-checkout status <rozoPaymentId> --json | jq -r '.state, .escalate'
+rozo-checkout status <rozoPaymentId> --watch --timeout 900 --json   # poll every 10 s
+```
+
+Exit 0 means the check itself ran cleanly, not that the invoice settled:
+`expired_unfunded` also exits 0. Always read `state`.
+
+**Retrying without paying twice.** Running `pay` again on the same link does
+not create a second order: while its order is open you get the same order
+back, and once money has arrived `pay` refuses with `ORDER_ALREADY_ACTIVE` or
+`ORDER_ALREADY_FUNDED`. The risk is paying a deposit twice, so before acting on
+a link again, run `status` on its `rozoPaymentId`:
+
+| `status` result | What to do |
+| --- | --- |
+| `escalate: true` (includes `underpaid`, `stuck_after_payment`; exit 1) | Do not pay again. Contact support with the link, `rozoPaymentId` and any tx hash or payment preimage. |
+| `state: settled` | Done. Skip this link. |
+| `state: awaiting_deposit` | Still open, but a payment you just sent may not be detected yet. First check your wallet: if a send or Lightning payment to this deposit exists or is pending, wait and poll. Only if nothing was sent, re-run the same `pay` to re-check it, then pay the deposit once. |
+| `state: payin_detected`, `payin_confirmed`, `bridging`, `paying_coinbase` | Money is in flight. Wait and poll; do not pay again. |
+| `state: expired_unfunded` | Nothing has arrived and this order is dead. **This link cannot be paid again**: get a new link from OpenRouter. First check your own wallet: if you sent anything to the old deposit, or a Lightning payment is still pending, do not pay the new link yet; contact support. |
+| `state: unknown` (exit 1) | The backend could not be read. Not proof that nothing was paid: retry `status`, not `pay`. |
+
+- Exit codes: `0` ok, `1` refused or failed (read `error.code`), `2` usage
+  error (nothing was created), `3` the watch window ended before a final
+  state. Exit 3 means money may still be in flight: keep polling, do not pay
+  again.
+- Use the same `--with` coin on every run for a link. A different coin can be
+  refused with `REUSED_SOURCE_MISMATCH` or change the open order's deposit.
+- `LINK_USED_OR_EXPIRED` or `LINK_NO_LONGER_PAYABLE`: the Coinbase link is
+  already paid, expired, or its order expired. Check your OpenRouter balance
+  and get a new link if it was not credited.
+- `RATE_LIMITED`: order creation is capped per IP per hour (currently 30
+  requests, and each `pay` makes two), so plan on about 15 links per hour from
+  one IP. Wait for the next hour and resume with the links not yet `settled`.
+  Need more? Email us.
+
+Questions about a batch? Email hi@rozo.ai, or reach us on
+[X](https://x.com/ROZOai) or [Discord](https://discord.gg/EfWejgTbuU).
+
 ## Three rules worth knowing
 
 - **The deposit address is one-time.** Never reuse one from an older order, a
