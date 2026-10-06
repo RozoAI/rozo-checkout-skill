@@ -403,16 +403,19 @@ done < links.txt
   JSON object, and `--no-watch` returns as soon as the deposit details exist.
   Without `--no-watch`, `pay --json` first waits for settlement (up to
   `--timeout`, default 900 s) and prints nothing until then, invoice included.
-- A successful `pay --no-watch` means the order and its deposit details exist.
-  **No money has moved yet**, which is why the log says `pending`. A link is
+- Without `--send` (the loop above), a successful `pay --no-watch` means the
+  order and its deposit details exist. **No money has moved yet**, which is
+  why the log says `pending`. With `--send`, the CLI may already have
+  broadcast your payment, so never pay that deposit by hand as well. A link is
   paid only when `status` later reports `settled`.
 - `order.rozoPaymentId` names the order and `order.deposit` says what to pay.
   Lightning: `deposit.lnInvoice` (the BOLT11) for `deposit.amount` sats. Other
   coins: `deposit.receiverAddress` and `deposit.amount`, plus
   `deposit.receiverMemo` on Stellar. `--send` cannot pay Lightning or Stellar.
-- The deadline to pay is `order.expiry.effectiveDeadlineIso`, not
-  `deposit.expiresAt`. It is the earlier of our order expiry and the Coinbase
-  link expiry, minus a settlement margin. Pay well before it.
+- The deadline to watch is `order.expiry.effectiveDeadlineIso`, not
+  `deposit.expiresAt`: it is the earlier of our order expiry and the Coinbase
+  link expiry. Stop paying at least `order.expiry.marginMinutes` before it,
+  since settlement needs that much time.
 - If time has passed since you created the order, do not pay saved deposit
   details blindly. Re-run the same `pay` command (same `--with`): while the
   order is still payable it re-checks the link and the deadline and hands back
@@ -439,7 +442,7 @@ a link again, run `status` on its `rozoPaymentId`:
 | --- | --- |
 | `escalate: true` (includes `underpaid`, `stuck_after_payment`; exit 1) | Do not pay again. Contact support with the link, `rozoPaymentId` and any tx hash or payment preimage. |
 | `state: settled` | Done. Skip this link. |
-| `state: awaiting_deposit` | Still open. Re-run the same `pay` to re-check it, then pay the deposit once. |
+| `state: awaiting_deposit` | Still open, but a payment you just sent may not be detected yet. First check your wallet: if a send or Lightning payment to this deposit exists or is pending, wait and poll. Only if nothing was sent, re-run the same `pay` to re-check it, then pay the deposit once. |
 | `state: payin_detected`, `payin_confirmed`, `bridging`, `paying_coinbase` | Money is in flight. Wait and poll; do not pay again. |
 | `state: expired_unfunded` | Nothing has arrived and this order is dead. **This link cannot be paid again**: get a new link from OpenRouter. First check your own wallet: if you sent anything to the old deposit, or a Lightning payment is still pending, do not pay the new link yet; contact support. |
 | `state: unknown` (exit 1) | The backend could not be read. Not proof that nothing was paid: retry `status`, not `pay`. |
