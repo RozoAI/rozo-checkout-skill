@@ -163,6 +163,14 @@ private key (EVM and Solana only); every other path is keyless.
 - After any on-chain payment is detected, never retry into a new order and never
   label the payment a normal failure — keep the tx hash and rozoPaymentId, keep
   polling, and escalate if it stays stuck.
+- An order that expired unfunded does not spend its link. First check your wallet: if
+  anything was sent to the old deposit, or a Lightning payment is still pending, do not
+  pay again; contact support with linkId + rozoPaymentId (the router cannot see a
+  pending Lightning payment). If nothing was sent, create-invoice on the SAME link again:
+  the router makes a new order once every earlier order is proved unfunded.
+  409 PAYMENT_EXPIRED retryable:true (confirmed:false) = not verifiable yet, wait a few
+  minutes and retry. 409 PAYMENT_EXPIRED confirmed:true or LINK_USED_OR_EXPIRED = ask
+  the merchant for a new link. 409 ORDER_ALREADY_ACTIVE = funds seen, do not pay again.
 
 ## Errors
 

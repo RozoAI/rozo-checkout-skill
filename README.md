@@ -433,9 +433,10 @@ Exit 0 means the check itself ran cleanly, not that the invoice settled:
 `expired_unfunded` also exits 0. Always read `state`.
 
 **Retrying without paying twice.** Running `pay` again on the same link does
-not create a second order: while its order is open you get the same order
+not create a second order while its order is open: you get the same order
 back, and once money has arrived `pay` refuses with `ORDER_ALREADY_ACTIVE` or
-`ORDER_ALREADY_FUNDED`. The risk is paying a deposit twice, so before acting on
+`ORDER_ALREADY_FUNDED`. Only after an order expired with nothing received does
+`pay` on the same link create a new order. The risk is paying a deposit twice, so before acting on
 a link again, run `status` on its `rozoPaymentId`:
 
 | `status` result | What to do |
@@ -444,7 +445,7 @@ a link again, run `status` on its `rozoPaymentId`:
 | `state: settled` | Done. Skip this link. |
 | `state: awaiting_deposit` | Still open, but a payment you just sent may not be detected yet. First check your wallet: if a send or Lightning payment to this deposit exists or is pending, wait and poll. Only if nothing was sent, re-run the same `pay` to re-check it, then pay the deposit once. |
 | `state: payin_detected`, `payin_confirmed`, `bridging`, `paying_coinbase` | Money is in flight. Wait and poll; do not pay again. |
-| `state: expired_unfunded` | Nothing has arrived and this order is dead. **This link cannot be paid again**: get a new link from OpenRouter. First check your own wallet: if you sent anything to the old deposit, or a Lightning payment is still pending, do not pay the new link yet; contact support. |
+| `state: expired_unfunded` | Nothing has arrived and this order is dead. **First check your own wallet**: if you sent anything to the old deposit, or a Lightning payment is still pending, do not pay again; contact support with the link and `rozoPaymentId` (we cannot see a pending Lightning payment). If nothing was sent, re-run the same `pay` on the same link with the same `--with`: it creates a new order. If that answers `PAYMENT_EXPIRED`, see below. |
 | `state: unknown` (exit 1) | The backend could not be read. Not proof that nothing was paid: retry `status`, not `pay`. |
 
 - Exit codes: `0` ok, `1` refused or failed (read `error.code`), `2` usage
@@ -453,9 +454,14 @@ a link again, run `status` on its `rozoPaymentId`:
   again.
 - Use the same `--with` coin on every run for a link. A different coin can be
   refused with `REUSED_SOURCE_MISMATCH` or change the open order's deposit.
-- `LINK_USED_OR_EXPIRED` or `LINK_NO_LONGER_PAYABLE`: the Coinbase link is
-  already paid, expired, or its order expired. Check your OpenRouter balance
-  and get a new link if it was not credited.
+- `LINK_USED_OR_EXPIRED` or `LINK_NO_LONGER_PAYABLE`: the Coinbase link itself
+  is already paid or expired. Check your OpenRouter balance and get a new link
+  if it was not credited.
+- `PAYMENT_EXPIRED`: an earlier order for this link expired. Read
+  `error.details.body`: with `retryable: true` (`confirmed: false`) the old
+  order cannot be proved unfunded yet, so wait a few minutes and retry the same
+  `pay`; with `confirmed: true` the link has used all its re-orders, so get a
+  new link from OpenRouter.
 - `RATE_LIMITED`: order creation is capped per IP per hour (currently 30
   requests, and each `pay` makes two), so plan on about 15 links per hour from
   one IP. Wait for the next hour and resume with the links not yet `settled`.

@@ -55001,7 +55001,7 @@ function classifyStatus({
       }
       const exp = payment?.expiresAt ? Date.parse(payment.expiresAt) : NaN;
       if (Number.isFinite(exp) && exp < now) {
-        return mk("expired_unfunded", "The order expired before any funds arrived. Safe to retry.", {
+        return mk("expired_unfunded", "The order expired before any funds arrived. This order can no longer be paid.", {
           terminal: true
         });
       }
@@ -55027,7 +55027,7 @@ function classifyStatus({
     case "payment_expired":
       return moneyDetected ? mk("stuck_after_payment", "Order expired AFTER funds arrived \u2014 escalate immediately.", {
         escalate: true
-      }) : mk("expired_unfunded", "Order expired unfunded. Safe to retry.", { terminal: true });
+      }) : mk("expired_unfunded", "Order expired unfunded. This order can no longer be paid.", { terminal: true });
     case "payment_bounced":
     case "payment_refunded":
       return mk("stuck_after_payment", `Order ended as ${payment.status} \u2014 escalate.`, {
@@ -55977,6 +55977,23 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
     errors: [statusError, paymentError].filter(Boolean)
   };
 }
+var EXPIRED_UNFUNDED_GUIDANCE = "This order expired before any funds arrived. First check your own wallet: if anything was sent to the old deposit address, or a Lightning payment is still pending, do not pay again; contact support with the linkId and rozoPaymentId (the router cannot see a pending Lightning payment). If nothing was sent, re-run the same pay on the same link with the same --with: it creates a new order for this link. If pay answers PAYMENT_EXPIRED with retryable: true, the old order cannot be verified yet; wait a few minutes and retry. If it answers LINK_USED_OR_EXPIRED, or PAYMENT_EXPIRED with confirmed: true, this link cannot be paid any more; get a new payment link from the merchant (OpenRouter). If it answers ORDER_ALREADY_ACTIVE, a payment was found: do not pay again; contact support.";
+function statusGuidance(result) {
+  if (result.escalate) {
+    return "MONEY DETECTED and the order is not on a healthy path. Do NOT pay again and do NOT create a new order for this link. Preserve linkId, rozoPaymentId and every tx hash, then escalate to the operator for manual reconciliation.";
+  }
+  if (result.unknown) {
+    return "The order state could not be established. This is NOT evidence that nothing was paid \u2014 do not create a new order and do not send again on the strength of it. Retry, or pass --rozo-payment-id so the authoritative pay-in view can be read.";
+  }
+  if (!result.authoritativeView) {
+    return "Only the fulfilment view was readable; the pay-in view is unavailable, so the money-detected rule cannot be enforced. Pass --rozo-payment-id for a complete answer.";
+  }
+  if ((result.state === "expired_unfunded" || result.state === "invoice_expired") && result.provider === "bitrefill") {
+    return "Nothing was funded, so nothing was lost. Create a fresh Bitrefill invoice and run rozo-checkout pay --bitrefill-invoice <id> --to <0x\u2026> --amount <USDC> --with <coin>";
+  }
+  if (result.state === "expired_unfunded") return EXPIRED_UNFUNDED_GUIDANCE;
+  return result.terminal ? "Done." : "Still in flight. Poll again in ~10s.";
+}
 async function main4(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = args["rozo-payment-id"] || (isRozoPaymentId(args._[0]) ? args._[0] : null);
@@ -56002,7 +56019,7 @@ async function main4(argv) {
     if (next.state !== result.state) history.push({ at: (/* @__PURE__ */ new Date()).toISOString(), state: next.state });
     result = next;
   }
-  const guidance = result.escalate ? "MONEY DETECTED and the order is not on a healthy path. Do NOT pay again and do NOT create a new order for this link. Preserve linkId, rozoPaymentId and every tx hash, then escalate to the operator for manual reconciliation." : result.unknown ? "The order state could not be established. This is NOT evidence that nothing was paid \u2014 do not create a new order and do not send again on the strength of it. Retry, or pass --rozo-payment-id so the authoritative pay-in view can be read." : !result.authoritativeView ? "Only the fulfilment view was readable; the pay-in view is unavailable, so the money-detected rule cannot be enforced. Pass --rozo-payment-id for a complete answer." : (result.state === "expired_unfunded" || result.state === "invoice_expired") && result.provider === "bitrefill" ? "Nothing was funded, so nothing was lost. Create a fresh Bitrefill invoice and run rozo-checkout pay --bitrefill-invoice <id> --to <0x\u2026> --amount <USDC> --with <coin>" : result.state === "expired_unfunded" ? "Nothing was funded, so nothing was lost. Start a fresh order with: rozo-checkout pay <coinbase-link> --with <coin>  (or create-order.js --url <link> --chain <id> --token <SYMBOL>)" : result.terminal ? "Done." : "Still in flight. Poll again in ~10s.";
+  const guidance = statusGuidance(result);
   const unresolved = watch && !result.terminal && !result.escalate && !result.unknown;
   const failed = result.escalate || result.unknown || !result.authoritativeView;
   emit(
