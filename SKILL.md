@@ -452,9 +452,12 @@ The extra fields are in `error.details.body`.
 Alongside `state`, status returns `paymentOutcome` (one of `awaiting_payment`,
 `processing`, `settled`, `expired_unfunded`, `needs_attention`, `unknown`) and
 `nextAction` (`type` plus `canRetryQuery`, `canCreateOrder`, `canSend`). Only
-`nextAction.canSend: true` permits sending money, and it is never true once
-money is detected, a send is recorded on this machine, or the pay-in view is
-partial.
+`nextAction.canSend: true` permits sending money. It is never true once money
+is detected, a send is recorded on this machine (or its record cannot be
+read), or the pay-in view is partial. It also requires `sendWindow.ok`: the
+same deadline-plus-margin and "link still payable" checks the send scripts
+run. When it is false, `nextAction.reason` carries the gate's code
+(`EXPIRY_MARGIN`, `LINK_NO_LONGER_PAYABLE`, ...).
 
 ### Step 6 — report
 
@@ -547,7 +550,7 @@ of any `status` result that is not a clean answer.
 | `DEPOSIT_CHANGED` | the live deposit details differ from what was confirmed | abort; re-run `create-order.js` and re-confirm |
 | `BROADCAST_AMBIGUOUS` | the RPC errored but a transaction may be in flight | do **not** resend; check the sender on an explorer, then poll |
 | `RPC_CHAIN_MISMATCH` | the RPC is not on the chain the order settles on | fix `ROZO_CHECKOUT_RPC_<chainId>`; never sign against it |
-| `INSUFFICIENT_GAS` | the sending wallet cannot pay the network fee (ETH, BNB, POL or SOL). `error.details` has network, fee coin, balance, required and shortfall | nothing was signed and the order is untouched; add the fee coin to that wallet and re-run, or pay with another coin |
+| `INSUFFICIENT_GAS` | the sending wallet cannot pay the network fee (ETH, BNB, POL or SOL; on Base this includes the L1 data fee). `error.details` has network, fee coin, balance, required and shortfall | nothing was signed and the order is untouched; add the fee coin to that wallet and re-run, or pay with another coin |
 | `GAS_CHECK_UNAVAILABLE` | the fee or balance could not be read from the RPC | **not** evidence of a shortfall; retry, pass `--rpc <url>`, or pay by hand (Mode A) |
 | `DECIMALS_MISMATCH` | the token's on-chain decimals disagree with expectations | do not sign — the amount could be off by orders of magnitude |
 | `CAP_PER_TX` | above the $1,100 per-payment limit for automated sending | no override exists; have the user pay from their own wallet (Mode A), which has no limit |
