@@ -25,6 +25,7 @@ import {
   EXIT_UNCONFIRMED,
   SkillError,
   redact,
+  publicHash,
 } from './lib/output.mjs';
 import { assertRozoPaymentId, maskAddress } from './lib/ids.mjs';
 import { chainName, decimalsFor } from './lib/amounts.mjs';
@@ -35,6 +36,7 @@ import { promptPassphrase } from './lib/passphrase.mjs';
 import { preflight, finalPayabilityCheck } from './lib/presend.mjs';
 import { claimSend, recordSendResult } from './lib/state.mjs';
 import { broadcastOutcome } from './lib/outcomes.mjs';
+import { solFeePrecheck } from './lib/gas.mjs';
 
 import {
   Connection,
@@ -176,31 +178,6 @@ async function main(argv) {
     }
   }
 
-  if (dryRun) {
-    emit({
-      success: true,
-      step: 'send-sol-dry-run',
-      rozoPaymentId,
-      linkId: state.linkId,
-      wouldSend: {
-        chain: chainName(900),
-        tokenSymbol: source.tokenSymbol,
-        amountAtomic: amountAtomic.toString(),
-        amount: source.amount,
-        toMasked: maskAddress(source.receiverAddress),
-        fromMasked: maskAddress(sender),
-        toIsTokenAccount,
-        withMemo: Boolean(source.receiverMemo),
-      },
-      confirmedAt: state.confirmation?.confirmedAt ?? null,
-      keySource,
-      // Key NAMES only — a value from a .env is never echoed.
-      envFile: dotenv ? { path: dotenv.path, applied: dotenv.applied } : null,
-      minutesOfSlack: Math.floor(expiry.msOfSlack / 60000),
-      note: 'Nothing was signed or broadcast. Add --send (without --dry-run) to execute.',
-    });
-  }
-
   const tx = new Transaction();
   tx.add(
     createTransferCheckedInstruction(
@@ -225,6 +202,43 @@ async function main(argv) {
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
   tx.recentBlockhash = blockhash;
   tx.feePayer = keypair.publicKey;
+
+  // The SPL balance is not enough: the fee is paid in SOL. Check it on the
+  // exact message about to be signed, before claimSend. A broadcast that fails
+  // for want of SOL would otherwise lock this order against any further
+  // automated send.
+  const networkFee = await solFeePrecheck({
+    connection,
+    payer: keypair.publicKey,
+    message: tx.compileMessage(),
+  });
+
+  if (dryRun) {
+    emit({
+      success: true,
+      step: 'send-sol-dry-run',
+      rozoPaymentId,
+      linkId: state.linkId,
+      wouldSend: {
+        chain: chainName(900),
+        tokenSymbol: source.tokenSymbol,
+        amountAtomic: amountAtomic.toString(),
+        amount: source.amount,
+        toMasked: maskAddress(source.receiverAddress),
+        fromMasked: maskAddress(sender),
+        toIsTokenAccount,
+        withMemo: Boolean(source.receiverMemo),
+      },
+      networkFee,
+      confirmedAt: state.confirmation?.confirmedAt ?? null,
+      keySource,
+      // Key NAMES only — a value from a .env is never echoed.
+      envFile: dotenv ? { path: dotenv.path, applied: dotenv.applied } : null,
+      minutesOfSlack: Math.floor(expiry.msOfSlack / 60000),
+      note: 'Nothing was signed or broadcast. Add --send (without --dry-run) to execute.',
+    });
+  }
+
   tx.sign(keypair);
 
   const signature = tx.signatures[0]?.signature
@@ -288,7 +302,7 @@ async function main(argv) {
           code: landed ? 'BROADCAST_AMBIGUOUS' : 'BROADCAST_FAILED',
           message: redact(err?.message || 'broadcast failed'),
         },
-        signature,
+        signature: publicHash(signature),
         guidance: landed
           ? 'The signed transaction may already be on chain. Do NOT resend. Check the signature ' +
             'on an explorer and poll status.js.'
@@ -336,7 +350,7 @@ async function main(argv) {
         confirmed: false,
         rozoPaymentId,
         linkId: state.linkId,
-        txHash: sent,
+        txHash: publicHash(sent),
         error: {
           code: broadcastOutcome({ executionError }).code,
           message: `The transaction landed but failed on chain: ${redact(JSON.stringify(executionError))}`,
@@ -358,7 +372,7 @@ async function main(argv) {
         confirmed: false,
         rozoPaymentId,
         linkId: state.linkId,
-        txHash: sent,
+        txHash: publicHash(sent),
         guidance:
           'Broadcast but not confirmed within the wait window. Do NOT resend. Poll status.js; ' +
           'receipt truth is the backend confirmedAt/amountReceived.',
@@ -376,7 +390,7 @@ async function main(argv) {
     confirmed: true,
     rozoPaymentId,
     linkId: state.linkId,
-    txHash: sent,
+    txHash: publicHash(sent),
     sent: {
       chain: chainName(900),
       tokenSymbol: source.tokenSymbol,

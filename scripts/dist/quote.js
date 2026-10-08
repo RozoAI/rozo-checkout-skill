@@ -40,7 +40,16 @@ function redact(text) {
   );
   return s;
 }
+var PublicHash = class {
+  constructor(value) {
+    this.value = value;
+  }
+  toJSON() {
+    return this.value;
+  }
+};
 function redactDeep(value) {
+  if (value instanceof PublicHash) return value.value;
   if (typeof value === "string") return redact(value);
   if (Array.isArray(value)) return value.map(redactDeep);
   if (value && typeof value === "object") {

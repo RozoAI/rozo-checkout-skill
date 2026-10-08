@@ -23,7 +23,7 @@ import { execFile } from 'node:child_process';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(here, '..', 'scripts', 'dist');
 
-const BUNDLES = ['cli.js', 'quote.js', 'create-order.js', 'status.js', 'send-evm.js', 'send-sol.js'];
+const BUNDLES = ['cli.js', 'quote.js', 'create-order.js', 'status.js', 'receipt.js', 'send-evm.js', 'send-sol.js'];
 
 /** Globals a CommonJS dependency may expect from the module scope. */
 const CJS_GLOBALS = ['__filename', '__dirname', 'require', 'module', 'exports'];

@@ -19,7 +19,6 @@ var PUBLIC_SUPPORT_URLS = /* @__PURE__ */ new Set([SUPPORT.x, SUPPORT.discord]);
 var EXIT_OK = 0;
 var EXIT_ERROR = 1;
 var EXIT_USAGE = 2;
-var EXIT_UNCONFIRMED = 3;
 function redact(text) {
   if (text === null || text === void 0) return text;
   let s = typeof text === "string" ? text : String(text);
@@ -782,6 +781,10 @@ var STATE_TO_OUTCOME = Object.freeze({
   stuck_after_payment: "needs_attention",
   unknown: "unknown"
 });
+var SERVICE_DELIVERY_NOTE = {
+  coinbase: "The invoice is paid. Arrival of the OpenRouter credits (or other goods) is not independently verified by Rozo; check the merchant account.",
+  bitrefill: "USDC reached the Bitrefill invoice address. Delivery of the Bitrefill order is not independently verified by Rozo; check the Bitrefill order page."
+};
 function merchantSettlementProved(result) {
   if (result?.provider === "bitrefill") return result?.state === "settled";
   return result?.backend?.coinbaseSettled === true;
@@ -896,10 +899,92 @@ function nextActionFor(result, outcome = paymentOutcomeFor(result)) {
       };
   }
 }
+function sourcePaymentLayer(result) {
+  const payin = result?.payin || {};
+  let status;
+  if (result?.unknown || !result?.authoritativeView) status = "unknown";
+  else if (payin.confirmedAt) status = "confirmed";
+  else if (result?.moneyDetected) status = "detected";
+  else status = "none";
+  return {
+    status,
+    evidence: status === "unknown" ? null : "rozo-intents",
+    chain: payin.chain ?? null,
+    expected: payin.expected ?? null,
+    received: payin.received ?? null,
+    txHash: payin.txHash ?? null,
+    confirmedAt: payin.confirmedAt ?? null,
+    localSend: result?.localSend ? {
+      status: result.localSend.status,
+      txHash: result.localSend.txHash ?? null,
+      claimedAt: result.localSend.claimedAt ?? null,
+      // A wallet broadcast proves the payer sent, not that Rozo received.
+      evidence: "local-wallet"
+    } : null
+  };
+}
+function merchantSettlementLayer(result) {
+  if (result?.provider === "bitrefill") {
+    const proved = result?.state === "settled";
+    return {
+      status: proved ? "confirmed" : result?.unknown ? "unknown" : "pending",
+      evidence: proved ? "rozo-payout" : null,
+      provider: "bitrefill",
+      txHash: result?.payout?.txHash ?? null,
+      confirmedAt: result?.payout?.confirmedAt ?? null
+    };
+  }
+  const backend = result?.backend || {};
+  let status;
+  if (backend.routerStatus && backend.routerStatus.startsWith("failed_")) status = "unknown";
+  else if (backend.coinbaseSettled === true) status = "confirmed";
+  else if (backend.coinbaseSettled === null || backend.coinbaseSettled === void 0) {
+    status = backend.routerStatus === "paid" || result?.unknown ? "unknown" : "pending";
+  } else status = "pending";
+  return {
+    status,
+    evidence: status === "confirmed" ? "coinbase" : null,
+    provider: "coinbase",
+    coinbaseStatus: backend.coinbaseStatus ?? null,
+    routerStatus: backend.routerStatus ?? null,
+    // The router reporting `paid` is recorded, but it is not settlement proof.
+    routerReportsPaid: backend.routerStatus === "paid",
+    // Coinbase may read settled because someone else paid the link.
+    routerFailed: Boolean(backend.routerStatus && backend.routerStatus.startsWith("failed_")),
+    payoutTxHash: result?.payout?.txHash ?? null
+  };
+}
+function serviceDeliveryLayer(result, merchant) {
+  return {
+    status: "unknown",
+    evidence: null,
+    note: merchant.status === "confirmed" ? SERVICE_DELIVERY_NOTE[result?.provider === "bitrefill" ? "bitrefill" : "coinbase"] : "Not applicable until the merchant invoice is settled."
+  };
+}
+function buildReceipt(result, { observedAt = (/* @__PURE__ */ new Date()).toISOString() } = {}) {
+  const paymentOutcome = paymentOutcomeFor(result);
+  const merchantSettlement = merchantSettlementLayer(result);
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    orderId: result?.rozoPaymentId ?? null,
+    linkId: result?.linkId ?? null,
+    provider: result?.provider ?? null,
+    observedAt,
+    paymentOutcome,
+    state: result?.state ?? "unknown",
+    sourcePayment: sourcePaymentLayer(result),
+    merchantSettlement,
+    serviceDelivery: serviceDeliveryLayer(result, merchantSettlement),
+    nextAction: nextActionFor(result, paymentOutcome)
+  };
+}
+function receiptExitCode(outcome) {
+  if (outcome === "settled") return 0;
+  if (outcome === "expired_unfunded" || outcome === "needs_attention") return 1;
+  return 3;
+}
 
 // scripts/src/status.mjs
-var POLL_INTERVAL_MS = 1e4;
-var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function resolveProvider(explicit, rozoPaymentId) {
   if (explicit) return String(explicit).toLowerCase();
   if (rozoPaymentId && isRozoPaymentId(rozoPaymentId)) {
@@ -1071,23 +1156,8 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
     errors: [statusError, paymentError].filter(Boolean)
   };
 }
-var EXPIRED_UNFUNDED_GUIDANCE = "This order expired before any funds arrived. First check your own wallet: if anything was sent to the old deposit address, or a Lightning payment is still pending, do not pay again; contact support with the linkId and rozoPaymentId (the router cannot see a pending Lightning payment). If nothing was sent, re-run the same pay on the same link with the same --with: it creates a new order for this link. If pay answers PAYMENT_EXPIRED with retryable: true, the old order cannot be verified yet; wait a few minutes and retry. If it answers LINK_USED_OR_EXPIRED, or PAYMENT_EXPIRED with confirmed: true, this link cannot be paid any more; get a new payment link from the merchant (OpenRouter). If it answers ORDER_ALREADY_ACTIVE, a payment was found: do not pay again; contact support.";
-function statusGuidance(result) {
-  if (result.escalate) {
-    return "MONEY DETECTED and the order is not on a healthy path. Do NOT pay again and do NOT create a new order for this link. Preserve linkId, rozoPaymentId and every tx hash, then escalate to the operator for manual reconciliation.";
-  }
-  if (result.unknown) {
-    return "The order state could not be established. This is NOT evidence that nothing was paid \u2014 do not create a new order and do not send again on the strength of it. Retry, or pass --rozo-payment-id so the authoritative pay-in view can be read.";
-  }
-  if (!result.authoritativeView) {
-    return "Only the fulfilment view was readable; the pay-in view is unavailable, so the money-detected rule cannot be enforced. Pass --rozo-payment-id for a complete answer.";
-  }
-  if ((result.state === "expired_unfunded" || result.state === "invoice_expired") && result.provider === "bitrefill") {
-    return "Nothing was funded, so nothing was lost. Create a fresh Bitrefill invoice and run rozo-checkout pay --bitrefill-invoice <id> --to <0x\u2026> --amount <USDC> --with <coin>";
-  }
-  if (result.state === "expired_unfunded") return EXPIRED_UNFUNDED_GUIDANCE;
-  return result.terminal ? "Done." : "Still in flight. Poll again in ~10s.";
-}
+
+// scripts/src/receipt.mjs
 async function main(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = args["rozo-payment-id"] || (isRozoPaymentId(args._[0]) ? args._[0] : null);
@@ -1102,44 +1172,24 @@ async function main(argv) {
   if (!rozoPaymentId && !linkId) {
     usage("Required: --rozo-payment-id <uuid> and/or --link-id <pl_* | paymentSession_*>");
   }
-  const watch = Boolean(args.watch);
-  const timeoutMs = Math.max(0, Number(args.timeout ?? 600) * 1e3);
-  const deadline = Date.now() + timeoutMs;
-  let result = await snapshot({ rozoPaymentId, linkId, provider });
-  const history = [{ at: (/* @__PURE__ */ new Date()).toISOString(), state: result.state }];
-  while (watch && !result.terminal && !result.escalate && !result.unknown && Date.now() < deadline) {
-    await sleep(POLL_INTERVAL_MS);
-    const next = await snapshot({ rozoPaymentId: result.rozoPaymentId || rozoPaymentId, linkId, provider });
-    if (next.state !== result.state) history.push({ at: (/* @__PURE__ */ new Date()).toISOString(), state: next.state });
-    result = next;
-  }
-  const guidance = statusGuidance(result);
-  const unresolved = watch && !result.terminal && !result.escalate && !result.unknown;
-  const failed = result.escalate || result.unknown || !result.authoritativeView;
-  const paymentOutcome = paymentOutcomeFor(result);
+  const result = await snapshot({ rozoPaymentId, linkId, provider });
+  const receipt = buildReceipt(result);
+  const exitCode = receiptExitCode(receipt.paymentOutcome);
   emit(
     {
-      // `success` keeps its historical meaning (the query produced a clean
-      // answer). It is NOT "the invoice is paid": read paymentOutcome.
-      success: !failed,
-      schemaVersion: SCHEMA_VERSION,
+      success: receipt.paymentOutcome === "settled",
       operationOk: !result.unknown,
-      paymentOutcome,
-      nextAction: nextActionFor(result, paymentOutcome),
-      step: "status",
-      ...result,
-      history,
-      guidance,
-      timedOut: unresolved,
-      // Anything short of a clean answer gets a human contact.
-      ...failed || unresolved ? { support: SUPPORT } : {}
+      step: "receipt",
+      receipt,
+      errors: result.errors,
+      ...exitCode === 0 ? {} : { support: SUPPORT }
     },
-    failed ? EXIT_ERROR : unresolved ? EXIT_UNCONFIRMED : 0
+    exitCode
   );
 }
 async function run(argv = process.argv.slice(2)) {
   return main(argv);
 }
 
-// scripts/src/bin/status.mjs
+// scripts/src/bin/receipt.mjs
 run().catch((err) => fail(err));

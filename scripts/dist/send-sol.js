@@ -32177,7 +32177,20 @@ function redact(text) {
   );
   return s;
 }
+var PublicHash = class {
+  constructor(value) {
+    this.value = value;
+  }
+  toJSON() {
+    return this.value;
+  }
+};
+var TX_HASH_VALUE = /^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{86,88})$/;
+function publicHash(value) {
+  return typeof value === "string" && TX_HASH_VALUE.test(value) ? new PublicHash(value) : value;
+}
 function redactDeep(value) {
+  if (value instanceof PublicHash) return value.value;
   if (typeof value === "string") return redact(value);
   if (Array.isArray(value)) return value.map(redactDeep);
   if (value && typeof value === "object") {
@@ -33988,6 +34001,82 @@ function broadcastOutcome({ receiptStatus, executionError = null, receiptSeen = 
   };
 }
 
+// scripts/src/lib/gas.mjs
+var EVM_FEE_COIN = Object.freeze({
+  1: { symbol: "ETH", network: "Ethereum" },
+  56: { symbol: "BNB", network: "BNB Chain" },
+  137: { symbol: "POL", network: "Polygon" },
+  8453: { symbol: "ETH", network: "Base" }
+});
+function formatAtomic(atomic, decimals) {
+  const neg = atomic < 0n;
+  const v = neg ? -atomic : atomic;
+  const base = 10n ** BigInt(decimals);
+  const whole = v / base;
+  const frac = (v % base).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return `${neg ? "-" : ""}${whole}${frac ? `.${frac}` : ""}`;
+}
+function assessFee({ balance, required, decimals, symbol, network }) {
+  const ok = required === null ? balance > 0n : balance >= required;
+  const details = {
+    network,
+    feeCoin: symbol,
+    balance: formatAtomic(balance, decimals),
+    required: required === null ? null : formatAtomic(required, decimals),
+    shortfall: required === null || ok ? null : formatAtomic(required - balance, decimals)
+  };
+  return { ok, details };
+}
+function insufficient(details, extra) {
+  const need = details.required ? `about ${details.required} ${details.feeCoin}` : `some ${details.feeCoin}`;
+  return new SkillError(
+    "INSUFFICIENT_GAS",
+    `This wallet holds ${details.balance} ${details.feeCoin} on ${details.network} but needs ${need} for the network fee${details.shortfall ? ` (short by ${details.shortfall} ${details.feeCoin})` : ""}. Nothing was signed. Add ${details.feeCoin} on ${details.network} to this wallet and re-run, or pay with a different coin.` + (extra ? ` ${extra}` : ""),
+    details
+  );
+}
+function unavailable(network, err) {
+  return new SkillError(
+    "GAS_CHECK_UNAVAILABLE",
+    `Could not check the network fee on ${network}: ${redact(err?.shortMessage || err?.message || "unknown error")}. This is not evidence of a shortfall. Nothing was signed. Retry, pass --rpc <url>, or pay by hand from your wallet.`,
+    { network }
+  );
+}
+var LAMPORTS_DECIMALS = 9;
+async function solFeePrecheck({ connection, payer, message }) {
+  const network = "Solana";
+  let balance;
+  let fee;
+  let rentMin;
+  try {
+    balance = BigInt(await connection.getBalance(payer, "confirmed"));
+    const res = await connection.getFeeForMessage(message, "confirmed");
+    if (res?.value === null || res?.value === void 0) {
+      throw new Error("the node returned no fee for this transaction (stale blockhash?)");
+    }
+    fee = BigInt(res.value);
+    rentMin = BigInt(await connection.getMinimumBalanceForRentExemption(0));
+  } catch (err) {
+    if (balance === 0n) {
+      throw insufficient(
+        assessFee({ balance, required: null, decimals: LAMPORTS_DECIMALS, symbol: "SOL", network }).details
+      );
+    }
+    throw unavailable(network, err);
+  }
+  const remaining = balance - fee;
+  const required = remaining === 0n ? fee : fee + rentMin;
+  const { ok, details } = assessFee({ balance, required, decimals: LAMPORTS_DECIMALS, symbol: "SOL", network });
+  const full = { ...details, fee: formatAtomic(fee, LAMPORTS_DECIMALS), rentExemptMinimum: formatAtomic(rentMin, LAMPORTS_DECIMALS) };
+  if (!ok) {
+    throw insufficient(
+      full,
+      balance >= fee ? "Solana also requires a wallet to keep a small minimum balance after paying the fee." : null
+    );
+  }
+  return full;
+}
+
 // scripts/src/send-sol.mjs
 var import_web32 = __toESM(require_index_cjs(), 1);
 
@@ -34152,30 +34241,6 @@ async function main(argv) {
       );
     }
   }
-  if (dryRun) {
-    emit({
-      success: true,
-      step: "send-sol-dry-run",
-      rozoPaymentId,
-      linkId: state.linkId,
-      wouldSend: {
-        chain: chainName(900),
-        tokenSymbol: source.tokenSymbol,
-        amountAtomic: amountAtomic.toString(),
-        amount: source.amount,
-        toMasked: maskAddress(source.receiverAddress),
-        fromMasked: maskAddress(sender),
-        toIsTokenAccount,
-        withMemo: Boolean(source.receiverMemo)
-      },
-      confirmedAt: state.confirmation?.confirmedAt ?? null,
-      keySource,
-      // Key NAMES only — a value from a .env is never echoed.
-      envFile: dotenv ? { path: dotenv.path, applied: dotenv.applied } : null,
-      minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4),
-      note: "Nothing was signed or broadcast. Add --send (without --dry-run) to execute."
-    });
-  }
   const tx = new import_web32.Transaction();
   tx.add(
     createTransferCheckedInstruction(
@@ -34199,6 +34264,36 @@ async function main(argv) {
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
   tx.recentBlockhash = blockhash;
   tx.feePayer = keypair.publicKey;
+  const networkFee = await solFeePrecheck({
+    connection,
+    payer: keypair.publicKey,
+    message: tx.compileMessage()
+  });
+  if (dryRun) {
+    emit({
+      success: true,
+      step: "send-sol-dry-run",
+      rozoPaymentId,
+      linkId: state.linkId,
+      wouldSend: {
+        chain: chainName(900),
+        tokenSymbol: source.tokenSymbol,
+        amountAtomic: amountAtomic.toString(),
+        amount: source.amount,
+        toMasked: maskAddress(source.receiverAddress),
+        fromMasked: maskAddress(sender),
+        toIsTokenAccount,
+        withMemo: Boolean(source.receiverMemo)
+      },
+      networkFee,
+      confirmedAt: state.confirmation?.confirmedAt ?? null,
+      keySource,
+      // Key NAMES only — a value from a .env is never echoed.
+      envFile: dotenv ? { path: dotenv.path, applied: dotenv.applied } : null,
+      minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4),
+      note: "Nothing was signed or broadcast. Add --send (without --dry-run) to execute."
+    });
+  }
   tx.sign(keypair);
   const signature = tx.signatures[0]?.signature ? base58Encode(tx.signatures[0].signature) : null;
   await finalPayabilityCheck({
@@ -34250,7 +34345,7 @@ async function main(argv) {
           code: landed ? "BROADCAST_AMBIGUOUS" : "BROADCAST_FAILED",
           message: redact(err?.message || "broadcast failed")
         },
-        signature,
+        signature: publicHash(signature),
         guidance: landed ? "The signed transaction may already be on chain. Do NOT resend. Check the signature on an explorer and poll status.js." : "Nothing appears to have landed, but this order is now locked against a second automated send. Verify on chain before doing anything else."
       },
       EXIT_ERROR
@@ -34287,7 +34382,7 @@ async function main(argv) {
         confirmed: false,
         rozoPaymentId,
         linkId: state.linkId,
-        txHash: sent,
+        txHash: publicHash(sent),
         error: {
           code: broadcastOutcome({ executionError }).code,
           message: `The transaction landed but failed on chain: ${redact(JSON.stringify(executionError))}`
@@ -34306,7 +34401,7 @@ async function main(argv) {
         confirmed: false,
         rozoPaymentId,
         linkId: state.linkId,
-        txHash: sent,
+        txHash: publicHash(sent),
         guidance: "Broadcast but not confirmed within the wait window. Do NOT resend. Poll status.js; receipt truth is the backend confirmedAt/amountReceived."
       },
       EXIT_UNCONFIRMED
@@ -34320,7 +34415,7 @@ async function main(argv) {
     confirmed: true,
     rozoPaymentId,
     linkId: state.linkId,
-    txHash: sent,
+    txHash: publicHash(sent),
     sent: {
       chain: chainName(900),
       tokenSymbol: source.tokenSymbol,

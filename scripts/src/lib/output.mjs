@@ -68,7 +68,35 @@ export function redact(text) {
 }
 
 /** Deep-redact an arbitrary value destined for stdout. */
+/**
+ * A public transaction hash or signature that our own code chose to show.
+ *
+ * An EVM tx hash has the same shape as a private key (0x + 64 hex) and a
+ * Solana signature the same shape as a base58 secret key, so the pattern
+ * redaction above cannot tell them apart and used to mask every hash. Neither
+ * a field name nor a length proves a value is public: an upstream error body
+ * could carry a key-shaped value under `signature`. So the exemption is an
+ * explicit marker instead. Only code that has the hash from a transaction
+ * result or a known response field wraps it with publicHash(); parsed JSON can
+ * never contain a PublicHash, so error bodies stay fully redacted.
+ */
+class PublicHash {
+  constructor(value) {
+    this.value = value;
+  }
+  toJSON() {
+    return this.value;
+  }
+}
+const TX_HASH_VALUE = /^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{86,88})$/;
+
+/** Mark a value as a public tx hash. Anything that is not exactly one hash is returned unchanged. */
+export function publicHash(value) {
+  return typeof value === 'string' && TX_HASH_VALUE.test(value) ? new PublicHash(value) : value;
+}
+
 export function redactDeep(value) {
+  if (value instanceof PublicHash) return value.value;
   if (typeof value === 'string') return redact(value);
   if (Array.isArray(value)) return value.map(redactDeep);
   if (value && typeof value === 'object') {

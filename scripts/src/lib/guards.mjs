@@ -486,9 +486,9 @@ export function classifyStatus({
   // paid, or by Coinbase reporting the resource settled. The intents-side
   // `payment_completed` is the bridge lifecycle finishing, which happens
   // before (and independently of) the Coinbase leg.
-  if (!bitrefill && (routerStatus === 'paid' || coinbase?.settled === true)) {
-    return mk('settled', 'Coinbase invoice settled by the funder wallet.', { terminal: true });
-  }
+  // A failed fulfilment is checked FIRST. A Coinbase link can read as settled
+  // (v1 usageCount >= maxUsage) because someone else paid it, while this
+  // order's pay-in sits stranded; that must never be reported as settled.
   if (routerStatus === 'failed_pay_invoice' || routerStatus === 'failed_insufficient_balance') {
     return mk(
       'stuck_after_payment',
@@ -496,6 +496,9 @@ export function classifyStatus({
         'manual reconciliation.',
       { terminal: false, escalate: true },
     );
+  }
+  if (!bitrefill && (routerStatus === 'paid' || coinbase?.settled === true)) {
+    return mk('settled', 'Coinbase invoice settled by the funder wallet.', { terminal: true });
   }
 
   if (moneyDetected && receipt && receipt.state === 'underpaid') {

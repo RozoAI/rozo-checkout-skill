@@ -3441,6 +3441,9 @@ function carry(digits) {
   }
   return `1${out.join("")}`;
 }
+function fromGwei(gwei, unit = "wei") {
+  return from(gwei, exponents.gwei - exponents[unit]);
+}
 var exponents, InvalidDecimalNumberError, InvalidDecimalsError;
 var init_Value = __esm({
   "node_modules/viem/_esm/utils/unit/Value.js"() {
@@ -10006,7 +10009,20 @@ function redact(text) {
   );
   return s;
 }
+var PublicHash = class {
+  constructor(value) {
+    this.value = value;
+  }
+  toJSON() {
+    return this.value;
+  }
+};
+var TX_HASH_VALUE = /^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{86,88})$/;
+function publicHash(value) {
+  return typeof value === "string" && TX_HASH_VALUE.test(value) ? new PublicHash(value) : value;
+}
 function redactDeep(value) {
+  if (value instanceof PublicHash) return value.value;
   if (typeof value === "string") return redact(value);
   if (Array.isArray(value)) return value.map(redactDeep);
   if (value && typeof value === "object") {
@@ -18315,6 +18331,12 @@ function formatUnits(value, decimals) {
   return format(value, decimals);
 }
 
+// node_modules/viem/_esm/utils/unit/parseGwei.js
+init_Value();
+function parseGwei(ether, unit = "wei") {
+  return fromGwei(ether, unit);
+}
+
 // node_modules/viem/_esm/utils/unit/parseUnits.js
 init_Value();
 function parseUnits(value, decimals) {
@@ -18458,7 +18480,7 @@ init_createBatchScheduler();
 init_stringify();
 async function multicall(client, parameters) {
   const { account, authorizationList, allowFailure = true, blockHash, blockNumber, blockOverrides, blockTag, requireCanonical, stateOverride } = parameters;
-  const contracts = parameters.contracts;
+  const contracts2 = parameters.contracts;
   const batch = typeof client.batch?.multicall === "object" ? client.batch.multicall : {};
   const batchSize = parameters.batchSize ?? batch.batchSize ?? 1024;
   const deployless = parameters.deployless ?? batch.deployless ?? false;
@@ -18479,8 +18501,8 @@ async function multicall(client, parameters) {
   const chunkedCalls = [[]];
   let currentChunk = 0;
   let currentChunkSize = 0;
-  for (let i = 0; i < contracts.length; i++) {
-    const { abi: abi2, address, args, functionName } = contracts[i];
+  for (let i = 0; i < contracts2.length; i++) {
+    const { abi: abi2, address, args, functionName } = contracts2[i];
     try {
       const callData = encodeFunctionData({ abi: abi2, args, functionName });
       currentChunkSize += (callData.length - 2) / 2;
@@ -18574,7 +18596,7 @@ async function multicall(client, parameters) {
     for (let j = 0; j < aggregate3Result.length; j++) {
       const { returnData, success } = aggregate3Result[j];
       const { callData } = batches[i][j];
-      const { abi: abi2, address, functionName, args } = contracts[results.length];
+      const { abi: abi2, address, functionName, args } = contracts2[results.length];
       try {
         if (callData === "0x")
           throw new AbiDecodingZeroDataError();
@@ -18601,7 +18623,7 @@ async function multicall(client, parameters) {
       }
     }
   }
-  if (results.length !== contracts.length)
+  if (results.length !== contracts2.length)
     throw new BaseError2("multicall results mismatch");
   return results;
 }
@@ -22802,6 +22824,256 @@ function broadcastOutcome({ receiptStatus, executionError = null, receiptSeen = 
   };
 }
 
+// scripts/src/lib/gas.mjs
+var EVM_FEE_COIN = Object.freeze({
+  1: { symbol: "ETH", network: "Ethereum" },
+  56: { symbol: "BNB", network: "BNB Chain" },
+  137: { symbol: "POL", network: "Polygon" },
+  8453: { symbol: "ETH", network: "Base" }
+});
+var DEFAULT_GAS_BUFFER_PCT = 20;
+var MAX_GAS_BUFFER_PCT = 200;
+function gasBufferPct(env = process.env) {
+  const raw = env?.ROZO_CHECKOUT_GAS_BUFFER_PCT;
+  if (raw === void 0 || raw === "") return DEFAULT_GAS_BUFFER_PCT;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > MAX_GAS_BUFFER_PCT) return DEFAULT_GAS_BUFFER_PCT;
+  return n;
+}
+function formatAtomic(atomic, decimals) {
+  const neg = atomic < 0n;
+  const v = neg ? -atomic : atomic;
+  const base = 10n ** BigInt(decimals);
+  const whole = v / base;
+  const frac = (v % base).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return `${neg ? "-" : ""}${whole}${frac ? `.${frac}` : ""}`;
+}
+function evmFeeRequirement({ gasEstimate, maxFeePerGas, gasPrice, bufferPct = DEFAULT_GAS_BUFFER_PCT }) {
+  const perGas = typeof maxFeePerGas === "bigint" ? maxFeePerGas : typeof gasPrice === "bigint" ? gasPrice : null;
+  if (typeof gasEstimate !== "bigint" || perGas === null) return null;
+  const gasLimit = (gasEstimate * BigInt(100 + bufferPct) + 99n) / 100n;
+  return { gasLimit, perGas, pricing: typeof maxFeePerGas === "bigint" ? "eip1559" : "legacy", fee: gasLimit * perGas };
+}
+function assessFee({ balance, required, decimals, symbol, network }) {
+  const ok = required === null ? balance > 0n : balance >= required;
+  const details = {
+    network,
+    feeCoin: symbol,
+    balance: formatAtomic(balance, decimals),
+    required: required === null ? null : formatAtomic(required, decimals),
+    shortfall: required === null || ok ? null : formatAtomic(required - balance, decimals)
+  };
+  return { ok, details };
+}
+function insufficient(details, extra) {
+  const need = details.required ? `about ${details.required} ${details.feeCoin}` : `some ${details.feeCoin}`;
+  return new SkillError(
+    "INSUFFICIENT_GAS",
+    `This wallet holds ${details.balance} ${details.feeCoin} on ${details.network} but needs ${need} for the network fee${details.shortfall ? ` (short by ${details.shortfall} ${details.feeCoin})` : ""}. Nothing was signed. Add ${details.feeCoin} on ${details.network} to this wallet and re-run, or pay with a different coin.` + (extra ? ` ${extra}` : ""),
+    details
+  );
+}
+function unavailable(network, err) {
+  return new SkillError(
+    "GAS_CHECK_UNAVAILABLE",
+    `Could not check the network fee on ${network}: ${redact(err?.shortMessage || err?.message || "unknown error")}. This is not evidence of a shortfall. Nothing was signed. Retry, pass --rpc <url>, or pay by hand from your wallet.`,
+    { network }
+  );
+}
+async function estimateFees(client) {
+  try {
+    return await client.estimateFeesPerGas();
+  } catch (err) {
+    if (err?.name !== "Eip1559FeesNotSupportedError") throw err;
+    return client.estimateFeesPerGas({ type: "legacy" });
+  }
+}
+var OP_STACK_GAS_PRICE_ORACLE = "0x420000000000000000000000000000000000000F";
+var OP_STACK_CHAIN_IDS = /* @__PURE__ */ new Set([8453]);
+async function evmGasPrecheck({
+  client,
+  chainId,
+  from: from15,
+  to,
+  data,
+  value = 0n,
+  bufferPct = gasBufferPct(),
+  estimateL1Fee: estimateL1Fee2 = null
+}) {
+  const coin = EVM_FEE_COIN[Number(chainId)] ?? { symbol: "native coin", network: `chain ${chainId}` };
+  let balance;
+  try {
+    balance = await client.getBalance({ address: from15 });
+  } catch (err) {
+    throw unavailable(coin.network, err);
+  }
+  let gasEstimate;
+  let fees;
+  try {
+    gasEstimate = await client.estimateGas({ account: from15, to, data, value });
+    fees = await estimateFees(client);
+  } catch (err) {
+    if (balance === 0n) {
+      throw insufficient(
+        assessFee({ balance, required: null, decimals: 18, symbol: coin.symbol, network: coin.network }).details
+      );
+    }
+    throw unavailable(coin.network, err);
+  }
+  const req = evmFeeRequirement({
+    gasEstimate,
+    maxFeePerGas: fees?.maxFeePerGas,
+    gasPrice: fees?.gasPrice,
+    bufferPct
+  });
+  if (!req) throw unavailable(coin.network, new Error("the node returned no fee price"));
+  let l1Fee = 0n;
+  if (OP_STACK_CHAIN_IDS.has(Number(chainId))) {
+    if (typeof estimateL1Fee2 !== "function") {
+      throw unavailable(coin.network, new Error("no L1 data fee estimator for this OP-stack chain"));
+    }
+    try {
+      l1Fee = (await estimateL1Fee2() * BigInt(100 + bufferPct) + 99n) / 100n;
+    } catch (err) {
+      throw unavailable(coin.network, err);
+    }
+  }
+  const required = req.fee + l1Fee + value;
+  const { ok, details } = assessFee({ balance, required, decimals: 18, symbol: coin.symbol, network: coin.network });
+  const full = {
+    ...details,
+    gasLimit: req.gasLimit.toString(),
+    pricing: req.pricing,
+    bufferPct,
+    l1DataFee: OP_STACK_CHAIN_IDS.has(Number(chainId)) ? formatAtomic(l1Fee, 18) : null
+  };
+  if (!ok) throw insufficient(full);
+  return full;
+}
+
+// node_modules/viem/_esm/op-stack/contracts.js
+var contracts = {
+  gasPriceOracle: { address: "0x420000000000000000000000000000000000000F" },
+  l1Block: { address: "0x4200000000000000000000000000000000000015" },
+  l2CrossDomainMessenger: {
+    address: "0x4200000000000000000000000000000000000007"
+  },
+  l2Erc721Bridge: { address: "0x4200000000000000000000000000000000000014" },
+  l2StandardBridge: { address: "0x4200000000000000000000000000000000000010" },
+  l2ToL1MessagePasser: {
+    address: "0x4200000000000000000000000000000000000016"
+  }
+};
+
+// node_modules/viem/_esm/op-stack/abis.js
+var gasPriceOracleAbi = [
+  { inputs: [], stateMutability: "nonpayable", type: "constructor" },
+  {
+    inputs: [],
+    name: "DECIMALS",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "baseFee",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "decimals",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "pure",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "gasPrice",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [{ internalType: "bytes", name: "_data", type: "bytes" }],
+    name: "getL1Fee",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [{ internalType: "bytes", name: "_data", type: "bytes" }],
+    name: "getL1GasUsed",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "l1BaseFee",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "overhead",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "scalar",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "version",
+    outputs: [{ internalType: "string", name: "", type: "string" }],
+    stateMutability: "view",
+    type: "function"
+  }
+];
+
+// node_modules/viem/_esm/op-stack/actions/estimateL1Fee.js
+init_getChainContractAddress();
+async function estimateL1Fee(client, args) {
+  const { chain = client.chain, gasPriceOracleAddress: gasPriceOracleAddress_ } = args;
+  const gasPriceOracleAddress = (() => {
+    if (gasPriceOracleAddress_)
+      return gasPriceOracleAddress_;
+    if (chain)
+      return getChainContractAddress({
+        chain,
+        contract: "gasPriceOracle"
+      });
+    return contracts.gasPriceOracle.address;
+  })();
+  const transaction = serializeTransaction({
+    ...args,
+    chainId: chain?.id ?? 1,
+    type: "eip1559",
+    // Set upper-limit-ish stub values. Shouldn't affect the estimate too much as we are
+    // tweaking dust bytes here (as opposed to long `data` bytes).
+    // See: https://github.com/ethereum-optimism/optimism/blob/54d02df55523c9e1b4b38ed082c12a42087323a0/packages/contracts-bedrock/src/L2/GasPriceOracle.sol#L242-L248.
+    gas: args.data ? 300000n : 21000n,
+    maxFeePerGas: parseGwei("5"),
+    maxPriorityFeePerGas: parseGwei("1"),
+    nonce: 1
+  });
+  return readContract(client, {
+    abi: gasPriceOracleAbi,
+    address: gasPriceOracleAddress,
+    functionName: "getL1Fee",
+    args: [transaction]
+  });
+}
+
 // node_modules/viem/_esm/accounts/privateKeyToAccount.js
 init_secp256k1();
 init_toHex();
@@ -23073,6 +23345,25 @@ async function main(argv) {
       `Sender holds ${balance} atomic units of ${source.tokenSymbol} on ${chainName(chainId)}; ${amountAtomic} are required.`
     );
   }
+  const data = encodeFunctionData({
+    abi: ERC20_TRANSFER_ABI,
+    functionName: "transfer",
+    args: [to, amountAtomic]
+  });
+  const networkFee = await evmGasPrecheck({
+    client: pub,
+    chainId,
+    from: sender,
+    to: tokenAddress,
+    data,
+    estimateL1Fee: OP_STACK_CHAIN_IDS.has(chainId) ? () => estimateL1Fee(pub, {
+      account: sender,
+      to: tokenAddress,
+      data,
+      chain,
+      gasPriceOracleAddress: OP_STACK_GAS_PRICE_ORACLE
+    }) : null
+  });
   if (dryRun) {
     emit({
       success: true,
@@ -23088,6 +23379,7 @@ async function main(argv) {
         toMasked: maskAddress(to),
         fromMasked: maskAddress(sender)
       },
+      networkFee,
       confirmedAt: state.confirmation?.confirmedAt ?? null,
       keySource,
       // Key NAMES only — a value from a .env is never echoed.
@@ -23097,11 +23389,6 @@ async function main(argv) {
     });
   }
   const wallet = createWalletClient({ account, chain, transport: http(rpcUrl) });
-  const data = encodeFunctionData({
-    abi: ERC20_TRANSFER_ABI,
-    functionName: "transfer",
-    args: [to, amountAtomic]
-  });
   const request2 = await wallet.prepareTransactionRequest({
     to: tokenAddress,
     data,
@@ -23160,7 +23447,7 @@ async function main(argv) {
           code: landed === false ? "BROADCAST_FAILED" : "BROADCAST_AMBIGUOUS",
           message: redact(err?.shortMessage || err?.message || "broadcast failed")
         },
-        signedTxHash: expectedTxHash,
+        signedTxHash: publicHash(expectedTxHash),
         nonceBefore,
         foundOnChain: landed,
         guidance: landed === false ? "Nothing appears to have been broadcast, but this order is now locked against a second automated send. Verify the signed hash on a block explorer first." : "The signed transaction may already be in flight. Do NOT resend. Look up the signed hash above on a block explorer and poll status.js."
@@ -23184,7 +23471,7 @@ async function main(argv) {
         confirmed: false,
         rozoPaymentId,
         linkId: state.linkId,
-        txHash,
+        txHash: publicHash(txHash),
         guidance: "Broadcast but not confirmed within the wait window. Do NOT resend. Poll status.js; receipt truth is the backend confirmedAt/amountReceived, not this response."
       },
       EXIT_UNCONFIRMED
@@ -23205,7 +23492,7 @@ async function main(argv) {
       confirmed: succeeded,
       rozoPaymentId,
       linkId: state.linkId,
-      txHash,
+      txHash: publicHash(txHash),
       blockNumber: receipt.blockNumber?.toString?.() ?? null,
       ...succeeded ? {} : { error: { code: outcome.code, message: "The transfer reverted on chain." } },
       sent: {

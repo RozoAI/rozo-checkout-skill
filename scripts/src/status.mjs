@@ -17,15 +17,16 @@
  * failure and never suggests paying again.
  */
 
-import { parseArgs, emit, fail, usage, EXIT_UNCONFIRMED, EXIT_ERROR } from './lib/output.mjs';
+import { parseArgs, emit, fail, usage, EXIT_UNCONFIRMED, EXIT_ERROR, publicHash } from './lib/output.mjs';
 import { isRozoPaymentId, maskAddress } from './lib/ids.mjs';
 import { invoiceStatus, getPayment } from './lib/api.mjs';
 import { chainName, formatAmount } from './lib/amounts.mjs';
-import { classifyStatus } from './lib/guards.mjs';
+import { classifyStatus, checkPayable } from './lib/guards.mjs';
 import { SUPPORT } from './lib/support.mjs';
-import { formatRemaining } from './lib/expiry.mjs';
+import { formatRemaining, checkExpiry } from './lib/expiry.mjs';
 import { findByLinkId, readState } from './lib/state.mjs';
 import { providerFromPayment, earliestExpiry, intentBitrefillExpiry } from './lib/bitrefill.mjs';
+import { SCHEMA_VERSION, paymentOutcomeFor, nextActionFor } from './lib/receipt.mjs';
 
 const POLL_INTERVAL_MS = 10_000;
 
@@ -44,7 +45,63 @@ function resolveProvider(explicit, rozoPaymentId) {
   return null;
 }
 
-async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
+/**
+ * This machine's send record for the order, without addresses.
+ *
+ * A record that exists but cannot be read (corrupt, permission denied) is NOT
+ * "no send": it is reported as status `unreadable`, which counts as a local
+ * send and blocks paying again or creating a new order.
+ */
+export function localSendFor(id, read = readState) {
+  if (!id || !isRozoPaymentId(id)) return null;
+  let state;
+  try {
+    state = read(id);
+  } catch (err) {
+    return { status: 'unreadable', txHash: null, claimedAt: null, error: err?.code ?? 'STATE_UNREADABLE' };
+  }
+  const send = state?.send;
+  if (!send || !send.status) return null;
+  return { status: send.status, txHash: publicHash(send.txHash ?? null), claimedAt: send.claimedAt ?? null };
+}
+
+/**
+ * Would the senders' own gates let money go out right now? The same
+ * checkExpiry (deadline minus the chain's safety margin) and checkPayable
+ * (the Coinbase resource still accepts payment) that presend.mjs enforces.
+ * Missing data fails closed. Lightning BOLT11 validity is checked by pay
+ * itself before the invoice is shown and is not re-checked here.
+ */
+export function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, now = Date.now() }) {
+  if (provider === 'bitrefill') {
+    const deadline = bitrefillExpiry ?? null;
+    const expiry = checkExpiry({
+      now,
+      chainId,
+      intentExpiresAt: payment?.expiresAt ?? deadline,
+      coinbaseExpiry: deadline,
+    });
+    return expiry.ok
+      ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 60000) }
+      : { ok: false, code: expiry.code, reason: expiry.reason };
+  }
+  if (!status) {
+    return { ok: false, code: 'LINK_PAYABILITY_UNKNOWN', reason: 'The Coinbase link state could not be read.' };
+  }
+  const payable = checkPayable(status, now);
+  if (!payable.ok) return { ok: false, code: payable.code, reason: payable.reason };
+  const expiry = checkExpiry({
+    now,
+    chainId,
+    intentExpiresAt: payment?.expiresAt ?? status?.rozoPayment?.expiresAt,
+    coinbaseExpiry: status?.coinbase?.preApprovalExpiry,
+  });
+  return expiry.ok
+    ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 60000) }
+    : { ok: false, code: expiry.code, reason: expiry.reason };
+}
+
+export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   let provider = resolveProvider(explicitProvider, rozoPaymentId);
   // No flag and no local record: ask the intent itself first, so a Bitrefill
   // order created elsewhere is still classified correctly.
@@ -159,7 +216,7 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       expected: source.amount ? formatAmount(source) : null,
       received: source.amountReceived ?? null,
       receipt: verdict.receipt,
-      txHash: source.txHash ?? null,
+      txHash: publicHash(source.txHash ?? null),
       confirmedAt: source.confirmedAt ?? null,
       senderAddressMasked: source.senderAddress ? maskAddress(source.senderAddress) : null,
       chain: source.chainId ? chainName(source.chainId) : null,
@@ -181,10 +238,15 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       };
     })(),
     payout: {
-      txHash: payment?.destination?.txHash ?? status?.rozoPayment?.destination?.txHash ?? null,
+      txHash: publicHash(payment?.destination?.txHash ?? status?.rozoPayment?.destination?.txHash ?? null),
       confirmedAt:
         payment?.destination?.confirmedAt ?? status?.rozoPayment?.destination?.confirmedAt ?? null,
     },
+    localSend: localSendFor(id),
+    sendWindow:
+      state === 'awaiting_deposit'
+        ? sendWindowFor({ provider, chainId: source.chainId, payment, status, bitrefillExpiry })
+        : null,
     errors: [statusError, paymentError].filter(Boolean),
   };
 }
@@ -273,10 +335,17 @@ async function main(argv) {
 
   const unresolved = watch && !result.terminal && !result.escalate && !result.unknown;
   const failed = result.escalate || result.unknown || !result.authoritativeView;
+  const paymentOutcome = paymentOutcomeFor(result);
 
   emit(
     {
+      // `success` keeps its historical meaning (the query produced a clean
+      // answer). It is NOT "the invoice is paid": read paymentOutcome.
       success: !failed,
+      schemaVersion: SCHEMA_VERSION,
+      operationOk: !result.unknown,
+      paymentOutcome,
+      nextAction: nextActionFor(result, paymentOutcome),
       step: 'status',
       ...result,
       history,

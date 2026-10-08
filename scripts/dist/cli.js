@@ -3475,6 +3475,9 @@ function carry(digits) {
   }
   return `1${out2.join("")}`;
 }
+function fromGwei(gwei, unit = "wei") {
+  return from(gwei, exponents.gwei - exponents[unit]);
+}
 var exponents, InvalidDecimalNumberError, InvalidDecimalsError;
 var init_Value = __esm({
   "node_modules/viem/_esm/utils/unit/Value.js"() {
@@ -20541,7 +20544,7 @@ var require_dist = __commonJS({
           }
         }
       }
-      function* run7(value, struct2, options = {}) {
+      function* run8(value, struct2, options = {}) {
         const { path: path7 = [], branch = [value], coerce: coerce2 = false, mask: mask2 = false } = options;
         const ctx = { path: path7, branch, mask: mask2 };
         if (coerce2) {
@@ -20554,7 +20557,7 @@ var require_dist = __commonJS({
           yield [failure, void 0];
         }
         for (let [k, v, s] of struct2.entries(value, ctx)) {
-          const ts = run7(v, s, {
+          const ts = run8(v, s, {
             path: k === void 0 ? path7 : [...path7, k],
             branch: k === void 0 ? branch : [...branch, v],
             coerce: coerce2,
@@ -20682,7 +20685,7 @@ var require_dist = __commonJS({
         return !result[0];
       }
       function validate7(value, struct2, options = {}) {
-        const tuples = run7(value, struct2, options);
+        const tuples = run8(value, struct2, options);
         const tuple2 = shiftIterator(tuples);
         if (tuple2[0]) {
           const error = new StructError(tuple2[0], function* () {
@@ -21095,7 +21098,7 @@ var require_dist = __commonJS({
           validator(value, ctx) {
             const failures = [];
             for (const S of Structs) {
-              const [...tuples] = run7(value, S, ctx);
+              const [...tuples] = run8(value, S, ctx);
               const [first] = tuples;
               if (!first[0]) {
                 return [];
@@ -41511,7 +41514,20 @@ function redact(text) {
   );
   return s;
 }
+var PublicHash = class {
+  constructor(value) {
+    this.value = value;
+  }
+  toJSON() {
+    return this.value;
+  }
+};
+var TX_HASH_VALUE = /^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{86,88})$/;
+function publicHash(value) {
+  return typeof value === "string" && TX_HASH_VALUE.test(value) ? new PublicHash(value) : value;
+}
 function redactDeep(value) {
+  if (value instanceof PublicHash) return value.value;
   if (typeof value === "string") return redact(value);
   if (Array.isArray(value)) return value.map(redactDeep);
   if (value && typeof value === "object") {
@@ -41754,7 +41770,7 @@ function normalizeUtmSource(value) {
 }
 
 // scripts/src/lib/cli-args.mjs
-var COMMANDS = ["pay", "quote", "status", "help", "version"];
+var COMMANDS = ["pay", "quote", "status", "receipt", "help", "version"];
 var CHAIN_ALIASES = {
   ethereum: "1",
   eth: "1",
@@ -41970,6 +41986,18 @@ function parseCliArgs(argv) {
     if (!target) throw new CliError("MISSING_TARGET", "Usage: rozo-checkout quote <coinbase-link>");
     return { command, target, json, ...utmSource ? { utmSource } : {} };
   }
+  if (command === "receipt") {
+    if (!target) {
+      throw new CliError(
+        "MISSING_TARGET",
+        "Usage: rozo-checkout receipt <rozoPaymentId | coinbase-link>"
+      );
+    }
+    if (flags.provider !== void 0 && !["coinbase", "bitrefill"].includes(String(flags.provider))) {
+      throw new CliError("BAD_VALUE", "--provider must be coinbase or bitrefill.");
+    }
+    return { command, target, json, provider: flags.provider };
+  }
   if (command === "status") {
     if (!target) {
       throw new CliError(
@@ -42087,6 +42115,7 @@ USAGE
   npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x\u2026> --amount <USDC> --expires-at <ISO> --with <coin>
   npx @rozoai/checkout quote <coinbase-link>
   npx @rozoai/checkout status <rozoPaymentId | coinbase-link>
+  npx @rozoai/checkout receipt <rozoPaymentId | coinbase-link>
 
 COINS (--with)
   usdt-solana   usdc-solana   usdt-bnb      usdc-bnb
@@ -42139,6 +42168,17 @@ EXAMPLES
   npx @rozoai/checkout pay pl_01... --with usdt-solana --email you@example.com
   npx @rozoai/checkout pay --bitrefill-invoice 8f3k2 --to 0xAbC\u2026123 --amount 7.90 --expires-at 2026-10-01T12:00:00Z --with usdc-stellar
   npx @rozoai/checkout status 11111111-2222-4333-8444-555555555555
+  npx @rozoai/checkout receipt 11111111-2222-4333-8444-555555555555 --json
+
+RECEIPT
+  receipt reads the order once (nothing is created or sent) and reports three
+  layers separately: did your money reach Rozo, was the merchant invoice paid,
+  and was the service delivered (always "unknown": Rozo cannot see OpenRouter
+  credits). Exit 0 only when the merchant invoice is settled; 3 when it is
+  still in flight or unknown; 1 when it expired unpaid or needs a human.
+  In --json output from status and receipt, read paymentOutcome and
+  nextAction. The older "success" field means the query worked, not that the
+  invoice is paid.
 
 Creating an order moves no money; an unfunded order simply expires. Nothing is
 paid until you confirm, and --send is required before anything is signed.
@@ -50830,6 +50870,12 @@ function formatUnits(value, decimals) {
   return format(value, decimals);
 }
 
+// node_modules/viem/_esm/utils/unit/parseGwei.js
+init_Value();
+function parseGwei(ether, unit = "wei") {
+  return fromGwei(ether, unit);
+}
+
 // node_modules/viem/_esm/utils/unit/parseUnits.js
 init_Value();
 function parseUnits(value, decimals) {
@@ -50973,7 +51019,7 @@ init_createBatchScheduler();
 init_stringify();
 async function multicall(client, parameters) {
   const { account, authorizationList, allowFailure = true, blockHash, blockNumber, blockOverrides, blockTag, requireCanonical, stateOverride } = parameters;
-  const contracts = parameters.contracts;
+  const contracts2 = parameters.contracts;
   const batch = typeof client.batch?.multicall === "object" ? client.batch.multicall : {};
   const batchSize = parameters.batchSize ?? batch.batchSize ?? 1024;
   const deployless = parameters.deployless ?? batch.deployless ?? false;
@@ -50994,8 +51040,8 @@ async function multicall(client, parameters) {
   const chunkedCalls = [[]];
   let currentChunk = 0;
   let currentChunkSize = 0;
-  for (let i = 0; i < contracts.length; i++) {
-    const { abi: abi2, address, args, functionName } = contracts[i];
+  for (let i = 0; i < contracts2.length; i++) {
+    const { abi: abi2, address, args, functionName } = contracts2[i];
     try {
       const callData = encodeFunctionData({ abi: abi2, args, functionName });
       currentChunkSize += (callData.length - 2) / 2;
@@ -51089,7 +51135,7 @@ async function multicall(client, parameters) {
     for (let j = 0; j < aggregate3Result.length; j++) {
       const { returnData, success } = aggregate3Result[j];
       const { callData } = batches[i][j];
-      const { abi: abi2, address, functionName, args } = contracts[results.length];
+      const { abi: abi2, address, functionName, args } = contracts2[results.length];
       try {
         if (callData === "0x")
           throw new AbiDecodingZeroDataError();
@@ -51116,7 +51162,7 @@ async function multicall(client, parameters) {
       }
     }
   }
-  if (results.length !== contracts.length)
+  if (results.length !== contracts2.length)
     throw new BaseError2("multicall results mismatch");
   return results;
 }
@@ -54961,15 +55007,15 @@ function classifyStatus({
       { escalate: true }
     );
   }
-  if (!bitrefill && (routerStatus === "paid" || coinbase?.settled === true)) {
-    return mk("settled", "Coinbase invoice settled by the funder wallet.", { terminal: true });
-  }
   if (routerStatus === "failed_pay_invoice" || routerStatus === "failed_insufficient_balance") {
     return mk(
       "stuck_after_payment",
       `Fulfillment failed (${routerStatus}) after the pay-in. Do not pay again \u2014 escalate for manual reconciliation.`,
       { terminal: false, escalate: true }
     );
+  }
+  if (!bitrefill && (routerStatus === "paid" || coinbase?.settled === true)) {
+    return mk("settled", "Coinbase invoice settled by the funder wallet.", { terminal: true });
   }
   if (moneyDetected && receipt && receipt.state === "underpaid") {
     return mk(
@@ -55227,6 +55273,17 @@ async function main2(argv) {
             tokenSymbol: existing.tokenSymbol ?? null,
             expiresAt: created.expiresAt ?? null,
             expiresIn: Number.isFinite(remainingMs) ? formatRemaining(remainingMs) : null
+          },
+          // Machine-readable form of the guidance below. The live order keeps
+          // its own coin; a different coin is only possible once it has
+          // expired unfunded (then pay on the same link creates a new order).
+          nextAction: {
+            type: "choose_method",
+            canRetryQuery: true,
+            canCreateOrder: false,
+            canSend: false,
+            payExistingWith: { chainId: existing.chainId ?? null, tokenSymbol: existing.tokenSymbol ?? null },
+            switchPossibleAfter: created.expiresAt ?? null
           },
           guidance: `Either pay the existing order with ${existing.tokenSymbol ?? "its own coin"} (re-run with --chain ${existing.chainId} --token ${existing.tokenSymbol}), or wait ${Number.isFinite(remainingMs) ? formatRemaining(remainingMs) : "for it to expire"} for it to expire and then create a new one. Unpaid orders cost nothing.`
         },
@@ -55841,6 +55898,241 @@ async function run3(argv = process.argv.slice(2)) {
   return main3(argv);
 }
 
+// scripts/src/lib/receipt.mjs
+var SCHEMA_VERSION = 1;
+var PAYMENT_OUTCOMES = Object.freeze([
+  "awaiting_payment",
+  "processing",
+  "settled",
+  "expired_unfunded",
+  "needs_attention",
+  "unknown"
+]);
+var NEXT_ACTION_TYPES = Object.freeze([
+  "pay",
+  "check_status",
+  "choose_method",
+  "request_new_invoice",
+  "contact_support",
+  "none"
+]);
+var STATE_TO_OUTCOME = Object.freeze({
+  awaiting_deposit: "awaiting_payment",
+  payin_detected: "processing",
+  payin_confirmed: "processing",
+  bridging: "processing",
+  paying_coinbase: "processing",
+  settled: "settled",
+  expired_unfunded: "expired_unfunded",
+  invoice_expired: "expired_unfunded",
+  deadline_unknown: "needs_attention",
+  underpaid: "needs_attention",
+  stuck_after_payment: "needs_attention",
+  unknown: "unknown"
+});
+var SERVICE_DELIVERY_NOTE = {
+  coinbase: "The invoice is paid. Arrival of the OpenRouter credits (or other goods) is not independently verified by Rozo; check the merchant account.",
+  bitrefill: "USDC reached the Bitrefill invoice address. Delivery of the Bitrefill order is not independently verified by Rozo; check the Bitrefill order page."
+};
+function merchantSettlementProved(result) {
+  if (result?.provider === "bitrefill") return result?.state === "settled";
+  return result?.backend?.coinbaseSettled === true;
+}
+function hasLocalSend(result) {
+  return Boolean(result?.localSend && result.localSend.status);
+}
+function paymentOutcomeFor(result) {
+  if (!result) return "unknown";
+  if (result.escalate) return "needs_attention";
+  if (result.unknown) return "unknown";
+  let outcome = Object.prototype.hasOwnProperty.call(STATE_TO_OUTCOME, result.state) ? STATE_TO_OUTCOME[result.state] : "unknown";
+  if (outcome === "settled" && !merchantSettlementProved(result)) outcome = "processing";
+  if (outcome === "settled" && result.provider !== "bitrefill") {
+    const router = result.backend?.routerStatus ?? null;
+    if (router && router.startsWith("failed_")) return "needs_attention";
+    if (router && router !== "paid") outcome = "processing";
+  }
+  if (!result.authoritativeView && (outcome === "awaiting_payment" || outcome === "expired_unfunded")) {
+    return "unknown";
+  }
+  if ((result.moneyDetected || hasLocalSend(result)) && outcome === "expired_unfunded") {
+    return "needs_attention";
+  }
+  if (result.moneyDetected && outcome === "awaiting_payment") return "processing";
+  return outcome;
+}
+function nextActionFor(result, outcome = paymentOutcomeFor(result)) {
+  const locked = Boolean(result?.moneyDetected) || hasLocalSend(result);
+  const base = { canRetryQuery: true, canCreateOrder: false, canSend: false };
+  const bitrefill = result?.provider === "bitrefill";
+  switch (outcome) {
+    case "awaiting_payment":
+      if (locked) {
+        return {
+          ...base,
+          type: "check_status",
+          message: "A send was already recorded for this order. Do NOT pay again; poll status until the pay-in shows up."
+        };
+      }
+      if (!result?.sendWindow?.ok) {
+        const code = result?.sendWindow?.code ?? "SEND_WINDOW_UNKNOWN";
+        if (code === "LINK_NO_LONGER_PAYABLE") {
+          return {
+            ...base,
+            type: "request_new_invoice",
+            reason: code,
+            message: "The merchant link no longer accepts payment. Do NOT fund this order; get a new payment link."
+          };
+        }
+        if (code === "EXPIRED" || code === "EXPIRY_MARGIN") {
+          return {
+            ...base,
+            type: "check_status",
+            reason: code,
+            message: "Too little time is left to pay this order safely. Do NOT fund it. Once it shows expired_unfunded, run pay again on the same link for a new order."
+          };
+        }
+        return {
+          ...base,
+          type: "check_status",
+          reason: code,
+          message: "Whether this order can still be paid could not be proved. Do NOT fund it on a guess; retry."
+        };
+      }
+      return {
+        ...base,
+        type: "pay",
+        canSend: true,
+        message: "Send the exact amount from the order deposit block, once."
+      };
+    case "processing":
+      return {
+        ...base,
+        type: "check_status",
+        message: "Funds are moving. Do NOT pay again; poll status."
+      };
+    case "settled":
+      return { ...base, type: "none", canRetryQuery: false, message: "Nothing to do." };
+    case "expired_unfunded":
+      if (bitrefill) {
+        return {
+          ...base,
+          type: "request_new_invoice",
+          message: "Nothing was funded. Create a fresh Bitrefill invoice and pay that one."
+        };
+      }
+      return {
+        ...base,
+        type: "choose_method",
+        canCreateOrder: true,
+        message: "Nothing arrived for this order. If your own wallet shows no send to the old deposit address and no pending Lightning payment, run pay again on the same link: it creates a new order, and you may pick a different coin. Never fund the old deposit address."
+      };
+    case "needs_attention":
+      if (result?.state === "deadline_unknown" && !locked) {
+        return {
+          ...base,
+          type: "request_new_invoice",
+          message: "The invoice deadline is unknown here, so the order is not payable. Re-run pay with the invoice details, or create a fresh invoice."
+        };
+      }
+      return {
+        ...base,
+        type: "contact_support",
+        message: "Do NOT pay again and do NOT create a new order. Keep linkId, rozoPaymentId and every tx hash, and contact Rozo support."
+      };
+    default:
+      return {
+        ...base,
+        type: "check_status",
+        message: "The order state could not be established. This is not evidence that nothing was paid. Retry with the rozoPaymentId before doing anything else."
+      };
+  }
+}
+function sourcePaymentLayer(result) {
+  const payin = result?.payin || {};
+  let status;
+  if (result?.unknown || !result?.authoritativeView) status = "unknown";
+  else if (payin.confirmedAt) status = "confirmed";
+  else if (result?.moneyDetected) status = "detected";
+  else status = "none";
+  return {
+    status,
+    evidence: status === "unknown" ? null : "rozo-intents",
+    chain: payin.chain ?? null,
+    expected: payin.expected ?? null,
+    received: payin.received ?? null,
+    txHash: payin.txHash ?? null,
+    confirmedAt: payin.confirmedAt ?? null,
+    localSend: result?.localSend ? {
+      status: result.localSend.status,
+      txHash: result.localSend.txHash ?? null,
+      claimedAt: result.localSend.claimedAt ?? null,
+      // A wallet broadcast proves the payer sent, not that Rozo received.
+      evidence: "local-wallet"
+    } : null
+  };
+}
+function merchantSettlementLayer(result) {
+  if (result?.provider === "bitrefill") {
+    const proved = result?.state === "settled";
+    return {
+      status: proved ? "confirmed" : result?.unknown ? "unknown" : "pending",
+      evidence: proved ? "rozo-payout" : null,
+      provider: "bitrefill",
+      txHash: result?.payout?.txHash ?? null,
+      confirmedAt: result?.payout?.confirmedAt ?? null
+    };
+  }
+  const backend = result?.backend || {};
+  let status;
+  if (backend.routerStatus && backend.routerStatus.startsWith("failed_")) status = "unknown";
+  else if (backend.coinbaseSettled === true) status = "confirmed";
+  else if (backend.coinbaseSettled === null || backend.coinbaseSettled === void 0) {
+    status = backend.routerStatus === "paid" || result?.unknown ? "unknown" : "pending";
+  } else status = "pending";
+  return {
+    status,
+    evidence: status === "confirmed" ? "coinbase" : null,
+    provider: "coinbase",
+    coinbaseStatus: backend.coinbaseStatus ?? null,
+    routerStatus: backend.routerStatus ?? null,
+    // The router reporting `paid` is recorded, but it is not settlement proof.
+    routerReportsPaid: backend.routerStatus === "paid",
+    // Coinbase may read settled because someone else paid the link.
+    routerFailed: Boolean(backend.routerStatus && backend.routerStatus.startsWith("failed_")),
+    payoutTxHash: result?.payout?.txHash ?? null
+  };
+}
+function serviceDeliveryLayer(result, merchant) {
+  return {
+    status: "unknown",
+    evidence: null,
+    note: merchant.status === "confirmed" ? SERVICE_DELIVERY_NOTE[result?.provider === "bitrefill" ? "bitrefill" : "coinbase"] : "Not applicable until the merchant invoice is settled."
+  };
+}
+function buildReceipt(result, { observedAt = (/* @__PURE__ */ new Date()).toISOString() } = {}) {
+  const paymentOutcome = paymentOutcomeFor(result);
+  const merchantSettlement = merchantSettlementLayer(result);
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    orderId: result?.rozoPaymentId ?? null,
+    linkId: result?.linkId ?? null,
+    provider: result?.provider ?? null,
+    observedAt,
+    paymentOutcome,
+    state: result?.state ?? "unknown",
+    sourcePayment: sourcePaymentLayer(result),
+    merchantSettlement,
+    serviceDelivery: serviceDeliveryLayer(result, merchantSettlement),
+    nextAction: nextActionFor(result, paymentOutcome)
+  };
+}
+function receiptExitCode(outcome) {
+  if (outcome === "settled") return 0;
+  if (outcome === "expired_unfunded" || outcome === "needs_attention") return 1;
+  return 3;
+}
+
 // scripts/src/status.mjs
 var POLL_INTERVAL_MS = 1e4;
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -55854,6 +56146,42 @@ function resolveProvider(explicit, rozoPaymentId) {
     }
   }
   return null;
+}
+function localSendFor(id, read = readState) {
+  if (!id || !isRozoPaymentId(id)) return null;
+  let state;
+  try {
+    state = read(id);
+  } catch (err) {
+    return { status: "unreadable", txHash: null, claimedAt: null, error: err?.code ?? "STATE_UNREADABLE" };
+  }
+  const send = state?.send;
+  if (!send || !send.status) return null;
+  return { status: send.status, txHash: publicHash(send.txHash ?? null), claimedAt: send.claimedAt ?? null };
+}
+function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, now = Date.now() }) {
+  if (provider === "bitrefill") {
+    const deadline = bitrefillExpiry ?? null;
+    const expiry2 = checkExpiry({
+      now,
+      chainId,
+      intentExpiresAt: payment?.expiresAt ?? deadline,
+      coinbaseExpiry: deadline
+    });
+    return expiry2.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry2.msOfSlack / 6e4) } : { ok: false, code: expiry2.code, reason: expiry2.reason };
+  }
+  if (!status) {
+    return { ok: false, code: "LINK_PAYABILITY_UNKNOWN", reason: "The Coinbase link state could not be read." };
+  }
+  const payable = checkPayable(status, now);
+  if (!payable.ok) return { ok: false, code: payable.code, reason: payable.reason };
+  const expiry = checkExpiry({
+    now,
+    chainId,
+    intentExpiresAt: payment?.expiresAt ?? status?.rozoPayment?.expiresAt,
+    coinbaseExpiry: status?.coinbase?.preApprovalExpiry
+  });
+  return expiry.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4) } : { ok: false, code: expiry.code, reason: expiry.reason };
 }
 async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   let provider = resolveProvider(explicitProvider, rozoPaymentId);
@@ -55952,7 +56280,7 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       expected: source.amount ? formatAmount(source) : null,
       received: source.amountReceived ?? null,
       receipt: verdict.receipt,
-      txHash: source.txHash ?? null,
+      txHash: publicHash(source.txHash ?? null),
       confirmedAt: source.confirmedAt ?? null,
       senderAddressMasked: source.senderAddress ? maskAddress2(source.senderAddress) : null,
       chain: source.chainId ? chainName(source.chainId) : null
@@ -55971,9 +56299,11 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       };
     })(),
     payout: {
-      txHash: payment?.destination?.txHash ?? status?.rozoPayment?.destination?.txHash ?? null,
+      txHash: publicHash(payment?.destination?.txHash ?? status?.rozoPayment?.destination?.txHash ?? null),
       confirmedAt: payment?.destination?.confirmedAt ?? status?.rozoPayment?.destination?.confirmedAt ?? null
     },
+    localSend: localSendFor(id),
+    sendWindow: state === "awaiting_deposit" ? sendWindowFor({ provider, chainId: source.chainId, payment, status, bitrefillExpiry }) : null,
     errors: [statusError, paymentError].filter(Boolean)
   };
 }
@@ -56022,9 +56352,16 @@ async function main4(argv) {
   const guidance = statusGuidance(result);
   const unresolved = watch && !result.terminal && !result.escalate && !result.unknown;
   const failed = result.escalate || result.unknown || !result.authoritativeView;
+  const paymentOutcome = paymentOutcomeFor(result);
   emit(
     {
+      // `success` keeps its historical meaning (the query produced a clean
+      // answer). It is NOT "the invoice is paid": read paymentOutcome.
       success: !failed,
+      schemaVersion: SCHEMA_VERSION,
+      operationOk: !result.unknown,
+      paymentOutcome,
+      nextAction: nextActionFor(result, paymentOutcome),
       step: "status",
       ...result,
       history,
@@ -56038,6 +56375,40 @@ async function main4(argv) {
 }
 async function run4(argv = process.argv.slice(2)) {
   return main4(argv);
+}
+
+// scripts/src/receipt.mjs
+async function main5(argv) {
+  const args = parseArgs(argv);
+  const rozoPaymentId = args["rozo-payment-id"] || (isRozoPaymentId(args._[0]) ? args._[0] : null);
+  const linkId = args["link-id"] || (!rozoPaymentId ? args._[0] : null);
+  const provider = args.provider ? String(args.provider) : null;
+  if (provider && provider !== "bitrefill" && provider !== "coinbase") {
+    usage("--provider must be coinbase or bitrefill");
+  }
+  if (provider === "bitrefill" && !rozoPaymentId) {
+    usage("A Bitrefill order is tracked by --rozo-payment-id <uuid>.");
+  }
+  if (!rozoPaymentId && !linkId) {
+    usage("Required: --rozo-payment-id <uuid> and/or --link-id <pl_* | paymentSession_*>");
+  }
+  const result = await snapshot({ rozoPaymentId, linkId, provider });
+  const receipt = buildReceipt(result);
+  const exitCode = receiptExitCode(receipt.paymentOutcome);
+  emit(
+    {
+      success: receipt.paymentOutcome === "settled",
+      operationOk: !result.unknown,
+      step: "receipt",
+      receipt,
+      errors: result.errors,
+      ...exitCode === 0 ? {} : { support: SUPPORT }
+    },
+    exitCode
+  );
+}
+async function run5(argv = process.argv.slice(2)) {
+  return main5(argv);
 }
 
 // scripts/src/lib/passphrase.mjs
@@ -56279,6 +56650,290 @@ function broadcastOutcome({ receiptStatus, executionError = null, receiptSeen = 
   };
 }
 
+// scripts/src/lib/gas.mjs
+var EVM_FEE_COIN = Object.freeze({
+  1: { symbol: "ETH", network: "Ethereum" },
+  56: { symbol: "BNB", network: "BNB Chain" },
+  137: { symbol: "POL", network: "Polygon" },
+  8453: { symbol: "ETH", network: "Base" }
+});
+var DEFAULT_GAS_BUFFER_PCT = 20;
+var MAX_GAS_BUFFER_PCT = 200;
+function gasBufferPct(env = process.env) {
+  const raw = env?.ROZO_CHECKOUT_GAS_BUFFER_PCT;
+  if (raw === void 0 || raw === "") return DEFAULT_GAS_BUFFER_PCT;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > MAX_GAS_BUFFER_PCT) return DEFAULT_GAS_BUFFER_PCT;
+  return n;
+}
+function formatAtomic(atomic, decimals) {
+  const neg = atomic < 0n;
+  const v = neg ? -atomic : atomic;
+  const base = 10n ** BigInt(decimals);
+  const whole = v / base;
+  const frac = (v % base).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return `${neg ? "-" : ""}${whole}${frac ? `.${frac}` : ""}`;
+}
+function evmFeeRequirement({ gasEstimate, maxFeePerGas, gasPrice, bufferPct = DEFAULT_GAS_BUFFER_PCT }) {
+  const perGas = typeof maxFeePerGas === "bigint" ? maxFeePerGas : typeof gasPrice === "bigint" ? gasPrice : null;
+  if (typeof gasEstimate !== "bigint" || perGas === null) return null;
+  const gasLimit = (gasEstimate * BigInt(100 + bufferPct) + 99n) / 100n;
+  return { gasLimit, perGas, pricing: typeof maxFeePerGas === "bigint" ? "eip1559" : "legacy", fee: gasLimit * perGas };
+}
+function assessFee({ balance, required, decimals, symbol, network }) {
+  const ok = required === null ? balance > 0n : balance >= required;
+  const details = {
+    network,
+    feeCoin: symbol,
+    balance: formatAtomic(balance, decimals),
+    required: required === null ? null : formatAtomic(required, decimals),
+    shortfall: required === null || ok ? null : formatAtomic(required - balance, decimals)
+  };
+  return { ok, details };
+}
+function insufficient(details, extra) {
+  const need = details.required ? `about ${details.required} ${details.feeCoin}` : `some ${details.feeCoin}`;
+  return new SkillError(
+    "INSUFFICIENT_GAS",
+    `This wallet holds ${details.balance} ${details.feeCoin} on ${details.network} but needs ${need} for the network fee${details.shortfall ? ` (short by ${details.shortfall} ${details.feeCoin})` : ""}. Nothing was signed. Add ${details.feeCoin} on ${details.network} to this wallet and re-run, or pay with a different coin.` + (extra ? ` ${extra}` : ""),
+    details
+  );
+}
+function unavailable(network, err) {
+  return new SkillError(
+    "GAS_CHECK_UNAVAILABLE",
+    `Could not check the network fee on ${network}: ${redact(err?.shortMessage || err?.message || "unknown error")}. This is not evidence of a shortfall. Nothing was signed. Retry, pass --rpc <url>, or pay by hand from your wallet.`,
+    { network }
+  );
+}
+async function estimateFees(client) {
+  try {
+    return await client.estimateFeesPerGas();
+  } catch (err) {
+    if (err?.name !== "Eip1559FeesNotSupportedError") throw err;
+    return client.estimateFeesPerGas({ type: "legacy" });
+  }
+}
+var OP_STACK_GAS_PRICE_ORACLE = "0x420000000000000000000000000000000000000F";
+var OP_STACK_CHAIN_IDS = /* @__PURE__ */ new Set([8453]);
+async function evmGasPrecheck({
+  client,
+  chainId,
+  from: from15,
+  to,
+  data,
+  value = 0n,
+  bufferPct = gasBufferPct(),
+  estimateL1Fee: estimateL1Fee2 = null
+}) {
+  const coin = EVM_FEE_COIN[Number(chainId)] ?? { symbol: "native coin", network: `chain ${chainId}` };
+  let balance;
+  try {
+    balance = await client.getBalance({ address: from15 });
+  } catch (err) {
+    throw unavailable(coin.network, err);
+  }
+  let gasEstimate;
+  let fees;
+  try {
+    gasEstimate = await client.estimateGas({ account: from15, to, data, value });
+    fees = await estimateFees(client);
+  } catch (err) {
+    if (balance === 0n) {
+      throw insufficient(
+        assessFee({ balance, required: null, decimals: 18, symbol: coin.symbol, network: coin.network }).details
+      );
+    }
+    throw unavailable(coin.network, err);
+  }
+  const req = evmFeeRequirement({
+    gasEstimate,
+    maxFeePerGas: fees?.maxFeePerGas,
+    gasPrice: fees?.gasPrice,
+    bufferPct
+  });
+  if (!req) throw unavailable(coin.network, new Error("the node returned no fee price"));
+  let l1Fee = 0n;
+  if (OP_STACK_CHAIN_IDS.has(Number(chainId))) {
+    if (typeof estimateL1Fee2 !== "function") {
+      throw unavailable(coin.network, new Error("no L1 data fee estimator for this OP-stack chain"));
+    }
+    try {
+      l1Fee = (await estimateL1Fee2() * BigInt(100 + bufferPct) + 99n) / 100n;
+    } catch (err) {
+      throw unavailable(coin.network, err);
+    }
+  }
+  const required = req.fee + l1Fee + value;
+  const { ok, details } = assessFee({ balance, required, decimals: 18, symbol: coin.symbol, network: coin.network });
+  const full = {
+    ...details,
+    gasLimit: req.gasLimit.toString(),
+    pricing: req.pricing,
+    bufferPct,
+    l1DataFee: OP_STACK_CHAIN_IDS.has(Number(chainId)) ? formatAtomic(l1Fee, 18) : null
+  };
+  if (!ok) throw insufficient(full);
+  return full;
+}
+var LAMPORTS_DECIMALS = 9;
+async function solFeePrecheck({ connection, payer, message }) {
+  const network = "Solana";
+  let balance;
+  let fee;
+  let rentMin;
+  try {
+    balance = BigInt(await connection.getBalance(payer, "confirmed"));
+    const res = await connection.getFeeForMessage(message, "confirmed");
+    if (res?.value === null || res?.value === void 0) {
+      throw new Error("the node returned no fee for this transaction (stale blockhash?)");
+    }
+    fee = BigInt(res.value);
+    rentMin = BigInt(await connection.getMinimumBalanceForRentExemption(0));
+  } catch (err) {
+    if (balance === 0n) {
+      throw insufficient(
+        assessFee({ balance, required: null, decimals: LAMPORTS_DECIMALS, symbol: "SOL", network }).details
+      );
+    }
+    throw unavailable(network, err);
+  }
+  const remaining = balance - fee;
+  const required = remaining === 0n ? fee : fee + rentMin;
+  const { ok, details } = assessFee({ balance, required, decimals: LAMPORTS_DECIMALS, symbol: "SOL", network });
+  const full = { ...details, fee: formatAtomic(fee, LAMPORTS_DECIMALS), rentExemptMinimum: formatAtomic(rentMin, LAMPORTS_DECIMALS) };
+  if (!ok) {
+    throw insufficient(
+      full,
+      balance >= fee ? "Solana also requires a wallet to keep a small minimum balance after paying the fee." : null
+    );
+  }
+  return full;
+}
+
+// node_modules/viem/_esm/op-stack/contracts.js
+var contracts = {
+  gasPriceOracle: { address: "0x420000000000000000000000000000000000000F" },
+  l1Block: { address: "0x4200000000000000000000000000000000000015" },
+  l2CrossDomainMessenger: {
+    address: "0x4200000000000000000000000000000000000007"
+  },
+  l2Erc721Bridge: { address: "0x4200000000000000000000000000000000000014" },
+  l2StandardBridge: { address: "0x4200000000000000000000000000000000000010" },
+  l2ToL1MessagePasser: {
+    address: "0x4200000000000000000000000000000000000016"
+  }
+};
+
+// node_modules/viem/_esm/op-stack/abis.js
+var gasPriceOracleAbi = [
+  { inputs: [], stateMutability: "nonpayable", type: "constructor" },
+  {
+    inputs: [],
+    name: "DECIMALS",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "baseFee",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "decimals",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "pure",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "gasPrice",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [{ internalType: "bytes", name: "_data", type: "bytes" }],
+    name: "getL1Fee",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [{ internalType: "bytes", name: "_data", type: "bytes" }],
+    name: "getL1GasUsed",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "l1BaseFee",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "overhead",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "scalar",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "version",
+    outputs: [{ internalType: "string", name: "", type: "string" }],
+    stateMutability: "view",
+    type: "function"
+  }
+];
+
+// node_modules/viem/_esm/op-stack/actions/estimateL1Fee.js
+init_getChainContractAddress();
+async function estimateL1Fee(client, args) {
+  const { chain = client.chain, gasPriceOracleAddress: gasPriceOracleAddress_ } = args;
+  const gasPriceOracleAddress = (() => {
+    if (gasPriceOracleAddress_)
+      return gasPriceOracleAddress_;
+    if (chain)
+      return getChainContractAddress({
+        chain,
+        contract: "gasPriceOracle"
+      });
+    return contracts.gasPriceOracle.address;
+  })();
+  const transaction = serializeTransaction({
+    ...args,
+    chainId: chain?.id ?? 1,
+    type: "eip1559",
+    // Set upper-limit-ish stub values. Shouldn't affect the estimate too much as we are
+    // tweaking dust bytes here (as opposed to long `data` bytes).
+    // See: https://github.com/ethereum-optimism/optimism/blob/54d02df55523c9e1b4b38ed082c12a42087323a0/packages/contracts-bedrock/src/L2/GasPriceOracle.sol#L242-L248.
+    gas: args.data ? 300000n : 21000n,
+    maxFeePerGas: parseGwei("5"),
+    maxPriorityFeePerGas: parseGwei("1"),
+    nonce: 1
+  });
+  return readContract(client, {
+    abi: gasPriceOracleAbi,
+    address: gasPriceOracleAddress,
+    functionName: "getL1Fee",
+    args: [transaction]
+  });
+}
+
 // node_modules/viem/_esm/accounts/privateKeyToAccount.js
 init_secp256k1();
 init_toHex();
@@ -56472,7 +57127,7 @@ function chainDef(chainId, rpcUrl) {
     rpcUrls: { default: { http: [rpcUrl] } }
   });
 }
-async function main5(argv) {
+async function main6(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = assertRozoPaymentId(args["rozo-payment-id"] || args._[0]);
   assertNoTrackedDotEnv();
@@ -56550,6 +57205,25 @@ async function main5(argv) {
       `Sender holds ${balance} atomic units of ${source.tokenSymbol} on ${chainName(chainId)}; ${amountAtomic} are required.`
     );
   }
+  const data = encodeFunctionData({
+    abi: ERC20_TRANSFER_ABI,
+    functionName: "transfer",
+    args: [to, amountAtomic]
+  });
+  const networkFee = await evmGasPrecheck({
+    client: pub,
+    chainId,
+    from: sender,
+    to: tokenAddress,
+    data,
+    estimateL1Fee: OP_STACK_CHAIN_IDS.has(chainId) ? () => estimateL1Fee(pub, {
+      account: sender,
+      to: tokenAddress,
+      data,
+      chain,
+      gasPriceOracleAddress: OP_STACK_GAS_PRICE_ORACLE
+    }) : null
+  });
   if (dryRun) {
     emit({
       success: true,
@@ -56565,6 +57239,7 @@ async function main5(argv) {
         toMasked: maskAddress2(to),
         fromMasked: maskAddress2(sender)
       },
+      networkFee,
       confirmedAt: state.confirmation?.confirmedAt ?? null,
       keySource,
       // Key NAMES only — a value from a .env is never echoed.
@@ -56574,11 +57249,6 @@ async function main5(argv) {
     });
   }
   const wallet = createWalletClient({ account, chain, transport: http(rpcUrl) });
-  const data = encodeFunctionData({
-    abi: ERC20_TRANSFER_ABI,
-    functionName: "transfer",
-    args: [to, amountAtomic]
-  });
   const request2 = await wallet.prepareTransactionRequest({
     to: tokenAddress,
     data,
@@ -56637,7 +57307,7 @@ async function main5(argv) {
           code: landed === false ? "BROADCAST_FAILED" : "BROADCAST_AMBIGUOUS",
           message: redact(err?.shortMessage || err?.message || "broadcast failed")
         },
-        signedTxHash: expectedTxHash,
+        signedTxHash: publicHash(expectedTxHash),
         nonceBefore,
         foundOnChain: landed,
         guidance: landed === false ? "Nothing appears to have been broadcast, but this order is now locked against a second automated send. Verify the signed hash on a block explorer first." : "The signed transaction may already be in flight. Do NOT resend. Look up the signed hash above on a block explorer and poll status.js."
@@ -56661,7 +57331,7 @@ async function main5(argv) {
         confirmed: false,
         rozoPaymentId,
         linkId: state.linkId,
-        txHash,
+        txHash: publicHash(txHash),
         guidance: "Broadcast but not confirmed within the wait window. Do NOT resend. Poll status.js; receipt truth is the backend confirmedAt/amountReceived, not this response."
       },
       EXIT_UNCONFIRMED
@@ -56682,7 +57352,7 @@ async function main5(argv) {
       confirmed: succeeded,
       rozoPaymentId,
       linkId: state.linkId,
-      txHash,
+      txHash: publicHash(txHash),
       blockNumber: receipt.blockNumber?.toString?.() ?? null,
       ...succeeded ? {} : { error: { code: outcome.code, message: "The transfer reverted on chain." } },
       sent: {
@@ -56700,8 +57370,8 @@ async function main5(argv) {
     outcome.exitCode
   );
 }
-async function run5(argv = process.argv.slice(2)) {
-  return main5(argv);
+async function run6(argv = process.argv.slice(2)) {
+  return main6(argv);
 }
 
 // scripts/src/send-sol.mjs
@@ -56771,7 +57441,7 @@ function createTransferCheckedInstruction(source, mint, destination, owner, amou
 var MEMO_PROGRAM_ID = new import_web32.PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 var MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 var B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-async function main6(argv) {
+async function main7(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = assertRozoPaymentId(args["rozo-payment-id"] || args._[0]);
   assertNoTrackedDotEnv();
@@ -56868,30 +57538,6 @@ async function main6(argv) {
       );
     }
   }
-  if (dryRun) {
-    emit({
-      success: true,
-      step: "send-sol-dry-run",
-      rozoPaymentId,
-      linkId: state.linkId,
-      wouldSend: {
-        chain: chainName(900),
-        tokenSymbol: source.tokenSymbol,
-        amountAtomic: amountAtomic.toString(),
-        amount: source.amount,
-        toMasked: maskAddress2(source.receiverAddress),
-        fromMasked: maskAddress2(sender),
-        toIsTokenAccount,
-        withMemo: Boolean(source.receiverMemo)
-      },
-      confirmedAt: state.confirmation?.confirmedAt ?? null,
-      keySource,
-      // Key NAMES only — a value from a .env is never echoed.
-      envFile: dotenv ? { path: dotenv.path, applied: dotenv.applied } : null,
-      minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4),
-      note: "Nothing was signed or broadcast. Add --send (without --dry-run) to execute."
-    });
-  }
   const tx = new import_web32.Transaction();
   tx.add(
     createTransferCheckedInstruction(
@@ -56915,6 +57561,36 @@ async function main6(argv) {
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
   tx.recentBlockhash = blockhash;
   tx.feePayer = keypair.publicKey;
+  const networkFee = await solFeePrecheck({
+    connection,
+    payer: keypair.publicKey,
+    message: tx.compileMessage()
+  });
+  if (dryRun) {
+    emit({
+      success: true,
+      step: "send-sol-dry-run",
+      rozoPaymentId,
+      linkId: state.linkId,
+      wouldSend: {
+        chain: chainName(900),
+        tokenSymbol: source.tokenSymbol,
+        amountAtomic: amountAtomic.toString(),
+        amount: source.amount,
+        toMasked: maskAddress2(source.receiverAddress),
+        fromMasked: maskAddress2(sender),
+        toIsTokenAccount,
+        withMemo: Boolean(source.receiverMemo)
+      },
+      networkFee,
+      confirmedAt: state.confirmation?.confirmedAt ?? null,
+      keySource,
+      // Key NAMES only — a value from a .env is never echoed.
+      envFile: dotenv ? { path: dotenv.path, applied: dotenv.applied } : null,
+      minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4),
+      note: "Nothing was signed or broadcast. Add --send (without --dry-run) to execute."
+    });
+  }
   tx.sign(keypair);
   const signature = tx.signatures[0]?.signature ? base58Encode(tx.signatures[0].signature) : null;
   await finalPayabilityCheck({
@@ -56966,7 +57642,7 @@ async function main6(argv) {
           code: landed ? "BROADCAST_AMBIGUOUS" : "BROADCAST_FAILED",
           message: redact(err?.message || "broadcast failed")
         },
-        signature,
+        signature: publicHash(signature),
         guidance: landed ? "The signed transaction may already be on chain. Do NOT resend. Check the signature on an explorer and poll status.js." : "Nothing appears to have landed, but this order is now locked against a second automated send. Verify on chain before doing anything else."
       },
       EXIT_ERROR
@@ -57003,7 +57679,7 @@ async function main6(argv) {
         confirmed: false,
         rozoPaymentId,
         linkId: state.linkId,
-        txHash: sent,
+        txHash: publicHash(sent),
         error: {
           code: broadcastOutcome({ executionError }).code,
           message: `The transaction landed but failed on chain: ${redact(JSON.stringify(executionError))}`
@@ -57022,7 +57698,7 @@ async function main6(argv) {
         confirmed: false,
         rozoPaymentId,
         linkId: state.linkId,
-        txHash: sent,
+        txHash: publicHash(sent),
         guidance: "Broadcast but not confirmed within the wait window. Do NOT resend. Poll status.js; receipt truth is the backend confirmedAt/amountReceived."
       },
       EXIT_UNCONFIRMED
@@ -57036,7 +57712,7 @@ async function main6(argv) {
     confirmed: true,
     rozoPaymentId,
     linkId: state.linkId,
-    txHash: sent,
+    txHash: publicHash(sent),
     sent: {
       chain: chainName(900),
       tokenSymbol: source.tokenSymbol,
@@ -57064,8 +57740,8 @@ function base58Encode(buf) {
   }
   return out2;
 }
-async function run6(argv = process.argv.slice(2)) {
-  return main6(argv);
+async function run7(argv = process.argv.slice(2)) {
+  return main7(argv);
 }
 
 // scripts/src/cli.mjs
@@ -57268,6 +57944,49 @@ async function cmdStatus(opts) {
   out();
   return exitCode;
 }
+var LAYER_LABEL = {
+  confirmed: green("confirmed"),
+  detected: yellow("detected"),
+  pending: yellow("pending"),
+  none: dim("none"),
+  unknown: yellow("unknown")
+};
+async function cmdReceipt(opts) {
+  const argv = targetToArgs(opts.target);
+  if (opts.provider) argv.push("--provider", opts.provider);
+  if (!opts.json) out(dim("  Reading the order\u2026 (no money moves)"));
+  const { payload, exitCode } = await step(run5, argv);
+  if (opts.json) {
+    printJson(payload);
+    return exitCode;
+  }
+  if (payload.error) {
+    printError(payload);
+    printSupport();
+    return exitCode;
+  }
+  const r = payload.receipt;
+  out();
+  out(`  Outcome    ${outcomeLabel(r.paymentOutcome)}  ${dim(`(${r.state})`)}`);
+  out(`  Your payment       ${LAYER_LABEL[r.sourcePayment.status] ?? r.sourcePayment.status}` + (r.sourcePayment.txHash ? `  ${r.sourcePayment.txHash}` : ""));
+  if (r.sourcePayment.localSend && r.sourcePayment.status !== "confirmed") {
+    out(dim(`                     this machine sent it (${r.sourcePayment.localSend.status})` + (r.sourcePayment.localSend.txHash ? `: ${r.sourcePayment.localSend.txHash}` : "")));
+  }
+  out(`  Merchant invoice   ${LAYER_LABEL[r.merchantSettlement.status] ?? r.merchantSettlement.status}` + (r.merchantSettlement.coinbaseStatus ? `  ${dim(r.merchantSettlement.coinbaseStatus)}` : ""));
+  out(`  Service delivered  ${LAYER_LABEL.unknown}`);
+  if (r.merchantSettlement.status === "confirmed") out(`  ${dim(r.serviceDelivery.note)}`);
+  out();
+  out(`  Next: ${r.nextAction.type === "contact_support" ? red(r.nextAction.message) : r.nextAction.message}`);
+  if (payload.support) printSupport();
+  out();
+  return exitCode;
+}
+function outcomeLabel(outcome) {
+  if (outcome === "settled") return green(bold(outcome));
+  if (outcome === "needs_attention" || outcome === "unknown") return red(bold(outcome));
+  if (outcome === "expired_unfunded") return yellow(bold(outcome));
+  return bold(outcome);
+}
 function presetFor(chainId, tokenSymbol) {
   const hit = PICKER_OPTIONS.find(
     (o) => o.chainId === String(chainId) && o.tokenSymbol === String(tokenSymbol).toUpperCase()
@@ -57452,7 +58171,7 @@ async function cmdPay(opts) {
   }
   if (opts.send) {
     const family = chainFamily(deposit.chainId);
-    const sender = family === "evm" ? run5 : family === "solana" ? run6 : null;
+    const sender = family === "evm" ? run6 : family === "solana" ? run7 : null;
     if (!sender) {
       const payload = formatFailure({
         code: "SEND_UNSUPPORTED_CHAIN",
@@ -57564,7 +58283,7 @@ function printDeposit(deposit, opts) {
   out(dim("  Send it exactly once."));
   out();
 }
-async function main7() {
+async function main8() {
   let opts;
   try {
     opts = parseCliArgs(process.argv.slice(2));
@@ -57593,6 +58312,8 @@ async function main7() {
       return cmdQuote(opts);
     case "status":
       return cmdStatus(opts);
+    case "receipt":
+      return cmdReceipt(opts);
     case "pay":
       try {
         return await cmdPay(opts);
@@ -57613,7 +58334,7 @@ async function main7() {
       return EXIT_USAGE;
   }
 }
-main7().then((code) => process.exit(code ?? EXIT_OK)).catch((err) => {
+main8().then((code) => process.exit(code ?? EXIT_OK)).catch((err) => {
   const payload = formatFailure(err);
   if (process.argv.includes("--json")) printJson(payload);
   else {

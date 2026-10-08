@@ -30,6 +30,7 @@ import {
   EXIT_UNCONFIRMED,
   SkillError,
   redact,
+  publicHash,
 } from './lib/output.mjs';
 import { assertRozoPaymentId, maskAddress } from './lib/ids.mjs';
 import { chainName, decimalsFor } from './lib/amounts.mjs';
@@ -40,6 +41,8 @@ import { promptPassphrase } from './lib/passphrase.mjs';
 import { preflight, finalPayabilityCheck } from './lib/presend.mjs';
 import { claimSend, recordSendResult } from './lib/state.mjs';
 import { broadcastOutcome } from './lib/outcomes.mjs';
+import { evmGasPrecheck, OP_STACK_CHAIN_IDS, OP_STACK_GAS_PRICE_ORACLE } from './lib/gas.mjs';
+import { estimateL1Fee } from 'viem/op-stack';
 
 import {
   createPublicClient,
@@ -205,6 +208,33 @@ async function main(argv) {
     );
   }
 
+  const data = encodeFunctionData({
+    abi: ERC20_TRANSFER_ABI,
+    functionName: 'transfer',
+    args: [to, amountAtomic],
+  });
+
+  // The token balance is not enough: the network fee is paid in the chain's
+  // native coin. Check it on the exact transfer about to be signed, before
+  // anything is signed or claimed, so a shortfall leaves the order untouched.
+  const networkFee = await evmGasPrecheck({
+    client: pub,
+    chainId,
+    from: sender,
+    to: tokenAddress,
+    data,
+    estimateL1Fee: OP_STACK_CHAIN_IDS.has(chainId)
+      ? () =>
+          estimateL1Fee(pub, {
+            account: sender,
+            to: tokenAddress,
+            data,
+            chain,
+            gasPriceOracleAddress: OP_STACK_GAS_PRICE_ORACLE,
+          })
+      : null,
+  });
+
   if (dryRun) {
     emit({
       success: true,
@@ -220,6 +250,7 @@ async function main(argv) {
         toMasked: maskAddress(to),
         fromMasked: maskAddress(sender),
       },
+      networkFee,
       confirmedAt: state.confirmation?.confirmedAt ?? null,
       keySource,
       // Key NAMES only — a value from a .env is never echoed.
@@ -230,11 +261,6 @@ async function main(argv) {
   }
 
   const wallet = createWalletClient({ account, chain, transport: http(rpcUrl) });
-  const data = encodeFunctionData({
-    abi: ERC20_TRANSFER_ABI,
-    functionName: 'transfer',
-    args: [to, amountAtomic],
-  });
 
   // Sign first: this fixes the nonce and yields the transaction hash BEFORE
   // anything is broadcast, so an ambiguous send can be resolved by looking the
@@ -307,7 +333,7 @@ async function main(argv) {
           code: landed === false ? 'BROADCAST_FAILED' : 'BROADCAST_AMBIGUOUS',
           message: redact(err?.shortMessage || err?.message || 'broadcast failed'),
         },
-        signedTxHash: expectedTxHash,
+        signedTxHash: publicHash(expectedTxHash),
         nonceBefore,
         foundOnChain: landed,
         guidance:
@@ -339,7 +365,7 @@ async function main(argv) {
         confirmed: false,
         rozoPaymentId,
         linkId: state.linkId,
-        txHash,
+        txHash: publicHash(txHash),
         guidance:
           'Broadcast but not confirmed within the wait window. Do NOT resend. Poll status.js; ' +
           'receipt truth is the backend confirmedAt/amountReceived, not this response.',
@@ -364,7 +390,7 @@ async function main(argv) {
       confirmed: succeeded,
       rozoPaymentId,
       linkId: state.linkId,
-      txHash,
+      txHash: publicHash(txHash),
       blockNumber: receipt.blockNumber?.toString?.() ?? null,
       ...(succeeded ? {} : { error: { code: outcome.code, message: 'The transfer reverted on chain.' } }),
       sent: {

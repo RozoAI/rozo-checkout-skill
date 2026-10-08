@@ -66,7 +66,16 @@ function redact(text) {
   );
   return s;
 }
+var PublicHash = class {
+  constructor(value) {
+    this.value = value;
+  }
+  toJSON() {
+    return this.value;
+  }
+};
 function redactDeep(value) {
+  if (value instanceof PublicHash) return value.value;
   if (typeof value === "string") return redact(value);
   if (Array.isArray(value)) return value.map(redactDeep);
   if (value && typeof value === "object") {
@@ -1255,6 +1264,17 @@ async function main(argv) {
             tokenSymbol: existing.tokenSymbol ?? null,
             expiresAt: created.expiresAt ?? null,
             expiresIn: Number.isFinite(remainingMs) ? formatRemaining(remainingMs) : null
+          },
+          // Machine-readable form of the guidance below. The live order keeps
+          // its own coin; a different coin is only possible once it has
+          // expired unfunded (then pay on the same link creates a new order).
+          nextAction: {
+            type: "choose_method",
+            canRetryQuery: true,
+            canCreateOrder: false,
+            canSend: false,
+            payExistingWith: { chainId: existing.chainId ?? null, tokenSymbol: existing.tokenSymbol ?? null },
+            switchPossibleAfter: created.expiresAt ?? null
           },
           guidance: `Either pay the existing order with ${existing.tokenSymbol ?? "its own coin"} (re-run with --chain ${existing.chainId} --token ${existing.tokenSymbol}), or wait ${Number.isFinite(remainingMs) ? formatRemaining(remainingMs) : "for it to expire"} for it to expire and then create a new one. Unpaid orders cost nothing.`
         },
