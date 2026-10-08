@@ -21,7 +21,8 @@ import {
 import { capture } from '../scripts/src/lib/output.mjs';
 import { parseCliArgs, CliError } from '../scripts/src/lib/cli-args.mjs';
 import { run as runReceipt } from '../scripts/src/receipt.mjs';
-import { run as runStatus } from '../scripts/src/status.mjs';
+import { run as runStatus, localSendFor, sendWindowFor } from '../scripts/src/status.mjs';
+import { classifyStatus } from '../scripts/src/lib/guards.mjs';
 import { createOrderRecord, claimSend } from '../scripts/src/lib/state.mjs';
 
 const ID = '11111111-2222-4333-8444-555555555555';
@@ -43,6 +44,7 @@ function snap(over = {}) {
     payin: { expected: '5.02 USDT', received: null, txHash: null, confirmedAt: null, chain: 'Solana' },
     payout: { txHash: null, confirmedAt: null },
     localSend: null,
+    sendWindow: { ok: true, code: null, minutesOfSlack: 30 },
     errors: [],
     ...over,
   };
@@ -127,6 +129,64 @@ test('canSend is true only for a clean, authoritative, unfunded, live order', ()
       }
     }
   }
+});
+
+test('canSend needs the senders\' own deadline and payability gates to pass', () => {
+  for (const [code, type] of [
+    ['EXPIRY_MARGIN', 'check_status'],
+    ['EXPIRED', 'check_status'],
+    ['LINK_NO_LONGER_PAYABLE', 'request_new_invoice'],
+    ['LINK_PAYABILITY_UNKNOWN', 'check_status'],
+    ['EXPIRY_UNPARSABLE', 'check_status'],
+  ]) {
+    const a = nextActionFor(snap({ sendWindow: { ok: false, code } }));
+    assert.equal(a.canSend, false, code);
+    assert.equal(a.type, type, code);
+    assert.equal(a.reason, code);
+  }
+  assert.equal(nextActionFor(snap({ sendWindow: undefined })).canSend, false);
+});
+
+test('send window: 1 minute left is refused, a used link is refused, missing data fails closed', () => {
+  const now = Date.parse('2026-10-08T00:00:00Z');
+  const status = clone(readFixture('invoice-status-payable.json'));
+  status.coinbase.preApprovalExpiry = String(Math.floor(now / 1000) + 3600);
+  const live = { expiresAt: new Date(now + 60 * 60_000).toISOString() };
+  assert.equal(sendWindowFor({ provider: 'coinbase', chainId: '900', payment: live, status, now }).ok, true);
+  const soon = { expiresAt: new Date(now + 60_000).toISOString() };
+  assert.equal(sendWindowFor({ provider: 'coinbase', chainId: '900', payment: soon, status, now }).code, 'EXPIRY_MARGIN');
+  const used = clone(status);
+  used.coinbase.usageCount = 1;
+  assert.equal(sendWindowFor({ provider: 'coinbase', chainId: '900', payment: live, status: used, now }).ok, false);
+  assert.equal(sendWindowFor({ provider: 'coinbase', chainId: '900', payment: live, status: null, now }).code, 'LINK_PAYABILITY_UNKNOWN');
+  assert.equal(sendWindowFor({ provider: 'bitrefill', chainId: '1500', payment: {}, bitrefillExpiry: null, now }).ok, false);
+});
+
+test('an unreadable local send record locks the order instead of reading as "no send"', () => {
+  const unreadable = localSendFor(ID, () => {
+    throw Object.assign(new Error('denied'), { code: 'STATE_UNREADABLE' });
+  });
+  assert.equal(unreadable.status, 'unreadable');
+  assert.equal(localSendFor(ID, () => null), null);
+  const a = nextActionFor(snap({ localSend: unreadable }));
+  assert.equal(a.canSend, false);
+  assert.equal(nextActionFor(snap({ localSend: unreadable, state: 'expired_unfunded' })).canCreateOrder, false);
+});
+
+test('Coinbase settled but router fulfilment failed is needs_attention, never settled', () => {
+  const v = classifyStatus({
+    payment: { status: 'payment_payout_completed', source: { txHash: 'x', confirmedAt: '2026-10-08T00:00:00Z' } },
+    routerState: { status: 'failed_pay_invoice' },
+    coinbase: { settled: true },
+  });
+  assert.equal(v.state, 'stuck_after_payment');
+  assert.equal(v.escalate, true);
+  const failed = snap({ state: 'settled', backend: { routerStatus: 'failed_pay_invoice', coinbaseSettled: true } });
+  assert.equal(paymentOutcomeFor(failed), 'needs_attention');
+  assert.equal(buildReceipt(failed).merchantSettlement.status, 'unknown');
+  assert.equal(buildReceipt(failed).merchantSettlement.routerFailed, true);
+  const midPay = snap({ state: 'settled', backend: { routerStatus: 'paying', coinbaseSettled: true } });
+  assert.equal(paymentOutcomeFor(midPay), 'processing');
 });
 
 test('expired unfunded: Coinbase re-orders on the same link, Bitrefill needs a new invoice', () => {
@@ -255,7 +315,8 @@ test('receipt: usage errors exit 2', async () => {
 
 test('status keeps its old fields and adds outcome fields; a local send blocks canSend', async () => {
   const s = clone(readFixture('invoice-status-payable.json'));
-  s.rozoPayment.expiresAt = new Date(Date.now() + 30 * 60_000).toISOString();
+  s.rozoPayment.expiresAt = new Date(Date.now() + 60 * 60_000).toISOString();
+  s.coinbase.preApprovalExpiry = String(Math.floor(Date.now() / 1000) + 3600);
   const p = clone(readFixture('payment-unpaid-solana.json'));
   p.expiresAt = s.rozoPayment.expiresAt;
   await withStubs({ invoiceStatus: s, payment: p }, async () => {

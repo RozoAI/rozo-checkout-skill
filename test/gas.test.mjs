@@ -12,7 +12,7 @@ import {
   evmGasPrecheck,
   solFeePrecheck,
 } from '../scripts/src/lib/gas.mjs';
-import { redactDeep } from '../scripts/src/lib/output.mjs';
+import { redactDeep, publicHash, formatFailure, SkillError } from '../scripts/src/lib/output.mjs';
 
 const FROM = '0x1234567890abcdef1234567890ABCDEF12345678';
 const GWEI = 1_000_000_000n;
@@ -113,7 +113,7 @@ test('EVM: RPC failure is GAS_CHECK_UNAVAILABLE, never a shortfall or a zero fee
 });
 
 test('EVM: enough native coin passes and reports the fee', async () => {
-  const d = await evmGasPrecheck({ client: evmClient(), chainId: 8453, from: FROM, to: FROM, data: '0x', bufferPct: 20 });
+  const d = await evmGasPrecheck({ client: evmClient(), chainId: 8453, from: FROM, to: FROM, data: '0x', bufferPct: 20, estimateL1Fee: async () => 1000n });
   assert.equal(d.feeCoin, 'ETH');
   assert.equal(d.network, 'Base');
   assert.equal(d.gasLimit, '60000');
@@ -162,26 +162,67 @@ test('Solana: plenty of SOL passes', async () => {
   assert.equal(d.shortfall, null);
 });
 
-test('tx hashes survive redaction only under hash field names; keys never do', () => {
+test('only hashes our code marks with publicHash survive redaction', () => {
   const hex = `0x${'ab'.repeat(32)}`;
   const sig = '5'.repeat(88);
   const out = redactDeep({
-    txHash: hex,
-    signature: sig,
-    nested: { payoutTxHash: hex, localSend: { txHash: hex } },
-    privateKey: hex,
-    secretKey: sig,
+    txHash: publicHash(hex),
+    signature: publicHash(sig),
+    nested: { localSend: { txHash: publicHash(hex) } },
+    unmarkedTxHash: hex,
+    privateKey: publicHash(hex),
     note: `leaked ${hex}`,
-    other: hex,
-    txHashWithText: `${hex} extra`,
   });
   assert.equal(out.txHash, hex);
   assert.equal(out.signature, sig);
-  assert.equal(out.nested.payoutTxHash, hex);
   assert.equal(out.nested.localSend.txHash, hex);
-  assert.equal(out.privateKey, '<redacted>');
-  assert.equal(out.secretKey, '<redacted>');
+  assert.equal(out.unmarkedTxHash, '0x<redacted>');
+  assert.equal(out.privateKey, '<redacted>'); // the key-name rule still wins
   assert.equal(out.note, 'leaked 0x<redacted>');
-  assert.equal(out.other, '0x<redacted>');
-  assert.equal(redactDeep({ txHash: `${hex} extra` }).txHash, '0x<redacted> extra');
+  // Not exactly one hash: publicHash returns it unchanged, so it is redacted.
+  assert.equal(redactDeep({ txHash: publicHash(`${hex} extra`) }).txHash, '0x<redacted> extra');
+  assert.equal(JSON.stringify({ h: publicHash(hex) }), JSON.stringify({ h: hex }));
+});
+
+test('an upstream error body cannot smuggle a key-shaped value out under a hash field name', () => {
+  const keyShaped = `0x${'cd'.repeat(32)}`;
+  const payload = formatFailure(new SkillError('HTTP_400', 'bad', { body: { signature: keyShaped, txHash: keyShaped } }));
+  assert.equal(payload.error.details.body.signature, '0x<redacted>');
+  assert.equal(payload.error.details.body.txHash, '0x<redacted>');
+});
+
+test('EVM: legacy pricing only when the node does not support EIP-1559', async () => {
+  const legacyNode = {
+    ...evmClient(),
+    async estimateFeesPerGas(opts) {
+      if (opts?.type === 'legacy') return { gasPrice: 3n * GWEI };
+      throw Object.assign(new Error('Chain does not support EIP-1559 fees.'), { name: 'Eip1559FeesNotSupportedError' });
+    },
+  };
+  const d = await evmGasPrecheck({ client: legacyNode, chainId: 56, from: FROM, to: FROM, data: '0x', bufferPct: 0 });
+  assert.equal(d.pricing, 'legacy');
+  assert.equal(d.required, '0.00015'); // 50000 * 3 gwei
+  const flaky = { ...evmClient(), async estimateFeesPerGas() { throw new Error('timeout'); } };
+  await rejectsWith(evmGasPrecheck({ client: flaky, chainId: 56, from: FROM, to: FROM, data: '0x' }), 'GAS_CHECK_UNAVAILABLE');
+});
+
+test('Base: the L1 data fee is added; without an estimate the check is unavailable', async () => {
+  const client = evmClient({ balance: 2_000_000_000_000_000n, fees: { maxFeePerGas: GWEI } }); // 0.002 ETH
+  const d = await evmGasPrecheck({ client, chainId: 8453, from: FROM, to: FROM, data: '0x', bufferPct: 0, estimateL1Fee: async () => 1_000_000_000_000n });
+  assert.equal(d.l1DataFee, '0.000001');
+  assert.equal(d.required, '0.000051'); // 50000 gwei L2 + 0.000001 L1
+  // L2 alone fits, L2 + L1 does not.
+  const short = await rejectsWith(
+    evmGasPrecheck({ client: evmClient({ balance: 60_000n * GWEI, fees: { maxFeePerGas: GWEI } }), chainId: 8453, from: FROM, to: FROM, data: '0x', bufferPct: 0, estimateL1Fee: async () => 20_000n * GWEI }),
+    'INSUFFICIENT_GAS',
+  );
+  assert.equal(short.details.shortfall, '0.00001');
+  await rejectsWith(evmGasPrecheck({ client, chainId: 8453, from: FROM, to: FROM, data: '0x' }), 'GAS_CHECK_UNAVAILABLE');
+  await rejectsWith(
+    evmGasPrecheck({ client, chainId: 8453, from: FROM, to: FROM, data: '0x', estimateL1Fee: async () => { throw new Error('oracle down'); } }),
+    'GAS_CHECK_UNAVAILABLE',
+  );
+  // Non-OP chains never call it.
+  const eth = await evmGasPrecheck({ client: evmClient(), chainId: 1, from: FROM, to: FROM, data: '0x', estimateL1Fee: async () => { throw new Error('must not be called'); } });
+  assert.equal(eth.l1DataFee, null);
 });

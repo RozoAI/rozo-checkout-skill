@@ -32177,15 +32177,20 @@ function redact(text) {
   );
   return s;
 }
-var TX_HASH_FIELDS = /* @__PURE__ */ new Set([
-  "txHash",
-  "signedTxHash",
-  "expectedTxHash",
-  "payoutTxHash",
-  "signature"
-]);
+var PublicHash = class {
+  constructor(value) {
+    this.value = value;
+  }
+  toJSON() {
+    return this.value;
+  }
+};
 var TX_HASH_VALUE = /^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{86,88})$/;
+function publicHash(value) {
+  return typeof value === "string" && TX_HASH_VALUE.test(value) ? new PublicHash(value) : value;
+}
 function redactDeep(value) {
+  if (value instanceof PublicHash) return value.value;
   if (typeof value === "string") return redact(value);
   if (Array.isArray(value)) return value.map(redactDeep);
   if (value && typeof value === "object") {
@@ -32193,10 +32198,6 @@ function redactDeep(value) {
     for (const [k, v] of Object.entries(value)) {
       if (/priv(ate)?[-_]?key|secret|mnemonic|seed/i.test(k)) {
         out[k] = "<redacted>";
-        continue;
-      }
-      if (TX_HASH_FIELDS.has(k) && typeof v === "string" && TX_HASH_VALUE.test(v)) {
-        out[k] = v;
         continue;
       }
       out[k] = redactDeep(v);
@@ -34344,7 +34345,7 @@ async function main(argv) {
           code: landed ? "BROADCAST_AMBIGUOUS" : "BROADCAST_FAILED",
           message: redact(err?.message || "broadcast failed")
         },
-        signature,
+        signature: publicHash(signature),
         guidance: landed ? "The signed transaction may already be on chain. Do NOT resend. Check the signature on an explorer and poll status.js." : "Nothing appears to have landed, but this order is now locked against a second automated send. Verify on chain before doing anything else."
       },
       EXIT_ERROR
@@ -34381,7 +34382,7 @@ async function main(argv) {
         confirmed: false,
         rozoPaymentId,
         linkId: state.linkId,
-        txHash: sent,
+        txHash: publicHash(sent),
         error: {
           code: broadcastOutcome({ executionError }).code,
           message: `The transaction landed but failed on chain: ${redact(JSON.stringify(executionError))}`
@@ -34400,7 +34401,7 @@ async function main(argv) {
         confirmed: false,
         rozoPaymentId,
         linkId: state.linkId,
-        txHash: sent,
+        txHash: publicHash(sent),
         guidance: "Broadcast but not confirmed within the wait window. Do NOT resend. Poll status.js; receipt truth is the backend confirmedAt/amountReceived."
       },
       EXIT_UNCONFIRMED
@@ -34414,7 +34415,7 @@ async function main(argv) {
     confirmed: true,
     rozoPaymentId,
     linkId: state.linkId,
-    txHash: sent,
+    txHash: publicHash(sent),
     sent: {
       chain: chainName(900),
       tokenSymbol: source.tokenSymbol,

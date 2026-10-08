@@ -113,7 +113,35 @@ function unavailable(network, err) {
  * client shape). Throws INSUFFICIENT_GAS / GAS_CHECK_UNAVAILABLE, else
  * returns the assessment details for display.
  */
-export async function evmGasPrecheck({ client, chainId, from, to, data, value = 0n, bufferPct = gasBufferPct() }) {
+/**
+ * viem's estimateFeesPerGas() defaults to EIP-1559 and throws
+ * Eip1559FeesNotSupportedError on a chain without baseFeePerGas. Only that
+ * specific error falls back to legacy pricing; any other failure stays a
+ * failure (GAS_CHECK_UNAVAILABLE).
+ */
+export async function estimateFees(client) {
+  try {
+    return await client.estimateFeesPerGas();
+  } catch (err) {
+    if (err?.name !== 'Eip1559FeesNotSupportedError') throw err;
+    return client.estimateFeesPerGas({ type: 'legacy' });
+  }
+}
+
+/** OP-stack chains also charge an L1 data fee, checked by the node at submit time. */
+export const OP_STACK_GAS_PRICE_ORACLE = '0x420000000000000000000000000000000000000F';
+export const OP_STACK_CHAIN_IDS = new Set([8453]);
+
+export async function evmGasPrecheck({
+  client,
+  chainId,
+  from,
+  to,
+  data,
+  value = 0n,
+  bufferPct = gasBufferPct(),
+  estimateL1Fee = null,
+}) {
   const coin = EVM_FEE_COIN[Number(chainId)] ?? { symbol: 'native coin', network: `chain ${chainId}` };
 
   let balance;
@@ -127,7 +155,7 @@ export async function evmGasPrecheck({ client, chainId, from, to, data, value = 
   let fees;
   try {
     gasEstimate = await client.estimateGas({ account: from, to, data, value });
-    fees = await client.estimateFeesPerGas();
+    fees = await estimateFees(client);
   } catch (err) {
     // Some nodes refuse to estimate for a sender with no native balance. A
     // zero balance is still provably unable to pay any fee.
@@ -147,9 +175,28 @@ export async function evmGasPrecheck({ client, chainId, from, to, data, value = 
   });
   if (!req) throw unavailable(coin.network, new Error('the node returned no fee price'));
 
-  const required = req.fee + value;
+  let l1Fee = 0n;
+  if (OP_STACK_CHAIN_IDS.has(Number(chainId))) {
+    if (typeof estimateL1Fee !== 'function') {
+      throw unavailable(coin.network, new Error('no L1 data fee estimator for this OP-stack chain'));
+    }
+    try {
+      // Same buffer as the L2 part: the L1 fee moves with Ethereum's base fee.
+      l1Fee = ((await estimateL1Fee()) * BigInt(100 + bufferPct) + 99n) / 100n;
+    } catch (err) {
+      throw unavailable(coin.network, err);
+    }
+  }
+
+  const required = req.fee + l1Fee + value;
   const { ok, details } = assessFee({ balance, required, decimals: 18, symbol: coin.symbol, network: coin.network });
-  const full = { ...details, gasLimit: req.gasLimit.toString(), pricing: req.pricing, bufferPct };
+  const full = {
+    ...details,
+    gasLimit: req.gasLimit.toString(),
+    pricing: req.pricing,
+    bufferPct,
+    l1DataFee: OP_STACK_CHAIN_IDS.has(Number(chainId)) ? formatAtomic(l1Fee, 18) : null,
+  };
   if (!ok) throw insufficient(full);
   return full;
 }

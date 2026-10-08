@@ -40,15 +40,20 @@ function redact(text) {
   );
   return s;
 }
-var TX_HASH_FIELDS = /* @__PURE__ */ new Set([
-  "txHash",
-  "signedTxHash",
-  "expectedTxHash",
-  "payoutTxHash",
-  "signature"
-]);
+var PublicHash = class {
+  constructor(value) {
+    this.value = value;
+  }
+  toJSON() {
+    return this.value;
+  }
+};
 var TX_HASH_VALUE = /^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{86,88})$/;
+function publicHash(value) {
+  return typeof value === "string" && TX_HASH_VALUE.test(value) ? new PublicHash(value) : value;
+}
 function redactDeep(value) {
+  if (value instanceof PublicHash) return value.value;
   if (typeof value === "string") return redact(value);
   if (Array.isArray(value)) return value.map(redactDeep);
   if (value && typeof value === "object") {
@@ -56,10 +61,6 @@ function redactDeep(value) {
     for (const [k, v] of Object.entries(value)) {
       if (/priv(ate)?[-_]?key|secret|mnemonic|seed/i.test(k)) {
         out[k] = "<redacted>";
-        continue;
-      }
-      if (TX_HASH_FIELDS.has(k) && typeof v === "string" && TX_HASH_VALUE.test(v)) {
-        out[k] = v;
         continue;
       }
       out[k] = redactDeep(v);
@@ -363,6 +364,72 @@ function receiptSignal(source) {
     return { money: true, receipt: null, unparsable: true };
   }
 }
+function checkPayable(statusResponse, now = Date.now()) {
+  const cb = statusResponse?.coinbase;
+  if (!cb) {
+    return {
+      ok: false,
+      code: "LINK_NO_LONGER_PAYABLE",
+      reason: "invoice-status returned no Coinbase state; cannot prove the link is still payable.",
+      derived: null
+    };
+  }
+  const protocolVersion = cb.protocolVersion ?? statusResponse?.protocolVersion ?? null;
+  const derived = {
+    protocolVersion,
+    status: cb.status ?? null,
+    settled: cb.settled ?? null,
+    usageCount: cb.usageCount ?? null,
+    maxUsage: cb.maxUsage ?? null,
+    preApprovalExpiry: cb.preApprovalExpiry ?? null
+  };
+  if (cb.settled === true) {
+    return {
+      ok: false,
+      code: "LINK_NO_LONGER_PAYABLE",
+      reason: "The Coinbase resource is already settled \u2014 someone has paid it.",
+      derived
+    };
+  }
+  if (protocolVersion === "v3") {
+    if (!cb.status) {
+      return {
+        ok: false,
+        code: "LINK_PAYABILITY_UNKNOWN",
+        reason: "The Payment Session response carries no status; cannot prove it is still payable.",
+        derived
+      };
+    }
+    if (cb.status !== "PAYMENT_SESSION_STATUS_CREATED") {
+      return {
+        ok: false,
+        code: "LINK_NO_LONGER_PAYABLE",
+        reason: `Payment Session status is ${cb.status}; only PAYMENT_SESSION_STATUS_CREATED is payable.`,
+        derived
+      };
+    }
+    return { ok: true, code: null, reason: null, derived };
+  }
+  const usage2 = Number(cb.usageCount);
+  const max = Number(cb.maxUsage);
+  if (cb.usageCount === null || cb.usageCount === void 0 || cb.maxUsage === null || cb.maxUsage === void 0 || !Number.isFinite(usage2) || !Number.isFinite(max)) {
+    return {
+      ok: false,
+      code: "LINK_PAYABILITY_UNKNOWN",
+      reason: "The payment link response is missing usageCount/maxUsage; cannot prove it has not already been used.",
+      derived
+    };
+  }
+  if (usage2 >= max) {
+    return {
+      ok: false,
+      code: "LINK_NO_LONGER_PAYABLE",
+      reason: `Payment link already used (${usage2}/${max}).`,
+      derived
+    };
+  }
+  return { ok: true, code: null, reason: null, derived };
+}
 function classifyStatus({
   payment,
   routerState,
@@ -404,15 +471,15 @@ function classifyStatus({
       { escalate: true }
     );
   }
-  if (!bitrefill && (routerStatus === "paid" || coinbase?.settled === true)) {
-    return mk("settled", "Coinbase invoice settled by the funder wallet.", { terminal: true });
-  }
   if (routerStatus === "failed_pay_invoice" || routerStatus === "failed_insufficient_balance") {
     return mk(
       "stuck_after_payment",
       `Fulfillment failed (${routerStatus}) after the pay-in. Do not pay again \u2014 escalate for manual reconciliation.`,
       { terminal: false, escalate: true }
     );
+  }
+  if (!bitrefill && (routerStatus === "paid" || coinbase?.settled === true)) {
+    return mk("settled", "Coinbase invoice settled by the funder wallet.", { terminal: true });
   }
   if (moneyDetected && receipt && receipt.state === "underpaid") {
     return mk(
@@ -511,6 +578,10 @@ function formatRemaining(ms) {
   const m = totalMinutes % 60;
   return m ? `${h}h ${m}m` : `${h}h`;
 }
+function marginFor(chainId) {
+  const key = String(chainId);
+  return MARGINS_MS[key] ?? MARGINS_MS[chainId] ?? DEFAULT_MARGIN_MS;
+}
 function parseDeadline(value) {
   if (value === null || value === void 0 || value === "") return null;
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -523,6 +594,87 @@ function parseDeadline(value) {
   }
   const t = Date.parse(s);
   return Number.isFinite(t) ? t : null;
+}
+function checkExpiry({
+  now,
+  chainId,
+  intentExpiresAt,
+  coinbaseExpiry,
+  bolt11ExpiresAt = void 0
+}) {
+  const marginMs = marginFor(chainId);
+  const intentMs = parseDeadline(intentExpiresAt);
+  const coinbaseMs = parseDeadline(coinbaseExpiry);
+  const bolt11Ms = bolt11ExpiresAt === void 0 ? void 0 : parseDeadline(bolt11ExpiresAt);
+  const deadlines = { intentMs, coinbaseMs, bolt11Ms: bolt11Ms ?? null };
+  const base = {
+    marginMs,
+    effectiveDeadlineMs: null,
+    msRemaining: null,
+    msOfSlack: null,
+    deadlines
+  };
+  if (intentMs === null) {
+    return {
+      ...base,
+      ok: false,
+      code: "EXPIRY_UNPARSABLE",
+      reason: "Intent expiresAt is missing or unparsable."
+    };
+  }
+  if (coinbaseMs === null) {
+    return {
+      ...base,
+      ok: false,
+      code: "EXPIRY_UNPARSABLE",
+      reason: "Coinbase preApprovalExpiry is missing or unparsable."
+    };
+  }
+  const effective = Math.min(intentMs, coinbaseMs);
+  const msRemaining = effective - now;
+  const msOfSlack = msRemaining - marginMs;
+  const withDeadline = {
+    ...base,
+    effectiveDeadlineMs: effective,
+    msRemaining,
+    msOfSlack
+  };
+  if (msRemaining <= 0) {
+    return {
+      ...withDeadline,
+      ok: false,
+      code: "EXPIRED",
+      reason: "The order or the Coinbase link has already expired."
+    };
+  }
+  if (msOfSlack <= 0) {
+    return {
+      ...withDeadline,
+      ok: false,
+      code: "EXPIRY_MARGIN",
+      reason: `Only ${Math.floor(msRemaining / 1e3)}s left before the earliest deadline; this chain needs a ${Math.floor(marginMs / 6e4)} min safety margin.`
+    };
+  }
+  if (bolt11ExpiresAt !== void 0) {
+    if (bolt11Ms === null) {
+      return {
+        ...withDeadline,
+        ok: false,
+        code: "EXPIRY_UNPARSABLE",
+        reason: "BOLT11 invoice expiry is missing or unparsable."
+      };
+    }
+    const bolt11Remaining = bolt11Ms - now;
+    if (bolt11Remaining < BOLT11_MIN_VALIDITY_MS) {
+      return {
+        ...withDeadline,
+        ok: false,
+        code: "BOLT11_TOO_SHORT",
+        reason: `BOLT11 invoice has ${Math.max(0, Math.floor(bolt11Remaining / 1e3))}s of validity left; at least 10 min is required. Request a fresh invoice.`
+      };
+    }
+  }
+  return { ...withDeadline, ok: true, code: null, reason: null };
 }
 
 // scripts/src/lib/state.mjs
@@ -646,6 +798,11 @@ function paymentOutcomeFor(result) {
   if (result.unknown) return "unknown";
   let outcome = Object.prototype.hasOwnProperty.call(STATE_TO_OUTCOME, result.state) ? STATE_TO_OUTCOME[result.state] : "unknown";
   if (outcome === "settled" && !merchantSettlementProved(result)) outcome = "processing";
+  if (outcome === "settled" && result.provider !== "bitrefill") {
+    const router = result.backend?.routerStatus ?? null;
+    if (router && router.startsWith("failed_")) return "needs_attention";
+    if (router && router !== "paid") outcome = "processing";
+  }
   if (!result.authoritativeView && (outcome === "awaiting_payment" || outcome === "expired_unfunded")) {
     return "unknown";
   }
@@ -666,6 +823,31 @@ function nextActionFor(result, outcome = paymentOutcomeFor(result)) {
           ...base,
           type: "check_status",
           message: "A send was already recorded for this order. Do NOT pay again; poll status until the pay-in shows up."
+        };
+      }
+      if (!result?.sendWindow?.ok) {
+        const code = result?.sendWindow?.code ?? "SEND_WINDOW_UNKNOWN";
+        if (code === "LINK_NO_LONGER_PAYABLE") {
+          return {
+            ...base,
+            type: "request_new_invoice",
+            reason: code,
+            message: "The merchant link no longer accepts payment. Do NOT fund this order; get a new payment link."
+          };
+        }
+        if (code === "EXPIRED" || code === "EXPIRY_MARGIN") {
+          return {
+            ...base,
+            type: "check_status",
+            reason: code,
+            message: "Too little time is left to pay this order safely. Do NOT fund it. Once it shows expired_unfunded, run pay again on the same link for a new order."
+          };
+        }
+        return {
+          ...base,
+          type: "check_status",
+          reason: code,
+          message: "Whether this order can still be paid could not be proved. Do NOT fund it on a guess; retry."
         };
       }
       return {
@@ -754,7 +936,8 @@ function merchantSettlementLayer(result) {
   }
   const backend = result?.backend || {};
   let status;
-  if (backend.coinbaseSettled === true) status = "confirmed";
+  if (backend.routerStatus && backend.routerStatus.startsWith("failed_")) status = "unknown";
+  else if (backend.coinbaseSettled === true) status = "confirmed";
   else if (backend.coinbaseSettled === null || backend.coinbaseSettled === void 0) {
     status = backend.routerStatus === "paid" || result?.unknown ? "unknown" : "pending";
   } else status = "pending";
@@ -766,6 +949,8 @@ function merchantSettlementLayer(result) {
     routerStatus: backend.routerStatus ?? null,
     // The router reporting `paid` is recorded, but it is not settlement proof.
     routerReportsPaid: backend.routerStatus === "paid",
+    // Coinbase may read settled because someone else paid the link.
+    routerFailed: Boolean(backend.routerStatus && backend.routerStatus.startsWith("failed_")),
     payoutTxHash: result?.payout?.txHash ?? null
   };
 }
@@ -811,15 +996,41 @@ function resolveProvider(explicit, rozoPaymentId) {
   }
   return null;
 }
-function localSendFor(id) {
+function localSendFor(id, read = readState) {
   if (!id || !isRozoPaymentId(id)) return null;
+  let state;
   try {
-    const send = readState(id)?.send;
-    if (!send || !send.status) return null;
-    return { status: send.status, txHash: send.txHash ?? null, claimedAt: send.claimedAt ?? null };
-  } catch {
-    return null;
+    state = read(id);
+  } catch (err) {
+    return { status: "unreadable", txHash: null, claimedAt: null, error: err?.code ?? "STATE_UNREADABLE" };
   }
+  const send = state?.send;
+  if (!send || !send.status) return null;
+  return { status: send.status, txHash: publicHash(send.txHash ?? null), claimedAt: send.claimedAt ?? null };
+}
+function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, now = Date.now() }) {
+  if (provider === "bitrefill") {
+    const deadline = bitrefillExpiry ?? null;
+    const expiry2 = checkExpiry({
+      now,
+      chainId,
+      intentExpiresAt: payment?.expiresAt ?? deadline,
+      coinbaseExpiry: deadline
+    });
+    return expiry2.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry2.msOfSlack / 6e4) } : { ok: false, code: expiry2.code, reason: expiry2.reason };
+  }
+  if (!status) {
+    return { ok: false, code: "LINK_PAYABILITY_UNKNOWN", reason: "The Coinbase link state could not be read." };
+  }
+  const payable = checkPayable(status, now);
+  if (!payable.ok) return { ok: false, code: payable.code, reason: payable.reason };
+  const expiry = checkExpiry({
+    now,
+    chainId,
+    intentExpiresAt: payment?.expiresAt ?? status?.rozoPayment?.expiresAt,
+    coinbaseExpiry: status?.coinbase?.preApprovalExpiry
+  });
+  return expiry.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4) } : { ok: false, code: expiry.code, reason: expiry.reason };
 }
 async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   let provider = resolveProvider(explicitProvider, rozoPaymentId);
@@ -918,7 +1129,7 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       expected: source.amount ? formatAmount(source) : null,
       received: source.amountReceived ?? null,
       receipt: verdict.receipt,
-      txHash: source.txHash ?? null,
+      txHash: publicHash(source.txHash ?? null),
       confirmedAt: source.confirmedAt ?? null,
       senderAddressMasked: source.senderAddress ? maskAddress(source.senderAddress) : null,
       chain: source.chainId ? chainName(source.chainId) : null
@@ -937,10 +1148,11 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       };
     })(),
     payout: {
-      txHash: payment?.destination?.txHash ?? status?.rozoPayment?.destination?.txHash ?? null,
+      txHash: publicHash(payment?.destination?.txHash ?? status?.rozoPayment?.destination?.txHash ?? null),
       confirmedAt: payment?.destination?.confirmedAt ?? status?.rozoPayment?.destination?.confirmedAt ?? null
     },
     localSend: localSendFor(id),
+    sendWindow: state === "awaiting_deposit" ? sendWindowFor({ provider, chainId: source.chainId, payment, status, bitrefillExpiry }) : null,
     errors: [statusError, paymentError].filter(Boolean)
   };
 }

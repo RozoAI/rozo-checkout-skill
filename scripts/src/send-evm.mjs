@@ -30,6 +30,7 @@ import {
   EXIT_UNCONFIRMED,
   SkillError,
   redact,
+  publicHash,
 } from './lib/output.mjs';
 import { assertRozoPaymentId, maskAddress } from './lib/ids.mjs';
 import { chainName, decimalsFor } from './lib/amounts.mjs';
@@ -40,7 +41,8 @@ import { promptPassphrase } from './lib/passphrase.mjs';
 import { preflight, finalPayabilityCheck } from './lib/presend.mjs';
 import { claimSend, recordSendResult } from './lib/state.mjs';
 import { broadcastOutcome } from './lib/outcomes.mjs';
-import { evmGasPrecheck } from './lib/gas.mjs';
+import { evmGasPrecheck, OP_STACK_CHAIN_IDS, OP_STACK_GAS_PRICE_ORACLE } from './lib/gas.mjs';
+import { estimateL1Fee } from 'viem/op-stack';
 
 import {
   createPublicClient,
@@ -221,6 +223,16 @@ async function main(argv) {
     from: sender,
     to: tokenAddress,
     data,
+    estimateL1Fee: OP_STACK_CHAIN_IDS.has(chainId)
+      ? () =>
+          estimateL1Fee(pub, {
+            account: sender,
+            to: tokenAddress,
+            data,
+            chain,
+            gasPriceOracleAddress: OP_STACK_GAS_PRICE_ORACLE,
+          })
+      : null,
   });
 
   if (dryRun) {
@@ -321,7 +333,7 @@ async function main(argv) {
           code: landed === false ? 'BROADCAST_FAILED' : 'BROADCAST_AMBIGUOUS',
           message: redact(err?.shortMessage || err?.message || 'broadcast failed'),
         },
-        signedTxHash: expectedTxHash,
+        signedTxHash: publicHash(expectedTxHash),
         nonceBefore,
         foundOnChain: landed,
         guidance:
@@ -353,7 +365,7 @@ async function main(argv) {
         confirmed: false,
         rozoPaymentId,
         linkId: state.linkId,
-        txHash,
+        txHash: publicHash(txHash),
         guidance:
           'Broadcast but not confirmed within the wait window. Do NOT resend. Poll status.js; ' +
           'receipt truth is the backend confirmedAt/amountReceived, not this response.',
@@ -378,7 +390,7 @@ async function main(argv) {
       confirmed: succeeded,
       rozoPaymentId,
       linkId: state.linkId,
-      txHash,
+      txHash: publicHash(txHash),
       blockNumber: receipt.blockNumber?.toString?.() ?? null,
       ...(succeeded ? {} : { error: { code: outcome.code, message: 'The transfer reverted on chain.' } }),
       sent: {

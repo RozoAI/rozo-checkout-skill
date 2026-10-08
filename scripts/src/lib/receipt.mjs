@@ -90,6 +90,12 @@ export function paymentOutcomeFor(result) {
 
   // Router said paid, Coinbase has not shown capture yet.
   if (outcome === 'settled' && !merchantSettlementProved(result)) outcome = 'processing';
+  // Coinbase settled while the router is still mid-payment: wait for it.
+  if (outcome === 'settled' && result.provider !== 'bitrefill') {
+    const router = result.backend?.routerStatus ?? null;
+    if (router && router.startsWith('failed_')) return 'needs_attention';
+    if (router && router !== 'paid') outcome = 'processing';
+  }
 
   // A partial view cannot tell "nothing paid" from "paid, not visible".
   if (!result.authoritativeView && (outcome === 'awaiting_payment' || outcome === 'expired_unfunded')) {
@@ -124,6 +130,34 @@ export function nextActionFor(result, outcome = paymentOutcomeFor(result)) {
           message:
             'A send was already recorded for this order. Do NOT pay again; poll status until the ' +
             'pay-in shows up.',
+        };
+      }
+      // The senders' own deadline and payability gates. Missing = closed.
+      if (!result?.sendWindow?.ok) {
+        const code = result?.sendWindow?.code ?? 'SEND_WINDOW_UNKNOWN';
+        if (code === 'LINK_NO_LONGER_PAYABLE') {
+          return {
+            ...base,
+            type: 'request_new_invoice',
+            reason: code,
+            message: 'The merchant link no longer accepts payment. Do NOT fund this order; get a new payment link.',
+          };
+        }
+        if (code === 'EXPIRED' || code === 'EXPIRY_MARGIN') {
+          return {
+            ...base,
+            type: 'check_status',
+            reason: code,
+            message:
+              'Too little time is left to pay this order safely. Do NOT fund it. Once it shows ' +
+              'expired_unfunded, run pay again on the same link for a new order.',
+          };
+        }
+        return {
+          ...base,
+          type: 'check_status',
+          reason: code,
+          message: 'Whether this order can still be paid could not be proved. Do NOT fund it on a guess; retry.',
         };
       }
       return {
@@ -225,7 +259,8 @@ function merchantSettlementLayer(result) {
   }
   const backend = result?.backend || {};
   let status;
-  if (backend.coinbaseSettled === true) status = 'confirmed';
+  if (backend.routerStatus && backend.routerStatus.startsWith('failed_')) status = 'unknown';
+  else if (backend.coinbaseSettled === true) status = 'confirmed';
   else if (backend.coinbaseSettled === null || backend.coinbaseSettled === undefined) {
     status = backend.routerStatus === 'paid' || result?.unknown ? 'unknown' : 'pending';
   } else status = 'pending';
@@ -237,6 +272,8 @@ function merchantSettlementLayer(result) {
     routerStatus: backend.routerStatus ?? null,
     // The router reporting `paid` is recorded, but it is not settlement proof.
     routerReportsPaid: backend.routerStatus === 'paid',
+    // Coinbase may read settled because someone else paid the link.
+    routerFailed: Boolean(backend.routerStatus && backend.routerStatus.startsWith('failed_')),
     payoutTxHash: result?.payout?.txHash ?? null,
   };
 }

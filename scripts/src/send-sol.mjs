@@ -25,6 +25,7 @@ import {
   EXIT_UNCONFIRMED,
   SkillError,
   redact,
+  publicHash,
 } from './lib/output.mjs';
 import { assertRozoPaymentId, maskAddress } from './lib/ids.mjs';
 import { chainName, decimalsFor } from './lib/amounts.mjs';
@@ -301,7 +302,7 @@ async function main(argv) {
           code: landed ? 'BROADCAST_AMBIGUOUS' : 'BROADCAST_FAILED',
           message: redact(err?.message || 'broadcast failed'),
         },
-        signature,
+        signature: publicHash(signature),
         guidance: landed
           ? 'The signed transaction may already be on chain. Do NOT resend. Check the signature ' +
             'on an explorer and poll status.js.'
@@ -349,7 +350,7 @@ async function main(argv) {
         confirmed: false,
         rozoPaymentId,
         linkId: state.linkId,
-        txHash: sent,
+        txHash: publicHash(sent),
         error: {
           code: broadcastOutcome({ executionError }).code,
           message: `The transaction landed but failed on chain: ${redact(JSON.stringify(executionError))}`,
@@ -371,7 +372,7 @@ async function main(argv) {
         confirmed: false,
         rozoPaymentId,
         linkId: state.linkId,
-        txHash: sent,
+        txHash: publicHash(sent),
         guidance:
           'Broadcast but not confirmed within the wait window. Do NOT resend. Poll status.js; ' +
           'receipt truth is the backend confirmedAt/amountReceived.',
@@ -389,7 +390,7 @@ async function main(argv) {
     confirmed: true,
     rozoPaymentId,
     linkId: state.linkId,
-    txHash: sent,
+    txHash: publicHash(sent),
     sent: {
       chain: chainName(900),
       tokenSymbol: source.tokenSymbol,

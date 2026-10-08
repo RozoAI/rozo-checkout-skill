@@ -3441,6 +3441,9 @@ function carry(digits) {
   }
   return `1${out.join("")}`;
 }
+function fromGwei(gwei, unit = "wei") {
+  return from(gwei, exponents.gwei - exponents[unit]);
+}
 var exponents, InvalidDecimalNumberError, InvalidDecimalsError;
 var init_Value = __esm({
   "../rozo-checkout-skill/node_modules/viem/_esm/utils/unit/Value.js"() {
@@ -10006,15 +10009,20 @@ function redact(text) {
   );
   return s;
 }
-var TX_HASH_FIELDS = /* @__PURE__ */ new Set([
-  "txHash",
-  "signedTxHash",
-  "expectedTxHash",
-  "payoutTxHash",
-  "signature"
-]);
+var PublicHash = class {
+  constructor(value) {
+    this.value = value;
+  }
+  toJSON() {
+    return this.value;
+  }
+};
 var TX_HASH_VALUE = /^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{86,88})$/;
+function publicHash(value) {
+  return typeof value === "string" && TX_HASH_VALUE.test(value) ? new PublicHash(value) : value;
+}
 function redactDeep(value) {
+  if (value instanceof PublicHash) return value.value;
   if (typeof value === "string") return redact(value);
   if (Array.isArray(value)) return value.map(redactDeep);
   if (value && typeof value === "object") {
@@ -10022,10 +10030,6 @@ function redactDeep(value) {
     for (const [k, v] of Object.entries(value)) {
       if (/priv(ate)?[-_]?key|secret|mnemonic|seed/i.test(k)) {
         out[k] = "<redacted>";
-        continue;
-      }
-      if (TX_HASH_FIELDS.has(k) && typeof v === "string" && TX_HASH_VALUE.test(v)) {
-        out[k] = v;
         continue;
       }
       out[k] = redactDeep(v);
@@ -18327,6 +18331,12 @@ function formatUnits(value, decimals) {
   return format(value, decimals);
 }
 
+// ../rozo-checkout-skill/node_modules/viem/_esm/utils/unit/parseGwei.js
+init_Value();
+function parseGwei(ether, unit = "wei") {
+  return fromGwei(ether, unit);
+}
+
 // ../rozo-checkout-skill/node_modules/viem/_esm/utils/unit/parseUnits.js
 init_Value();
 function parseUnits(value, decimals) {
@@ -18470,7 +18480,7 @@ init_createBatchScheduler();
 init_stringify();
 async function multicall(client, parameters) {
   const { account, authorizationList, allowFailure = true, blockHash, blockNumber, blockOverrides, blockTag, requireCanonical, stateOverride } = parameters;
-  const contracts = parameters.contracts;
+  const contracts2 = parameters.contracts;
   const batch = typeof client.batch?.multicall === "object" ? client.batch.multicall : {};
   const batchSize = parameters.batchSize ?? batch.batchSize ?? 1024;
   const deployless = parameters.deployless ?? batch.deployless ?? false;
@@ -18491,8 +18501,8 @@ async function multicall(client, parameters) {
   const chunkedCalls = [[]];
   let currentChunk = 0;
   let currentChunkSize = 0;
-  for (let i = 0; i < contracts.length; i++) {
-    const { abi: abi2, address, args, functionName } = contracts[i];
+  for (let i = 0; i < contracts2.length; i++) {
+    const { abi: abi2, address, args, functionName } = contracts2[i];
     try {
       const callData = encodeFunctionData({ abi: abi2, args, functionName });
       currentChunkSize += (callData.length - 2) / 2;
@@ -18586,7 +18596,7 @@ async function multicall(client, parameters) {
     for (let j = 0; j < aggregate3Result.length; j++) {
       const { returnData, success } = aggregate3Result[j];
       const { callData } = batches[i][j];
-      const { abi: abi2, address, functionName, args } = contracts[results.length];
+      const { abi: abi2, address, functionName, args } = contracts2[results.length];
       try {
         if (callData === "0x")
           throw new AbiDecodingZeroDataError();
@@ -18613,7 +18623,7 @@ async function multicall(client, parameters) {
       }
     }
   }
-  if (results.length !== contracts.length)
+  if (results.length !== contracts2.length)
     throw new BaseError2("multicall results mismatch");
   return results;
 }
@@ -22870,7 +22880,26 @@ function unavailable(network, err) {
     { network }
   );
 }
-async function evmGasPrecheck({ client, chainId, from: from15, to, data, value = 0n, bufferPct = gasBufferPct() }) {
+async function estimateFees(client) {
+  try {
+    return await client.estimateFeesPerGas();
+  } catch (err) {
+    if (err?.name !== "Eip1559FeesNotSupportedError") throw err;
+    return client.estimateFeesPerGas({ type: "legacy" });
+  }
+}
+var OP_STACK_GAS_PRICE_ORACLE = "0x420000000000000000000000000000000000000F";
+var OP_STACK_CHAIN_IDS = /* @__PURE__ */ new Set([8453]);
+async function evmGasPrecheck({
+  client,
+  chainId,
+  from: from15,
+  to,
+  data,
+  value = 0n,
+  bufferPct = gasBufferPct(),
+  estimateL1Fee: estimateL1Fee2 = null
+}) {
   const coin = EVM_FEE_COIN[Number(chainId)] ?? { symbol: "native coin", network: `chain ${chainId}` };
   let balance;
   try {
@@ -22882,7 +22911,7 @@ async function evmGasPrecheck({ client, chainId, from: from15, to, data, value =
   let fees;
   try {
     gasEstimate = await client.estimateGas({ account: from15, to, data, value });
-    fees = await client.estimateFeesPerGas();
+    fees = await estimateFees(client);
   } catch (err) {
     if (balance === 0n) {
       throw insufficient(
@@ -22898,11 +22927,151 @@ async function evmGasPrecheck({ client, chainId, from: from15, to, data, value =
     bufferPct
   });
   if (!req) throw unavailable(coin.network, new Error("the node returned no fee price"));
-  const required = req.fee + value;
+  let l1Fee = 0n;
+  if (OP_STACK_CHAIN_IDS.has(Number(chainId))) {
+    if (typeof estimateL1Fee2 !== "function") {
+      throw unavailable(coin.network, new Error("no L1 data fee estimator for this OP-stack chain"));
+    }
+    try {
+      l1Fee = (await estimateL1Fee2() * BigInt(100 + bufferPct) + 99n) / 100n;
+    } catch (err) {
+      throw unavailable(coin.network, err);
+    }
+  }
+  const required = req.fee + l1Fee + value;
   const { ok, details } = assessFee({ balance, required, decimals: 18, symbol: coin.symbol, network: coin.network });
-  const full = { ...details, gasLimit: req.gasLimit.toString(), pricing: req.pricing, bufferPct };
+  const full = {
+    ...details,
+    gasLimit: req.gasLimit.toString(),
+    pricing: req.pricing,
+    bufferPct,
+    l1DataFee: OP_STACK_CHAIN_IDS.has(Number(chainId)) ? formatAtomic(l1Fee, 18) : null
+  };
   if (!ok) throw insufficient(full);
   return full;
+}
+
+// ../rozo-checkout-skill/node_modules/viem/_esm/op-stack/contracts.js
+var contracts = {
+  gasPriceOracle: { address: "0x420000000000000000000000000000000000000F" },
+  l1Block: { address: "0x4200000000000000000000000000000000000015" },
+  l2CrossDomainMessenger: {
+    address: "0x4200000000000000000000000000000000000007"
+  },
+  l2Erc721Bridge: { address: "0x4200000000000000000000000000000000000014" },
+  l2StandardBridge: { address: "0x4200000000000000000000000000000000000010" },
+  l2ToL1MessagePasser: {
+    address: "0x4200000000000000000000000000000000000016"
+  }
+};
+
+// ../rozo-checkout-skill/node_modules/viem/_esm/op-stack/abis.js
+var gasPriceOracleAbi = [
+  { inputs: [], stateMutability: "nonpayable", type: "constructor" },
+  {
+    inputs: [],
+    name: "DECIMALS",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "baseFee",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "decimals",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "pure",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "gasPrice",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [{ internalType: "bytes", name: "_data", type: "bytes" }],
+    name: "getL1Fee",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [{ internalType: "bytes", name: "_data", type: "bytes" }],
+    name: "getL1GasUsed",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "l1BaseFee",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "overhead",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "scalar",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "version",
+    outputs: [{ internalType: "string", name: "", type: "string" }],
+    stateMutability: "view",
+    type: "function"
+  }
+];
+
+// ../rozo-checkout-skill/node_modules/viem/_esm/op-stack/actions/estimateL1Fee.js
+init_getChainContractAddress();
+async function estimateL1Fee(client, args) {
+  const { chain = client.chain, gasPriceOracleAddress: gasPriceOracleAddress_ } = args;
+  const gasPriceOracleAddress = (() => {
+    if (gasPriceOracleAddress_)
+      return gasPriceOracleAddress_;
+    if (chain)
+      return getChainContractAddress({
+        chain,
+        contract: "gasPriceOracle"
+      });
+    return contracts.gasPriceOracle.address;
+  })();
+  const transaction = serializeTransaction({
+    ...args,
+    chainId: chain?.id ?? 1,
+    type: "eip1559",
+    // Set upper-limit-ish stub values. Shouldn't affect the estimate too much as we are
+    // tweaking dust bytes here (as opposed to long `data` bytes).
+    // See: https://github.com/ethereum-optimism/optimism/blob/54d02df55523c9e1b4b38ed082c12a42087323a0/packages/contracts-bedrock/src/L2/GasPriceOracle.sol#L242-L248.
+    gas: args.data ? 300000n : 21000n,
+    maxFeePerGas: parseGwei("5"),
+    maxPriorityFeePerGas: parseGwei("1"),
+    nonce: 1
+  });
+  return readContract(client, {
+    abi: gasPriceOracleAbi,
+    address: gasPriceOracleAddress,
+    functionName: "getL1Fee",
+    args: [transaction]
+  });
 }
 
 // ../rozo-checkout-skill/node_modules/viem/_esm/accounts/privateKeyToAccount.js
@@ -23186,7 +23355,14 @@ async function main(argv) {
     chainId,
     from: sender,
     to: tokenAddress,
-    data
+    data,
+    estimateL1Fee: OP_STACK_CHAIN_IDS.has(chainId) ? () => estimateL1Fee(pub, {
+      account: sender,
+      to: tokenAddress,
+      data,
+      chain,
+      gasPriceOracleAddress: OP_STACK_GAS_PRICE_ORACLE
+    }) : null
   });
   if (dryRun) {
     emit({
@@ -23271,7 +23447,7 @@ async function main(argv) {
           code: landed === false ? "BROADCAST_FAILED" : "BROADCAST_AMBIGUOUS",
           message: redact(err?.shortMessage || err?.message || "broadcast failed")
         },
-        signedTxHash: expectedTxHash,
+        signedTxHash: publicHash(expectedTxHash),
         nonceBefore,
         foundOnChain: landed,
         guidance: landed === false ? "Nothing appears to have been broadcast, but this order is now locked against a second automated send. Verify the signed hash on a block explorer first." : "The signed transaction may already be in flight. Do NOT resend. Look up the signed hash above on a block explorer and poll status.js."
@@ -23295,7 +23471,7 @@ async function main(argv) {
         confirmed: false,
         rozoPaymentId,
         linkId: state.linkId,
-        txHash,
+        txHash: publicHash(txHash),
         guidance: "Broadcast but not confirmed within the wait window. Do NOT resend. Poll status.js; receipt truth is the backend confirmedAt/amountReceived, not this response."
       },
       EXIT_UNCONFIRMED
@@ -23316,7 +23492,7 @@ async function main(argv) {
       confirmed: succeeded,
       rozoPaymentId,
       linkId: state.linkId,
-      txHash,
+      txHash: publicHash(txHash),
       blockNumber: receipt.blockNumber?.toString?.() ?? null,
       ...succeeded ? {} : { error: { code: outcome.code, message: "The transfer reverted on chain." } },
       sent: {
