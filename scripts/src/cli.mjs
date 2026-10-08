@@ -47,6 +47,7 @@ import { run as runQuote } from './quote.mjs';
 import { run as runCreateOrder } from './create-order.mjs';
 import { run as runCreateBitrefill } from './create-bitrefill-order.mjs';
 import { run as runStatus } from './status.mjs';
+import { run as runReceipt } from './receipt.mjs';
 import { run as runSendEvm } from './send-evm.mjs';
 import { run as runSendSol } from './send-sol.mjs';
 
@@ -314,6 +315,55 @@ async function cmdStatus(opts) {
   if (payload.support) printSupport();
   out();
   return exitCode;
+}
+
+const LAYER_LABEL = {
+  confirmed: green('confirmed'),
+  detected: yellow('detected'),
+  pending: yellow('pending'),
+  none: dim('none'),
+  unknown: yellow('unknown'),
+};
+
+async function cmdReceipt(opts) {
+  const argv = targetToArgs(opts.target);
+  if (opts.provider) argv.push('--provider', opts.provider);
+  if (!opts.json) out(dim('  Reading the order… (no money moves)'));
+  const { payload, exitCode } = await step(runReceipt, argv);
+  if (opts.json) {
+    printJson(payload);
+    return exitCode;
+  }
+  if (payload.error) {
+    printError(payload);
+    printSupport();
+    return exitCode;
+  }
+  const r = payload.receipt;
+  out();
+  out(`  Outcome    ${outcomeLabel(r.paymentOutcome)}  ${dim(`(${r.state})`)}`);
+  out(`  Your payment       ${LAYER_LABEL[r.sourcePayment.status] ?? r.sourcePayment.status}` +
+    (r.sourcePayment.txHash ? `  ${r.sourcePayment.txHash}` : ''));
+  if (r.sourcePayment.localSend && r.sourcePayment.status !== 'confirmed') {
+    out(dim(`                     this machine sent it (${r.sourcePayment.localSend.status})` +
+      (r.sourcePayment.localSend.txHash ? `: ${r.sourcePayment.localSend.txHash}` : '')));
+  }
+  out(`  Merchant invoice   ${LAYER_LABEL[r.merchantSettlement.status] ?? r.merchantSettlement.status}` +
+    (r.merchantSettlement.coinbaseStatus ? `  ${dim(r.merchantSettlement.coinbaseStatus)}` : ''));
+  out(`  Service delivered  ${LAYER_LABEL.unknown}`);
+  if (r.merchantSettlement.status === 'confirmed') out(`  ${dim(r.serviceDelivery.note)}`);
+  out();
+  out(`  Next: ${r.nextAction.type === 'contact_support' ? red(r.nextAction.message) : r.nextAction.message}`);
+  if (payload.support) printSupport();
+  out();
+  return exitCode;
+}
+
+function outcomeLabel(outcome) {
+  if (outcome === 'settled') return green(bold(outcome));
+  if (outcome === 'needs_attention' || outcome === 'unknown') return red(bold(outcome));
+  if (outcome === 'expired_unfunded') return yellow(bold(outcome));
+  return bold(outcome);
 }
 
 function presetFor(chainId, tokenSymbol) {
@@ -732,6 +782,8 @@ async function main() {
       return cmdQuote(opts);
     case 'status':
       return cmdStatus(opts);
+    case 'receipt':
+      return cmdReceipt(opts);
     case 'pay':
       try {
         return await cmdPay(opts);

@@ -68,6 +68,23 @@ export function redact(text) {
 }
 
 /** Deep-redact an arbitrary value destined for stdout. */
+/**
+ * Fields that hold a public transaction hash or signature. An EVM tx hash has
+ * the same shape as a private key (0x + 64 hex) and a Solana signature the
+ * same shape as a base58 secret key, so the pattern redaction above cannot
+ * tell them apart. They are let through ONLY under these field names, and only
+ * when the whole value is exactly one hash. Our own code sets these fields
+ * from transaction results; nothing user-supplied lands here.
+ */
+const TX_HASH_FIELDS = new Set([
+  'txHash',
+  'signedTxHash',
+  'expectedTxHash',
+  'payoutTxHash',
+  'signature',
+]);
+const TX_HASH_VALUE = /^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{86,88})$/;
+
 export function redactDeep(value) {
   if (typeof value === 'string') return redact(value);
   if (Array.isArray(value)) return value.map(redactDeep);
@@ -76,6 +93,10 @@ export function redactDeep(value) {
     for (const [k, v] of Object.entries(value)) {
       if (/priv(ate)?[-_]?key|secret|mnemonic|seed/i.test(k)) {
         out[k] = '<redacted>';
+        continue;
+      }
+      if (TX_HASH_FIELDS.has(k) && typeof v === 'string' && TX_HASH_VALUE.test(v)) {
+        out[k] = v;
         continue;
       }
       out[k] = redactDeep(v);

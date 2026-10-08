@@ -40,6 +40,14 @@ function redact(text) {
   );
   return s;
 }
+var TX_HASH_FIELDS = /* @__PURE__ */ new Set([
+  "txHash",
+  "signedTxHash",
+  "expectedTxHash",
+  "payoutTxHash",
+  "signature"
+]);
+var TX_HASH_VALUE = /^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{86,88})$/;
 function redactDeep(value) {
   if (typeof value === "string") return redact(value);
   if (Array.isArray(value)) return value.map(redactDeep);
@@ -48,6 +56,10 @@ function redactDeep(value) {
     for (const [k, v] of Object.entries(value)) {
       if (/priv(ate)?[-_]?key|secret|mnemonic|seed/i.test(k)) {
         out[k] = "<redacted>";
+        continue;
+      }
+      if (TX_HASH_FIELDS.has(k) && typeof v === "string" && TX_HASH_VALUE.test(v)) {
+        out[k] = v;
         continue;
       }
       out[k] = redactDeep(v);

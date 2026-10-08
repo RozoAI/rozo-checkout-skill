@@ -35,6 +35,7 @@ import { promptPassphrase } from './lib/passphrase.mjs';
 import { preflight, finalPayabilityCheck } from './lib/presend.mjs';
 import { claimSend, recordSendResult } from './lib/state.mjs';
 import { broadcastOutcome } from './lib/outcomes.mjs';
+import { solFeePrecheck } from './lib/gas.mjs';
 
 import {
   Connection,
@@ -176,31 +177,6 @@ async function main(argv) {
     }
   }
 
-  if (dryRun) {
-    emit({
-      success: true,
-      step: 'send-sol-dry-run',
-      rozoPaymentId,
-      linkId: state.linkId,
-      wouldSend: {
-        chain: chainName(900),
-        tokenSymbol: source.tokenSymbol,
-        amountAtomic: amountAtomic.toString(),
-        amount: source.amount,
-        toMasked: maskAddress(source.receiverAddress),
-        fromMasked: maskAddress(sender),
-        toIsTokenAccount,
-        withMemo: Boolean(source.receiverMemo),
-      },
-      confirmedAt: state.confirmation?.confirmedAt ?? null,
-      keySource,
-      // Key NAMES only — a value from a .env is never echoed.
-      envFile: dotenv ? { path: dotenv.path, applied: dotenv.applied } : null,
-      minutesOfSlack: Math.floor(expiry.msOfSlack / 60000),
-      note: 'Nothing was signed or broadcast. Add --send (without --dry-run) to execute.',
-    });
-  }
-
   const tx = new Transaction();
   tx.add(
     createTransferCheckedInstruction(
@@ -225,6 +201,43 @@ async function main(argv) {
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
   tx.recentBlockhash = blockhash;
   tx.feePayer = keypair.publicKey;
+
+  // The SPL balance is not enough: the fee is paid in SOL. Check it on the
+  // exact message about to be signed, before claimSend. A broadcast that fails
+  // for want of SOL would otherwise lock this order against any further
+  // automated send.
+  const networkFee = await solFeePrecheck({
+    connection,
+    payer: keypair.publicKey,
+    message: tx.compileMessage(),
+  });
+
+  if (dryRun) {
+    emit({
+      success: true,
+      step: 'send-sol-dry-run',
+      rozoPaymentId,
+      linkId: state.linkId,
+      wouldSend: {
+        chain: chainName(900),
+        tokenSymbol: source.tokenSymbol,
+        amountAtomic: amountAtomic.toString(),
+        amount: source.amount,
+        toMasked: maskAddress(source.receiverAddress),
+        fromMasked: maskAddress(sender),
+        toIsTokenAccount,
+        withMemo: Boolean(source.receiverMemo),
+      },
+      networkFee,
+      confirmedAt: state.confirmation?.confirmedAt ?? null,
+      keySource,
+      // Key NAMES only — a value from a .env is never echoed.
+      envFile: dotenv ? { path: dotenv.path, applied: dotenv.applied } : null,
+      minutesOfSlack: Math.floor(expiry.msOfSlack / 60000),
+      note: 'Nothing was signed or broadcast. Add --send (without --dry-run) to execute.',
+    });
+  }
+
   tx.sign(keypair);
 
   const signature = tx.signatures[0]?.signature

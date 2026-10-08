@@ -10,7 +10,7 @@ import { SUPPORTED_SOURCES, isSupportedSource, chainName } from './amounts.mjs';
 import { normalizeUtmSource } from './utm.mjs';
 import { normalizeContactEmail } from './support.mjs';
 
-export const COMMANDS = ['pay', 'quote', 'status', 'help', 'version'];
+export const COMMANDS = ['pay', 'quote', 'status', 'receipt', 'help', 'version'];
 
 /**
  * Chain aliases accepted in a preset. The canonical name is the key's value.
@@ -284,6 +284,19 @@ export function parseCliArgs(argv) {
     return { command, target, json, ...(utmSource ? { utmSource } : {}) };
   }
 
+  if (command === 'receipt') {
+    if (!target) {
+      throw new CliError(
+        'MISSING_TARGET',
+        'Usage: rozo-checkout receipt <rozoPaymentId | coinbase-link>',
+      );
+    }
+    if (flags.provider !== undefined && !['coinbase', 'bitrefill'].includes(String(flags.provider))) {
+      throw new CliError('BAD_VALUE', '--provider must be coinbase or bitrefill.');
+    }
+    return { command, target, json, provider: flags.provider };
+  }
+
   if (command === 'status') {
     if (!target) {
       throw new CliError(
@@ -419,6 +432,7 @@ USAGE
   npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x…> --amount <USDC> --expires-at <ISO> --with <coin>
   npx @rozoai/checkout quote <coinbase-link>
   npx @rozoai/checkout status <rozoPaymentId | coinbase-link>
+  npx @rozoai/checkout receipt <rozoPaymentId | coinbase-link>
 
 COINS (--with)
   usdt-solana   usdc-solana   usdt-bnb      usdc-bnb
@@ -471,6 +485,17 @@ EXAMPLES
   npx @rozoai/checkout pay pl_01... --with usdt-solana --email you@example.com
   npx @rozoai/checkout pay --bitrefill-invoice 8f3k2 --to 0xAbC…123 --amount 7.90 --expires-at 2026-10-01T12:00:00Z --with usdc-stellar
   npx @rozoai/checkout status 11111111-2222-4333-8444-555555555555
+  npx @rozoai/checkout receipt 11111111-2222-4333-8444-555555555555 --json
+
+RECEIPT
+  receipt reads the order once (nothing is created or sent) and reports three
+  layers separately: did your money reach Rozo, was the merchant invoice paid,
+  and was the service delivered (always "unknown": Rozo cannot see OpenRouter
+  credits). Exit 0 only when the merchant invoice is settled; 3 when it is
+  still in flight or unknown; 1 when it expired unpaid or needs a human.
+  In --json output from status and receipt, read paymentOutcome and
+  nextAction. The older "success" field means the query worked, not that the
+  invoice is paid.
 
 Creating an order moves no money; an unfunded order simply expires. Nothing is
 paid until you confirm, and --send is required before anything is signed.

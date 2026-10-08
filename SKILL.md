@@ -191,6 +191,11 @@ Each script prints **one JSON object on stdout**. Exit codes:
 | `2` | usage error |
 | `3` | submitted but not confirmed in the wait window (money may be in flight) |
 
+`success` keeps its historical meaning: the script produced a clean answer. It
+is **not** "the invoice is paid". `status.js` and `receipt.js` also return
+`schemaVersion`, `paymentOutcome` and `nextAction`; read those. `receipt.js`
+uses its own exit codes, listed in Step 6.
+
 The bundles in `scripts/dist/` are self-contained; `npm install` is only needed
 to rebuild them (`npm run build`).
 
@@ -444,7 +449,32 @@ The extra fields are in `error.details.body`.
 `settled` is only reported on real settlement evidence. The bridge reaching
 `payment_completed` is not that evidence and shows as `paying_coinbase`.
 
+Alongside `state`, status returns `paymentOutcome` (one of `awaiting_payment`,
+`processing`, `settled`, `expired_unfunded`, `needs_attention`, `unknown`) and
+`nextAction` (`type` plus `canRetryQuery`, `canCreateOrder`, `canSend`). Only
+`nextAction.canSend: true` permits sending money, and it is never true once
+money is detected, a send is recorded on this machine, or the pay-in view is
+partial.
+
 ### Step 6 — report
+
+```bash
+node scripts/dist/receipt.js --rozo-payment-id <uuid>
+# or: npx @rozoai/checkout receipt <uuid> --json
+```
+
+One read, nothing created or sent. It answers three questions separately:
+
+| Layer | `confirmed` means |
+|---|---|
+| `sourcePayment` | Rozo saw the pay-in confirmed. A wallet's "sent" is shown as `localSend` and is not proof Rozo received it. |
+| `merchantSettlement` | Coinbase itself reports the invoice paid: v3 `PAYMENT_SESSION_STATUS_CAPTURE_SUCCEEDED`, v1 `usageCount >= maxUsage`. The router reporting `paid` alone stays `pending`. For Bitrefill, the USDC payout landed. |
+| `serviceDelivery` | Always `unknown`. Rozo cannot see OpenRouter credits or Bitrefill goods; say "invoice paid, credits not independently verified". |
+
+Exit codes: `0` settled · `3` still in flight or unknown · `1` expired unpaid
+or needs a human · `2` usage.
+
+Report only after `receipt` exits 0:
 
 ```
 ✓ Paid {invoice.amount} USD to {merchant} with {token} on {chain}.
@@ -517,6 +547,8 @@ of any `status` result that is not a clean answer.
 | `DEPOSIT_CHANGED` | the live deposit details differ from what was confirmed | abort; re-run `create-order.js` and re-confirm |
 | `BROADCAST_AMBIGUOUS` | the RPC errored but a transaction may be in flight | do **not** resend; check the sender on an explorer, then poll |
 | `RPC_CHAIN_MISMATCH` | the RPC is not on the chain the order settles on | fix `ROZO_CHECKOUT_RPC_<chainId>`; never sign against it |
+| `INSUFFICIENT_GAS` | the sending wallet cannot pay the network fee (ETH, BNB, POL or SOL). `error.details` has network, fee coin, balance, required and shortfall | nothing was signed and the order is untouched; add the fee coin to that wallet and re-run, or pay with another coin |
+| `GAS_CHECK_UNAVAILABLE` | the fee or balance could not be read from the RPC | **not** evidence of a shortfall; retry, pass `--rpc <url>`, or pay by hand (Mode A) |
 | `DECIMALS_MISMATCH` | the token's on-chain decimals disagree with expectations | do not sign — the amount could be off by orders of magnitude |
 | `CAP_PER_TX` | above the $1,100 per-payment limit for automated sending | no override exists; have the user pay from their own wallet (Mode A), which has no limit |
 | `UNSUPPORTED_SOURCE` | that coin/chain pair is not accepted | offer the table at the top of this file (the server's own list omits Lightning) |

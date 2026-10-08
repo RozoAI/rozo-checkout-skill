@@ -66,6 +66,14 @@ function redact(text) {
   );
   return s;
 }
+var TX_HASH_FIELDS = /* @__PURE__ */ new Set([
+  "txHash",
+  "signedTxHash",
+  "expectedTxHash",
+  "payoutTxHash",
+  "signature"
+]);
+var TX_HASH_VALUE = /^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{86,88})$/;
 function redactDeep(value) {
   if (typeof value === "string") return redact(value);
   if (Array.isArray(value)) return value.map(redactDeep);
@@ -74,6 +82,10 @@ function redactDeep(value) {
     for (const [k, v] of Object.entries(value)) {
       if (/priv(ate)?[-_]?key|secret|mnemonic|seed/i.test(k)) {
         out[k] = "<redacted>";
+        continue;
+      }
+      if (TX_HASH_FIELDS.has(k) && typeof v === "string" && TX_HASH_VALUE.test(v)) {
+        out[k] = v;
         continue;
       }
       out[k] = redactDeep(v);
@@ -1255,6 +1267,17 @@ async function main(argv) {
             tokenSymbol: existing.tokenSymbol ?? null,
             expiresAt: created.expiresAt ?? null,
             expiresIn: Number.isFinite(remainingMs) ? formatRemaining(remainingMs) : null
+          },
+          // Machine-readable form of the guidance below. The live order keeps
+          // its own coin; a different coin is only possible once it has
+          // expired unfunded (then pay on the same link creates a new order).
+          nextAction: {
+            type: "choose_method",
+            canRetryQuery: true,
+            canCreateOrder: false,
+            canSend: false,
+            payExistingWith: { chainId: existing.chainId ?? null, tokenSymbol: existing.tokenSymbol ?? null },
+            switchPossibleAfter: created.expiresAt ?? null
           },
           guidance: `Either pay the existing order with ${existing.tokenSymbol ?? "its own coin"} (re-run with --chain ${existing.chainId} --token ${existing.tokenSymbol}), or wait ${Number.isFinite(remainingMs) ? formatRemaining(remainingMs) : "for it to expire"} for it to expire and then create a new one. Unpaid orders cost nothing.`
         },

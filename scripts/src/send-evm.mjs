@@ -40,6 +40,7 @@ import { promptPassphrase } from './lib/passphrase.mjs';
 import { preflight, finalPayabilityCheck } from './lib/presend.mjs';
 import { claimSend, recordSendResult } from './lib/state.mjs';
 import { broadcastOutcome } from './lib/outcomes.mjs';
+import { evmGasPrecheck } from './lib/gas.mjs';
 
 import {
   createPublicClient,
@@ -205,6 +206,23 @@ async function main(argv) {
     );
   }
 
+  const data = encodeFunctionData({
+    abi: ERC20_TRANSFER_ABI,
+    functionName: 'transfer',
+    args: [to, amountAtomic],
+  });
+
+  // The token balance is not enough: the network fee is paid in the chain's
+  // native coin. Check it on the exact transfer about to be signed, before
+  // anything is signed or claimed, so a shortfall leaves the order untouched.
+  const networkFee = await evmGasPrecheck({
+    client: pub,
+    chainId,
+    from: sender,
+    to: tokenAddress,
+    data,
+  });
+
   if (dryRun) {
     emit({
       success: true,
@@ -220,6 +238,7 @@ async function main(argv) {
         toMasked: maskAddress(to),
         fromMasked: maskAddress(sender),
       },
+      networkFee,
       confirmedAt: state.confirmation?.confirmedAt ?? null,
       keySource,
       // Key NAMES only — a value from a .env is never echoed.
@@ -230,11 +249,6 @@ async function main(argv) {
   }
 
   const wallet = createWalletClient({ account, chain, transport: http(rpcUrl) });
-  const data = encodeFunctionData({
-    abi: ERC20_TRANSFER_ABI,
-    functionName: 'transfer',
-    args: [to, amountAtomic],
-  });
 
   // Sign first: this fixes the nonce and yields the transaction hash BEFORE
   // anything is broadcast, so an ambiguous send can be resolved by looking the

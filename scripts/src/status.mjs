@@ -26,6 +26,7 @@ import { SUPPORT } from './lib/support.mjs';
 import { formatRemaining } from './lib/expiry.mjs';
 import { findByLinkId, readState } from './lib/state.mjs';
 import { providerFromPayment, earliestExpiry, intentBitrefillExpiry } from './lib/bitrefill.mjs';
+import { SCHEMA_VERSION, paymentOutcomeFor, nextActionFor } from './lib/receipt.mjs';
 
 const POLL_INTERVAL_MS = 10_000;
 
@@ -44,7 +45,19 @@ function resolveProvider(explicit, rozoPaymentId) {
   return null;
 }
 
-async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
+/** This machine's send record for the order, without addresses. */
+function localSendFor(id) {
+  if (!id || !isRozoPaymentId(id)) return null;
+  try {
+    const send = readState(id)?.send;
+    if (!send || !send.status) return null;
+    return { status: send.status, txHash: send.txHash ?? null, claimedAt: send.claimedAt ?? null };
+  } catch {
+    return null;
+  }
+}
+
+export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   let provider = resolveProvider(explicitProvider, rozoPaymentId);
   // No flag and no local record: ask the intent itself first, so a Bitrefill
   // order created elsewhere is still classified correctly.
@@ -185,6 +198,7 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       confirmedAt:
         payment?.destination?.confirmedAt ?? status?.rozoPayment?.destination?.confirmedAt ?? null,
     },
+    localSend: localSendFor(id),
     errors: [statusError, paymentError].filter(Boolean),
   };
 }
@@ -273,10 +287,17 @@ async function main(argv) {
 
   const unresolved = watch && !result.terminal && !result.escalate && !result.unknown;
   const failed = result.escalate || result.unknown || !result.authoritativeView;
+  const paymentOutcome = paymentOutcomeFor(result);
 
   emit(
     {
+      // `success` keeps its historical meaning (the query produced a clean
+      // answer). It is NOT "the invoice is paid": read paymentOutcome.
       success: !failed,
+      schemaVersion: SCHEMA_VERSION,
+      operationOk: !result.unknown,
+      paymentOutcome,
+      nextAction: nextActionFor(result, paymentOutcome),
       step: 'status',
       ...result,
       history,

@@ -430,7 +430,23 @@ rozo-checkout status <rozoPaymentId> --watch --timeout 900 --json   # poll every
 ```
 
 Exit 0 means the check itself ran cleanly, not that the invoice settled:
-`expired_unfunded` also exits 0. Always read `state`.
+`expired_unfunded` also exits 0. Always read `state`, or the simpler
+`paymentOutcome` and `nextAction` fields.
+
+For a yes/no answer, use `receipt`. It exits 0 only when Coinbase itself
+reports the invoice paid (v3 `CAPTURE_SUCCEEDED`), 3 while the payment is in
+flight or unknown, and 1 if the order expired unpaid or needs a human:
+
+```bash
+rozo-checkout receipt <rozoPaymentId> --json | jq '.receipt | .paymentOutcome, .merchantSettlement.status'
+```
+
+It reports your payment, the merchant invoice and service delivery as separate
+layers. Delivery is always `unknown`: Rozo cannot see your OpenRouter credits.
+
+With `--send`, the wallet must also hold the chain's fee coin (ETH, BNB, POL or
+SOL). If it does not, the CLI stops with `INSUFFICIENT_GAS` before signing and
+tells you how much is missing; the order is left untouched.
 
 **Retrying without paying twice.** Running `pay` again on the same link does
 not create a second order while its order is open: you get the same order
