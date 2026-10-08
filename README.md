@@ -514,6 +514,16 @@ The full list of what this refuses to do, and why, is in
 
 ## Changelog
 
+- **0.1.16**: new `receipt` command: one read, exit 0 only when the merchant
+  side itself reports the invoice paid (Coinbase v3 `CAPTURE_SUCCEEDED`, v1 usage
+  count, or the Bitrefill payout), reported as three layers
+  (your payment, merchant invoice, service delivery). `status` adds
+  `paymentOutcome`, `nextAction` and `sendWindow`; `nextAction.canSend` is the
+  only field that permits paying. With `--send`, the wallet's fee coin (ETH,
+  BNB, POL, SOL; on Base including the L1 data fee) is checked before signing:
+  `INSUFFICIENT_GAS` says how much is missing and leaves the order untouched.
+  Transaction hashes this tool reports are no longer masked; anything inside
+  error text still is.
 - **0.1.15**: corrected guidance after an order expires unpaid. First check
   your own wallet that nothing was sent to the old deposit and no Lightning
   payment is pending; if nothing was sent, re-run the same `pay` on the same
