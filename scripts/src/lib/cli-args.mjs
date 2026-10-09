@@ -9,8 +9,9 @@
 import { SUPPORTED_SOURCES, isSupportedSource, chainName } from './amounts.mjs';
 import { normalizeUtmSource } from './utm.mjs';
 import { normalizeContactEmail } from './support.mjs';
+import { isRozoPaymentId } from './ids.mjs';
 
-export const COMMANDS = ['pay', 'quote', 'status', 'receipt', 'help', 'version'];
+export const COMMANDS = ['pay', 'quote', 'status', 'receipt', 'resume', 'help', 'version'];
 
 /**
  * Chain aliases accepted in a preset. The canonical name is the key's value.
@@ -297,6 +298,19 @@ export function parseCliArgs(argv) {
     return { command, target, json, provider: flags.provider };
   }
 
+  if (command === 'resume') {
+    if (!target) {
+      throw new CliError('MISSING_TARGET', 'Usage: rozo-checkout resume <rozoPaymentId>');
+    }
+    if (!isRozoPaymentId(target)) {
+      throw new CliError(
+        'BAD_VALUE',
+        'resume takes the order id (rozoPaymentId, a UUID) that pay printed, not a payment link.',
+      );
+    }
+    return { command, target, json, yes: flags.yes === true };
+  }
+
   if (command === 'status') {
     if (!target) {
       throw new CliError(
@@ -433,6 +447,7 @@ USAGE
   npx @rozoai/checkout quote <coinbase-link>
   npx @rozoai/checkout status <rozoPaymentId | coinbase-link>
   npx @rozoai/checkout receipt <rozoPaymentId | coinbase-link>
+  npx @rozoai/checkout resume <rozoPaymentId>
 
 COINS (--with)
   usdt-solana   usdc-solana   usdt-bnb      usdc-bnb
@@ -496,6 +511,20 @@ RECEIPT
   In --json output from status and receipt, read paymentOutcome and
   nextAction. The older "success" field means the query worked, not that the
   invoice is paid.
+
+RESUME
+  resume picks up an order you created earlier and did not pay yet. It reads
+  the order (nothing is created or sent), and if it is still unpaid and has
+  enough time left it prints the hosted payment page and, after you confirm
+  (or with --yes), the exact deposit instructions again. A paid order is
+  reported as paid (exit 0); an expired one says so and how to start over.
+
+PRIVACY
+  Each order carries an anonymous install id: a random UUID created on first
+  run and stored in ~/.rozo-checkout/prefs.json. If OPENROUTER_API_KEY is set,
+  a one-way salted sha256 hash of it is sent too; the key itself is never
+  sent, logged or stored. Delete prefs.json
+  to reset the id; set ROZO_CHECKOUT_ANON_ID=off to send neither.
 
 Creating an order moves no money; an unfunded order simply expires. Nothing is
 paid until you confirm, and --send is required before anything is signed.

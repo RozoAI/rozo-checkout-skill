@@ -19,7 +19,7 @@ const distDir = path.join(here, 'dist');
 
 // Standalone scripts are built from their thin bin/ wrappers; the flows they
 // import are shared with the CLI, so no guard logic is duplicated.
-const SCRIPTS = ['quote', 'create-order', 'status', 'receipt', 'send-evm', 'send-sol'];
+const SCRIPTS = ['quote', 'create-order', 'status', 'receipt', 'resume', 'send-evm', 'send-sol'];
 
 fs.mkdirSync(distDir, { recursive: true });
 

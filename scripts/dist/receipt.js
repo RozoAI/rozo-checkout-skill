@@ -206,6 +206,57 @@ function getJson(url, opts) {
   return request("GET", url, opts);
 }
 
+// scripts/src/lib/state.mjs
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+function stateRoot() {
+  return process.env.ROZO_CHECKOUT_STATE_DIR || path.join(os.homedir(), ".rozo-checkout", "state");
+}
+function statePath(rozoPaymentId) {
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(String(rozoPaymentId || ""))) {
+    throw new SkillError("BAD_ROZO_PAYMENT_ID", "Refusing to build a state path from that id.");
+  }
+  return path.join(stateRoot(), `${rozoPaymentId}.json`);
+}
+function readState(rozoPaymentId) {
+  const file = statePath(rozoPaymentId);
+  let raw;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return null;
+    throw new SkillError("STATE_UNREADABLE", `Cannot read local state: ${err.code}`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new SkillError(
+      "STATE_CORRUPT",
+      "The local state file for this order is corrupt. Refusing to act; inspect it manually."
+    );
+  }
+}
+function findByLinkId(linkId) {
+  const dir = stateRoot();
+  let files = [];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
+  } catch {
+    return null;
+  }
+  let best = null;
+  for (const f of files) {
+    try {
+      const s = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+      if (s?.linkId !== linkId) continue;
+      if (!best || String(s.createdAt) > String(best.createdAt)) best = s;
+    } catch {
+    }
+  }
+  return best;
+}
+
 // scripts/src/lib/api.mjs
 var PKG_VERSION = (() => {
   const requireFrom = createRequire(import.meta.url);
@@ -675,57 +726,6 @@ function checkExpiry({
     }
   }
   return { ...withDeadline, ok: true, code: null, reason: null };
-}
-
-// scripts/src/lib/state.mjs
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
-function stateRoot() {
-  return process.env.ROZO_CHECKOUT_STATE_DIR || path.join(os.homedir(), ".rozo-checkout", "state");
-}
-function statePath(rozoPaymentId) {
-  if (!/^[A-Za-z0-9-]{8,64}$/.test(String(rozoPaymentId || ""))) {
-    throw new SkillError("BAD_ROZO_PAYMENT_ID", "Refusing to build a state path from that id.");
-  }
-  return path.join(stateRoot(), `${rozoPaymentId}.json`);
-}
-function readState(rozoPaymentId) {
-  const file = statePath(rozoPaymentId);
-  let raw;
-  try {
-    raw = fs.readFileSync(file, "utf8");
-  } catch (err) {
-    if (err.code === "ENOENT") return null;
-    throw new SkillError("STATE_UNREADABLE", `Cannot read local state: ${err.code}`);
-  }
-  try {
-    return JSON.parse(raw);
-  } catch {
-    throw new SkillError(
-      "STATE_CORRUPT",
-      "The local state file for this order is corrupt. Refusing to act; inspect it manually."
-    );
-  }
-}
-function findByLinkId(linkId) {
-  const dir = stateRoot();
-  let files = [];
-  try {
-    files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
-  } catch {
-    return null;
-  }
-  let best = null;
-  for (const f of files) {
-    try {
-      const s = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
-      if (s?.linkId !== linkId) continue;
-      if (!best || String(s.createdAt) > String(best.createdAt)) best = s;
-    } catch {
-    }
-  }
-  return best;
 }
 
 // scripts/src/lib/bitrefill.mjs

@@ -277,6 +277,273 @@ function normalizeUtmSource(value) {
   return s;
 }
 
+// scripts/src/lib/identity.mjs
+import crypto2 from "node:crypto";
+
+// scripts/src/lib/prefs.mjs
+import fs2 from "node:fs";
+import path2 from "node:path";
+import os2 from "node:os";
+
+// scripts/src/lib/state.mjs
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import crypto from "node:crypto";
+var LOCK_STALE_MS = 6e4;
+var LOCK_WAIT_MS = 1e4;
+var LOCK_POLL_MS = 25;
+function lockPath() {
+  return path.join(stateRoot(), ".send.lock");
+}
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function tryAcquire(file) {
+  try {
+    const fd = fs.openSync(file, "wx", 384);
+    fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, at: (/* @__PURE__ */ new Date()).toISOString() }));
+    fs.closeSync(fd);
+    return true;
+  } catch (err) {
+    if (err.code !== "EEXIST") throw err;
+    return false;
+  }
+}
+function withLock(fn) {
+  const file = lockPath();
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 448 });
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (; ; ) {
+    if (tryAcquire(file)) break;
+    try {
+      const age = Date.now() - fs.statSync(file).mtimeMs;
+      if (age > LOCK_STALE_MS) {
+        const stolen = `${file}.stale.${crypto.randomBytes(4).toString("hex")}`;
+        try {
+          fs.renameSync(file, stolen);
+          fs.unlinkSync(stolen);
+        } catch {
+        }
+        continue;
+      }
+    } catch (err) {
+      if (err.code !== "ENOENT") throw err;
+      continue;
+    }
+    if (Date.now() > deadline) {
+      throw new SkillError(
+        "LOCK_TIMEOUT",
+        "Another rozo-checkout process is holding the send lock. Refusing to proceed rather than risk a concurrent second send."
+      );
+    }
+    sleepSync(LOCK_POLL_MS);
+  }
+  try {
+    return fn();
+  } finally {
+    try {
+      fs.unlinkSync(file);
+    } catch {
+    }
+  }
+}
+function stateRoot() {
+  return process.env.ROZO_CHECKOUT_STATE_DIR || path.join(os.homedir(), ".rozo-checkout", "state");
+}
+function statePath(rozoPaymentId) {
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(String(rozoPaymentId || ""))) {
+    throw new SkillError("BAD_ROZO_PAYMENT_ID", "Refusing to build a state path from that id.");
+  }
+  return path.join(stateRoot(), `${rozoPaymentId}.json`);
+}
+function writeAtomic(file, data) {
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true, mode: 448 });
+  const tmp = path.join(dir, `.${path.basename(file)}.${crypto.randomBytes(6).toString("hex")}.tmp`);
+  const fd = fs.openSync(tmp, "wx", 384);
+  try {
+    fs.writeFileSync(fd, JSON.stringify(data, null, 2) + "\n", "utf8");
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmp, file);
+}
+function readState(rozoPaymentId) {
+  const file = statePath(rozoPaymentId);
+  let raw;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return null;
+    throw new SkillError("STATE_UNREADABLE", `Cannot read local state: ${err.code}`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new SkillError(
+      "STATE_CORRUPT",
+      "The local state file for this order is corrupt. Refusing to act; inspect it manually."
+    );
+  }
+}
+function createOrderRecord(record) {
+  return withLock(() => createOrderRecordUnlocked(record));
+}
+function mergeBitrefill(prev, next) {
+  if (!next) return prev ?? null;
+  if (!prev?.expiresAt || !next.expiresAt) return { ...next, expiresAt: next.expiresAt ?? prev?.expiresAt ?? null };
+  const a = Date.parse(prev.expiresAt);
+  const b = Date.parse(next.expiresAt);
+  return { ...next, expiresAt: Number.isFinite(a) && (!Number.isFinite(b) || a < b) ? prev.expiresAt : next.expiresAt };
+}
+function createOrderRecordUnlocked(record) {
+  const { rozoPaymentId } = record;
+  const existing = readState(rozoPaymentId);
+  const next = {
+    version: 1,
+    rozoPaymentId,
+    // 'coinbase' (default, historical records) or 'bitrefill'. Drives which
+    // payability checks presend and status run.
+    provider: record.provider ?? existing?.provider ?? "coinbase",
+    bitrefill: mergeBitrefill(existing?.bitrefill, record.bitrefill),
+    linkId: record.linkId,
+    paymentLink: record.paymentLink ?? null,
+    merchant: record.merchant ?? null,
+    invoiceAmount: record.invoiceAmount ?? null,
+    source: record.source,
+    receiverAddress: record.receiverAddress,
+    receiverMemo: record.receiverMemo ?? null,
+    amount: record.amount,
+    amountUnit: record.amountUnit ?? null,
+    expiresAt: record.expiresAt ?? null,
+    createdAt: existing?.createdAt ?? (/* @__PURE__ */ new Date()).toISOString(),
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    confirmation: existing?.confirmation ?? null,
+    send: existing?.send ?? null
+  };
+  writeAtomic(statePath(rozoPaymentId), next);
+  return next;
+}
+function depositDigest(source) {
+  const canonical = JSON.stringify({
+    chainId: String(source?.chainId ?? ""),
+    tokenSymbol: String(source?.tokenSymbol ?? "").toUpperCase(),
+    tokenAddress: String(source?.tokenAddress ?? ""),
+    receiverAddress: String(source?.receiverAddress ?? ""),
+    receiverMemo: source?.receiverMemo ?? null,
+    amount: String(source?.amount ?? ""),
+    amountUnit: source?.amountUnit ?? null,
+    lnInvoice: source?.lnInvoice ?? null
+  });
+  return crypto.createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+function recordConfirmation(rozoPaymentId, { source, invoiceAmount, tier }) {
+  return withLock(() => {
+    const state = readState(rozoPaymentId);
+    if (!state) {
+      throw new SkillError("NO_ORDER_STATE", "Cannot confirm an order with no local record.");
+    }
+    const next = {
+      ...state,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      confirmation: {
+        confirmedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        depositDigest: depositDigest(source),
+        invoiceAmount: invoiceAmount ?? state.invoiceAmount ?? null,
+        tier: tier ?? null
+      }
+    };
+    writeAtomic(statePath(rozoPaymentId), next);
+    return next;
+  });
+}
+
+// scripts/src/lib/prefs.mjs
+function prefsPath() {
+  const root = process.env.ROZO_CHECKOUT_STATE_DIR ? path2.dirname(stateRoot()) : path2.join(os2.homedir(), ".rozo-checkout");
+  return path2.join(root, "prefs.json");
+}
+var ALLOWED = ["lastPayerAddress", "lastAddressFamily", "lastPreset", "installId", "updatedAt"];
+var USER_FIELDS = ["lastPayerAddress", "lastAddressFamily", "lastPreset"];
+function readPrefs() {
+  let raw;
+  try {
+    raw = fs2.readFileSync(prefsPath(), "utf8");
+  } catch {
+    return null;
+  }
+  let doc;
+  try {
+    doc = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return null;
+  const out = {};
+  for (const k of ALLOWED) {
+    const v = doc[k];
+    if (typeof v === "string" && v.trim()) out[k] = v.trim();
+  }
+  return Object.keys(out).length ? out : null;
+}
+function savePrefs(update, { installId } = {}) {
+  const existing = readPrefs() || {};
+  const next = { ...existing };
+  for (const k of USER_FIELDS) {
+    const v = update?.[k];
+    if (typeof v === "string" && v.trim()) next[k] = v.trim();
+  }
+  if (typeof installId === "string" && installId) next.installId = installId;
+  next.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+  try {
+    writeAtomic(prefsPath(), next);
+  } catch {
+    return null;
+  }
+  return next;
+}
+
+// scripts/src/lib/identity.mjs
+var ACCOUNT_HASH_PREFIX = "rozo-acct-v1:";
+var INSTALL_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+function isValidInstallId(value) {
+  return typeof value === "string" && INSTALL_ID_RE.test(value);
+}
+function attributionDisabled(env = process.env) {
+  const v = String(env.ROZO_CHECKOUT_ANON_ID ?? "").trim().toLowerCase();
+  return ["off", "0", "false", "no"].includes(v);
+}
+function getOrCreateInstallId() {
+  const existing = readPrefs()?.installId;
+  if (isValidInstallId(existing)) return existing;
+  const fresh = crypto2.randomUUID().toLowerCase();
+  const saved = savePrefs({}, { installId: fresh });
+  const onDisk = readPrefs()?.installId;
+  if (saved && isValidInstallId(onDisk)) return onDisk;
+  return fresh;
+}
+function hashAccount(raw) {
+  return crypto2.createHash("sha256").update(`${ACCOUNT_HASH_PREFIX}${raw}`, "utf8").digest("hex");
+}
+function rawApiKey(env) {
+  const v = typeof env.OPENROUTER_API_KEY === "string" ? env.OPENROUTER_API_KEY.trim() : "";
+  return v && v.length <= 1024 ? v : null;
+}
+function attributionIdentity(env = process.env) {
+  if (attributionDisabled(env)) return {};
+  const out = {};
+  try {
+    const id = getOrCreateInstallId();
+    if (isValidInstallId(id)) out.install_id = id;
+  } catch {
+  }
+  const raw = rawApiKey(env);
+  if (raw) out.account_hash = hashAccount(raw);
+  return out;
+}
+
 // scripts/src/lib/api.mjs
 var PKG_VERSION = (() => {
   const requireFrom = createRequire(import.meta.url);
@@ -292,10 +559,16 @@ var PKG_VERSION = (() => {
 var MPP_BASE = process.env.ROZO_CHECKOUT_MPP_BASE || "https://apiserver.mpprouter.dev/v1/services/rozo-agent-api";
 var CLIENT_LABEL = `rozo-checkout-cli/${PKG_VERSION}`;
 var ATTRIBUTION_CLIENT = `rozo-checkout-skill/${PKG_VERSION}`;
-function buildAttribution({ utmSource } = {}) {
+function buildAttribution({ utmSource, identity } = {}) {
   const raw = utmSource !== void 0 ? utmSource : process.env.ROZO_CHECKOUT_UTM_SOURCE;
   const utm_source = normalizeUtmSource(raw);
-  return { client: ATTRIBUTION_CLIENT, ...utm_source ? { utm_source } : {} };
+  const ids = identity ?? attributionIdentity();
+  return {
+    client: ATTRIBUTION_CLIENT,
+    ...utm_source ? { utm_source } : {},
+    ...ids.install_id ? { install_id: ids.install_id } : {},
+    ...ids.account_hash ? { account_hash: ids.account_hash } : {}
+  };
 }
 var INTENTS_BASE = process.env.ROZO_CHECKOUT_INTENTS_BASE || "https://intentapiv4.rozo.ai/functions/v1/payment-api";
 async function quoteInvoice({ url, linkId }) {
@@ -891,9 +1164,9 @@ function checkPayable(statusResponse, now = Date.now()) {
 }
 
 // scripts/src/lib/blacklist.mjs
-import fs from "node:fs";
-import path from "node:path";
-import crypto from "node:crypto";
+import fs3 from "node:fs";
+import path3 from "node:path";
+import crypto3 from "node:crypto";
 import { fileURLToPath } from "node:url";
 var BlacklistError = class extends Error {
   constructor(code, message) {
@@ -928,7 +1201,7 @@ function parseBlacklist(doc) {
     }
     addresses.push(e.address);
   }
-  const digest = crypto.createHash("sha256").update(JSON.stringify(addresses), "utf8").digest("hex");
+  const digest = crypto3.createHash("sha256").update(JSON.stringify(addresses), "utf8").digest("hex");
   if (typeof provenance.addressesSha256 !== "string" || !provenance.addressesSha256) {
     throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist provenance digest is missing.");
   }
@@ -951,11 +1224,11 @@ function parseBlacklist(doc) {
   return { entries, index, provenance, digest };
 }
 function candidatePaths(moduleUrl) {
-  const here = path.dirname(fileURLToPath(moduleUrl));
+  const here = path3.dirname(fileURLToPath(moduleUrl));
   return [
-    path.join(here, "blacklist.json"),
-    path.join(here, "..", "src", "lib", "blacklist.json"),
-    path.join(here, "..", "..", "src", "lib", "blacklist.json")
+    path3.join(here, "blacklist.json"),
+    path3.join(here, "..", "src", "lib", "blacklist.json"),
+    path3.join(here, "..", "..", "src", "lib", "blacklist.json")
   ];
 }
 var cached = null;
@@ -966,7 +1239,7 @@ function loadBlacklist(explicitPath) {
   for (const p of paths) {
     let raw;
     try {
-      raw = fs.readFileSync(p, "utf8");
+      raw = fs3.readFileSync(p, "utf8");
     } catch (err) {
       lastErr = err;
       continue;
@@ -1011,181 +1284,6 @@ function assertNotBlacklisted(targets, blacklist) {
     }
   }
   return true;
-}
-
-// scripts/src/lib/state.mjs
-import fs2 from "node:fs";
-import path2 from "node:path";
-import os from "node:os";
-import crypto2 from "node:crypto";
-var LOCK_STALE_MS = 6e4;
-var LOCK_WAIT_MS = 1e4;
-var LOCK_POLL_MS = 25;
-function lockPath() {
-  return path2.join(stateRoot(), ".send.lock");
-}
-function sleepSync(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-function tryAcquire(file) {
-  try {
-    const fd = fs2.openSync(file, "wx", 384);
-    fs2.writeFileSync(fd, JSON.stringify({ pid: process.pid, at: (/* @__PURE__ */ new Date()).toISOString() }));
-    fs2.closeSync(fd);
-    return true;
-  } catch (err) {
-    if (err.code !== "EEXIST") throw err;
-    return false;
-  }
-}
-function withLock(fn) {
-  const file = lockPath();
-  fs2.mkdirSync(path2.dirname(file), { recursive: true, mode: 448 });
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  for (; ; ) {
-    if (tryAcquire(file)) break;
-    try {
-      const age = Date.now() - fs2.statSync(file).mtimeMs;
-      if (age > LOCK_STALE_MS) {
-        const stolen = `${file}.stale.${crypto2.randomBytes(4).toString("hex")}`;
-        try {
-          fs2.renameSync(file, stolen);
-          fs2.unlinkSync(stolen);
-        } catch {
-        }
-        continue;
-      }
-    } catch (err) {
-      if (err.code !== "ENOENT") throw err;
-      continue;
-    }
-    if (Date.now() > deadline) {
-      throw new SkillError(
-        "LOCK_TIMEOUT",
-        "Another rozo-checkout process is holding the send lock. Refusing to proceed rather than risk a concurrent second send."
-      );
-    }
-    sleepSync(LOCK_POLL_MS);
-  }
-  try {
-    return fn();
-  } finally {
-    try {
-      fs2.unlinkSync(file);
-    } catch {
-    }
-  }
-}
-function stateRoot() {
-  return process.env.ROZO_CHECKOUT_STATE_DIR || path2.join(os.homedir(), ".rozo-checkout", "state");
-}
-function statePath(rozoPaymentId) {
-  if (!/^[A-Za-z0-9-]{8,64}$/.test(String(rozoPaymentId || ""))) {
-    throw new SkillError("BAD_ROZO_PAYMENT_ID", "Refusing to build a state path from that id.");
-  }
-  return path2.join(stateRoot(), `${rozoPaymentId}.json`);
-}
-function writeAtomic(file, data) {
-  const dir = path2.dirname(file);
-  fs2.mkdirSync(dir, { recursive: true, mode: 448 });
-  const tmp = path2.join(dir, `.${path2.basename(file)}.${crypto2.randomBytes(6).toString("hex")}.tmp`);
-  const fd = fs2.openSync(tmp, "wx", 384);
-  try {
-    fs2.writeFileSync(fd, JSON.stringify(data, null, 2) + "\n", "utf8");
-    fs2.fsyncSync(fd);
-  } finally {
-    fs2.closeSync(fd);
-  }
-  fs2.renameSync(tmp, file);
-}
-function readState(rozoPaymentId) {
-  const file = statePath(rozoPaymentId);
-  let raw;
-  try {
-    raw = fs2.readFileSync(file, "utf8");
-  } catch (err) {
-    if (err.code === "ENOENT") return null;
-    throw new SkillError("STATE_UNREADABLE", `Cannot read local state: ${err.code}`);
-  }
-  try {
-    return JSON.parse(raw);
-  } catch {
-    throw new SkillError(
-      "STATE_CORRUPT",
-      "The local state file for this order is corrupt. Refusing to act; inspect it manually."
-    );
-  }
-}
-function createOrderRecord(record) {
-  return withLock(() => createOrderRecordUnlocked(record));
-}
-function mergeBitrefill(prev, next) {
-  if (!next) return prev ?? null;
-  if (!prev?.expiresAt || !next.expiresAt) return { ...next, expiresAt: next.expiresAt ?? prev?.expiresAt ?? null };
-  const a = Date.parse(prev.expiresAt);
-  const b = Date.parse(next.expiresAt);
-  return { ...next, expiresAt: Number.isFinite(a) && (!Number.isFinite(b) || a < b) ? prev.expiresAt : next.expiresAt };
-}
-function createOrderRecordUnlocked(record) {
-  const { rozoPaymentId } = record;
-  const existing = readState(rozoPaymentId);
-  const next = {
-    version: 1,
-    rozoPaymentId,
-    // 'coinbase' (default, historical records) or 'bitrefill'. Drives which
-    // payability checks presend and status run.
-    provider: record.provider ?? existing?.provider ?? "coinbase",
-    bitrefill: mergeBitrefill(existing?.bitrefill, record.bitrefill),
-    linkId: record.linkId,
-    paymentLink: record.paymentLink ?? null,
-    merchant: record.merchant ?? null,
-    invoiceAmount: record.invoiceAmount ?? null,
-    source: record.source,
-    receiverAddress: record.receiverAddress,
-    receiverMemo: record.receiverMemo ?? null,
-    amount: record.amount,
-    amountUnit: record.amountUnit ?? null,
-    expiresAt: record.expiresAt ?? null,
-    createdAt: existing?.createdAt ?? (/* @__PURE__ */ new Date()).toISOString(),
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-    confirmation: existing?.confirmation ?? null,
-    send: existing?.send ?? null
-  };
-  writeAtomic(statePath(rozoPaymentId), next);
-  return next;
-}
-function depositDigest(source) {
-  const canonical = JSON.stringify({
-    chainId: String(source?.chainId ?? ""),
-    tokenSymbol: String(source?.tokenSymbol ?? "").toUpperCase(),
-    tokenAddress: String(source?.tokenAddress ?? ""),
-    receiverAddress: String(source?.receiverAddress ?? ""),
-    receiverMemo: source?.receiverMemo ?? null,
-    amount: String(source?.amount ?? ""),
-    amountUnit: source?.amountUnit ?? null,
-    lnInvoice: source?.lnInvoice ?? null
-  });
-  return crypto2.createHash("sha256").update(canonical, "utf8").digest("hex");
-}
-function recordConfirmation(rozoPaymentId, { source, invoiceAmount, tier }) {
-  return withLock(() => {
-    const state = readState(rozoPaymentId);
-    if (!state) {
-      throw new SkillError("NO_ORDER_STATE", "Cannot confirm an order with no local record.");
-    }
-    const next = {
-      ...state,
-      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      confirmation: {
-        confirmedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        depositDigest: depositDigest(source),
-        invoiceAmount: invoiceAmount ?? state.invoiceAmount ?? null,
-        tier: tier ?? null
-      }
-    };
-    writeAtomic(statePath(rozoPaymentId), next);
-    return next;
-  });
 }
 
 // scripts/src/create-order.mjs

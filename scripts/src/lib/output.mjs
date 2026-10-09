@@ -95,6 +95,28 @@ export function publicHash(value) {
   return typeof value === 'string' && TX_HASH_VALUE.test(value) ? new PublicHash(value) : value;
 }
 
+/**
+ * Hosts whose pay-page URLs our own code may show in full. The pay page link
+ * for an order (payments/<id>.paymentLink) carries only the public order id,
+ * and a human needs the whole URL to open it. Same explicit-marker rule as
+ * publicHash: only code that read the field from a known response wraps it,
+ * and anything off this list stays redacted to its host.
+ */
+const PUBLIC_PAY_PAGE_HOSTS = new Set(['invoice.rozo.ai', 'checkout.rozo.ai']);
+
+/** Mark a Rozo pay-page URL as public. Anything else is returned unchanged (and gets redacted). */
+export function publicPayPage(value) {
+  if (typeof value !== 'string') return value;
+  let u;
+  try {
+    u = new URL(value);
+  } catch {
+    return value;
+  }
+  if (u.protocol !== 'https:' || u.username || u.password || !PUBLIC_PAY_PAGE_HOSTS.has(u.hostname)) return value;
+  return new PublicHash(value);
+}
+
 export function redactDeep(value) {
   if (value instanceof PublicHash) return value.value;
   if (typeof value === 'string') return redact(value);

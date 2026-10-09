@@ -1,8 +1,9 @@
 /**
  * Local preference memory: the last wallet address and coin the user chose.
  *
- * Scope is deliberately tiny. This file holds an address, a preset name and a
- * timestamp — never a key, never a balance, never anything about an invoice.
+ * Scope is deliberately tiny. This file holds an address, a preset name, a
+ * timestamp and the anonymous install id (see identity.mjs) — never a key,
+ * never a balance, never anything about an invoice.
  * It exists only so a repeat payer can press Enter twice instead of retyping.
  *
  * A saved address is re-validated (format and blacklist) on every reuse, so an
@@ -24,7 +25,10 @@ export function prefsPath() {
 }
 
 /** Fields we are willing to persist. Anything else is dropped on write. */
-const ALLOWED = ['lastPayerAddress', 'lastAddressFamily', 'lastPreset', 'updatedAt'];
+const ALLOWED = ['lastPayerAddress', 'lastAddressFamily', 'lastPreset', 'installId', 'updatedAt'];
+
+/** Fields a normal savePrefs() caller may set. installId is set only by identity.mjs. */
+const USER_FIELDS = ['lastPayerAddress', 'lastAddressFamily', 'lastPreset'];
 
 /**
  * Read saved preferences. A missing, unreadable, malformed or unexpected file
@@ -58,14 +62,14 @@ export function readPrefs() {
  * Save preferences, merging over whatever is already there. Only the allowed
  * fields are written; anything else the caller passes is ignored.
  */
-export function savePrefs(update) {
+export function savePrefs(update, { installId } = {}) {
   const existing = readPrefs() || {};
   const next = { ...existing };
-  for (const k of ALLOWED) {
-    if (k === 'updatedAt') continue;
+  for (const k of USER_FIELDS) {
     const v = update?.[k];
     if (typeof v === 'string' && v.trim()) next[k] = v.trim();
   }
+  if (typeof installId === 'string' && installId) next.installId = installId;
   next.updatedAt = new Date().toISOString();
   try {
     writeAtomic(prefsPath(), next);

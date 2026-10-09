@@ -120,6 +120,22 @@ Distributing this CLI? `--utm-source <label>` (or `ROZO_CHECKOUT_UTM_SOURCE`) is
 
 Want ROZO to be able to reach you if a payment needs attention? Add the optional `--email you@example.com` to `pay`.
 
+### Privacy: anonymous install id
+
+Every order this CLI creates carries two optional reporting fields in
+`attribution`, so repeat orders from one install can be counted as one payer:
+
+- `install_id`: a random UUID v4 made on first run and stored in
+  `~/.rozo-checkout/prefs.json` (mode 0600). It is not derived from your
+  machine, wallet or anything else about you.
+- `account_hash`: sent only if `OPENROUTER_API_KEY` is set in your
+  environment. It is the lowercase hex sha256 of `"rozo-acct-v1:" + key`. The
+  key itself is never sent, logged or written to disk. An OpenRouter account id
+  is never used for this, because a hash of a short id could be guessed back.
+
+Delete `~/.rozo-checkout/prefs.json` to get a new id (it also forgets your last
+wallet and coin). Set `ROZO_CHECKOUT_ANON_ID=off` to send neither field.
+
 Need help? Email hi@rozo.ai, or reach us on [X](https://x.com/ROZOai) or [Discord](https://discord.gg/EfWejgTbuU).
 
 <details>
@@ -441,6 +457,20 @@ flight or unknown, and 1 if the order expired unpaid or needs a human:
 rozo-checkout receipt <rozoPaymentId> --json | jq '.receipt | .paymentOutcome, .merchantSettlement.status'
 ```
 
+Closed the terminal before paying? `resume` picks the order back up without
+creating a new one:
+
+```bash
+rozo-checkout resume <rozoPaymentId>          # asks before showing the address
+rozo-checkout resume <rozoPaymentId> --yes    # non-interactive
+```
+
+If the order is still unpaid and has enough time left, it prints the hosted pay
+page and (after you confirm) the exact deposit instructions again. A paid order
+is reported as paid (exit 0); an expired one exits 1 and says how to start
+over; it refuses if this machine already recorded a send. Nothing is created or
+sent.
+
 It reports your payment, the merchant invoice and service delivery as separate
 layers. Delivery is always `unknown`: Rozo cannot see your OpenRouter credits.
 
@@ -514,6 +544,12 @@ The full list of what this refuses to do, and why, is in
 
 ## Changelog
 
+- **0.1.17**: new `resume <rozoPaymentId>` command: re-shows the pay page and
+  deposit instructions for an unpaid order (read-only, same expiry, payability
+  and blacklist gates as `pay`), and answers clearly when it is already paid or
+  expired. Orders now carry an anonymous `attribution.install_id` and, when
+  `OPENROUTER_API_KEY` is set, a salted `attribution.account_hash`; see
+  Privacy. `ROZO_CHECKOUT_ANON_ID=off` sends neither.
 - **0.1.16**: new `receipt` command: one read, exit 0 only when the merchant
   side itself reports the invoice paid (Coinbase v3 `CAPTURE_SUCCEEDED`, v1 usage
   count, or the Bitrefill payout), reported as three layers

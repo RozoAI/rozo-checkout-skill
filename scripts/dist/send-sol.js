@@ -33094,6 +33094,199 @@ function getJson(url, opts) {
   return request("GET", url, opts);
 }
 
+// scripts/src/lib/state.mjs
+import fs4 from "node:fs";
+import path4 from "node:path";
+import os3 from "node:os";
+import crypto4 from "node:crypto";
+var LOCK_STALE_MS = 6e4;
+var LOCK_WAIT_MS = 1e4;
+var LOCK_POLL_MS = 25;
+function lockPath() {
+  return path4.join(stateRoot(), ".send.lock");
+}
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function tryAcquire(file) {
+  try {
+    const fd = fs4.openSync(file, "wx", 384);
+    fs4.writeFileSync(fd, JSON.stringify({ pid: process.pid, at: (/* @__PURE__ */ new Date()).toISOString() }));
+    fs4.closeSync(fd);
+    return true;
+  } catch (err) {
+    if (err.code !== "EEXIST") throw err;
+    return false;
+  }
+}
+function withLock(fn) {
+  const file = lockPath();
+  fs4.mkdirSync(path4.dirname(file), { recursive: true, mode: 448 });
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (; ; ) {
+    if (tryAcquire(file)) break;
+    try {
+      const age = Date.now() - fs4.statSync(file).mtimeMs;
+      if (age > LOCK_STALE_MS) {
+        const stolen = `${file}.stale.${crypto4.randomBytes(4).toString("hex")}`;
+        try {
+          fs4.renameSync(file, stolen);
+          fs4.unlinkSync(stolen);
+        } catch {
+        }
+        continue;
+      }
+    } catch (err) {
+      if (err.code !== "ENOENT") throw err;
+      continue;
+    }
+    if (Date.now() > deadline) {
+      throw new SkillError(
+        "LOCK_TIMEOUT",
+        "Another rozo-checkout process is holding the send lock. Refusing to proceed rather than risk a concurrent second send."
+      );
+    }
+    sleepSync(LOCK_POLL_MS);
+  }
+  try {
+    return fn();
+  } finally {
+    try {
+      fs4.unlinkSync(file);
+    } catch {
+    }
+  }
+}
+function stateRoot() {
+  return process.env.ROZO_CHECKOUT_STATE_DIR || path4.join(os3.homedir(), ".rozo-checkout", "state");
+}
+function statePath(rozoPaymentId) {
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(String(rozoPaymentId || ""))) {
+    throw new SkillError("BAD_ROZO_PAYMENT_ID", "Refusing to build a state path from that id.");
+  }
+  return path4.join(stateRoot(), `${rozoPaymentId}.json`);
+}
+function writeAtomic(file, data) {
+  const dir = path4.dirname(file);
+  fs4.mkdirSync(dir, { recursive: true, mode: 448 });
+  const tmp = path4.join(dir, `.${path4.basename(file)}.${crypto4.randomBytes(6).toString("hex")}.tmp`);
+  const fd = fs4.openSync(tmp, "wx", 384);
+  try {
+    fs4.writeFileSync(fd, JSON.stringify(data, null, 2) + "\n", "utf8");
+    fs4.fsyncSync(fd);
+  } finally {
+    fs4.closeSync(fd);
+  }
+  fs4.renameSync(tmp, file);
+}
+function readState(rozoPaymentId) {
+  const file = statePath(rozoPaymentId);
+  let raw;
+  try {
+    raw = fs4.readFileSync(file, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return null;
+    throw new SkillError("STATE_UNREADABLE", `Cannot read local state: ${err.code}`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new SkillError(
+      "STATE_CORRUPT",
+      "The local state file for this order is corrupt. Refusing to act; inspect it manually."
+    );
+  }
+}
+function depositDigest(source) {
+  const canonical = JSON.stringify({
+    chainId: String(source?.chainId ?? ""),
+    tokenSymbol: String(source?.tokenSymbol ?? "").toUpperCase(),
+    tokenAddress: String(source?.tokenAddress ?? ""),
+    receiverAddress: String(source?.receiverAddress ?? ""),
+    receiverMemo: source?.receiverMemo ?? null,
+    amount: String(source?.amount ?? ""),
+    amountUnit: source?.amountUnit ?? null,
+    lnInvoice: source?.lnInvoice ?? null
+  });
+  return crypto4.createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+function claimSend(rozoPaymentId, intent, { skipCaps = false } = {}) {
+  return withLock(() => {
+    const state = readState(rozoPaymentId);
+    if (!state) {
+      throw new SkillError(
+        "NO_ORDER_STATE",
+        "No local record for this order. Run create-order.js in this same session first."
+      );
+    }
+    if (state.send) {
+      throw new SkillError(
+        "ALREADY_SENT",
+        `A send was already recorded for this order at ${state.send.claimedAt} (status: ${state.send.status}). Refusing to send twice. Check the backend for the pay-in before doing anything else.`,
+        { send: state.send }
+      );
+    }
+    const caps = skipCaps ? null : assertPaymentLimit(state.invoiceAmount);
+    const next = {
+      ...state,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      send: {
+        status: "claimed",
+        claimedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        chainId: intent.chainId,
+        tokenSymbol: intent.tokenSymbol,
+        from: intent.from,
+        to: intent.to,
+        amountAtomic: intent.amountAtomic,
+        memo: intent.memo ?? null,
+        nonceBefore: intent.nonceBefore ?? null,
+        expectedTxHash: intent.expectedTxHash ?? null,
+        txHash: null
+      }
+    };
+    writeAtomic(statePath(rozoPaymentId), next);
+    return { state: next, caps };
+  });
+}
+function recordSendResult(rozoPaymentId, { status, txHash = null, note = null }) {
+  return withLock(() => {
+    const state = readState(rozoPaymentId);
+    if (!state || !state.send) {
+      throw new SkillError("NO_SEND_CLAIM", "No send claim to update for this order.");
+    }
+    const next = {
+      ...state,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      send: {
+        ...state.send,
+        status,
+        txHash: txHash ?? state.send.txHash,
+        note,
+        resolvedAt: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    };
+    writeAtomic(statePath(rozoPaymentId), next);
+    return next;
+  });
+}
+var MAX_PAYMENT_USD = 1100;
+function assertPaymentLimit(invoiceUsd) {
+  if (invoiceUsd === null || invoiceUsd === void 0 || String(invoiceUsd).trim() === "") {
+    throw new SkillError("BAD_INVOICE_AMOUNT", "Cannot evaluate the payment limit without a USD amount.");
+  }
+  const usd = Number(invoiceUsd);
+  if (!Number.isFinite(usd) || usd < 0) {
+    throw new SkillError("BAD_INVOICE_AMOUNT", "Cannot evaluate the payment limit without a USD amount.");
+  }
+  if (usd > MAX_PAYMENT_USD) {
+    throw new SkillError(
+      "CAP_PER_TX",
+      `$${usd} is above the $${MAX_PAYMENT_USD} per-payment limit for automated sending. This limit has no override. Pay this invoice from a wallet you control instead \u2014 that path needs no key and has no limit.`
+    );
+  }
+  return { usd, limitUsd: MAX_PAYMENT_USD };
+}
+
 // scripts/src/lib/api.mjs
 var PKG_VERSION = (() => {
   const requireFrom = createRequire(import.meta.url);
@@ -33443,9 +33636,9 @@ function checkExpiry({
 }
 
 // scripts/src/lib/blacklist.mjs
-import fs4 from "node:fs";
-import path4 from "node:path";
-import crypto4 from "node:crypto";
+import fs5 from "node:fs";
+import path5 from "node:path";
+import crypto5 from "node:crypto";
 import { fileURLToPath } from "node:url";
 var BlacklistError = class extends Error {
   constructor(code, message) {
@@ -33480,7 +33673,7 @@ function parseBlacklist(doc) {
     }
     addresses.push(e.address);
   }
-  const digest = crypto4.createHash("sha256").update(JSON.stringify(addresses), "utf8").digest("hex");
+  const digest = crypto5.createHash("sha256").update(JSON.stringify(addresses), "utf8").digest("hex");
   if (typeof provenance.addressesSha256 !== "string" || !provenance.addressesSha256) {
     throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist provenance digest is missing.");
   }
@@ -33503,11 +33696,11 @@ function parseBlacklist(doc) {
   return { entries, index, provenance, digest };
 }
 function candidatePaths(moduleUrl) {
-  const here = path4.dirname(fileURLToPath(moduleUrl));
+  const here = path5.dirname(fileURLToPath(moduleUrl));
   return [
-    path4.join(here, "blacklist.json"),
-    path4.join(here, "..", "src", "lib", "blacklist.json"),
-    path4.join(here, "..", "..", "src", "lib", "blacklist.json")
+    path5.join(here, "blacklist.json"),
+    path5.join(here, "..", "src", "lib", "blacklist.json"),
+    path5.join(here, "..", "..", "src", "lib", "blacklist.json")
   ];
 }
 var cached = null;
@@ -33518,7 +33711,7 @@ function loadBlacklist(explicitPath) {
   for (const p of paths) {
     let raw;
     try {
-      raw = fs4.readFileSync(p, "utf8");
+      raw = fs5.readFileSync(p, "utf8");
     } catch (err) {
       lastErr = err;
       continue;
@@ -33563,199 +33756,6 @@ function assertNotBlacklisted(targets, blacklist) {
     }
   }
   return true;
-}
-
-// scripts/src/lib/state.mjs
-import fs5 from "node:fs";
-import path5 from "node:path";
-import os3 from "node:os";
-import crypto5 from "node:crypto";
-var LOCK_STALE_MS = 6e4;
-var LOCK_WAIT_MS = 1e4;
-var LOCK_POLL_MS = 25;
-function lockPath() {
-  return path5.join(stateRoot(), ".send.lock");
-}
-function sleepSync(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-function tryAcquire(file) {
-  try {
-    const fd = fs5.openSync(file, "wx", 384);
-    fs5.writeFileSync(fd, JSON.stringify({ pid: process.pid, at: (/* @__PURE__ */ new Date()).toISOString() }));
-    fs5.closeSync(fd);
-    return true;
-  } catch (err) {
-    if (err.code !== "EEXIST") throw err;
-    return false;
-  }
-}
-function withLock(fn) {
-  const file = lockPath();
-  fs5.mkdirSync(path5.dirname(file), { recursive: true, mode: 448 });
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  for (; ; ) {
-    if (tryAcquire(file)) break;
-    try {
-      const age = Date.now() - fs5.statSync(file).mtimeMs;
-      if (age > LOCK_STALE_MS) {
-        const stolen = `${file}.stale.${crypto5.randomBytes(4).toString("hex")}`;
-        try {
-          fs5.renameSync(file, stolen);
-          fs5.unlinkSync(stolen);
-        } catch {
-        }
-        continue;
-      }
-    } catch (err) {
-      if (err.code !== "ENOENT") throw err;
-      continue;
-    }
-    if (Date.now() > deadline) {
-      throw new SkillError(
-        "LOCK_TIMEOUT",
-        "Another rozo-checkout process is holding the send lock. Refusing to proceed rather than risk a concurrent second send."
-      );
-    }
-    sleepSync(LOCK_POLL_MS);
-  }
-  try {
-    return fn();
-  } finally {
-    try {
-      fs5.unlinkSync(file);
-    } catch {
-    }
-  }
-}
-function stateRoot() {
-  return process.env.ROZO_CHECKOUT_STATE_DIR || path5.join(os3.homedir(), ".rozo-checkout", "state");
-}
-function statePath(rozoPaymentId) {
-  if (!/^[A-Za-z0-9-]{8,64}$/.test(String(rozoPaymentId || ""))) {
-    throw new SkillError("BAD_ROZO_PAYMENT_ID", "Refusing to build a state path from that id.");
-  }
-  return path5.join(stateRoot(), `${rozoPaymentId}.json`);
-}
-function writeAtomic(file, data) {
-  const dir = path5.dirname(file);
-  fs5.mkdirSync(dir, { recursive: true, mode: 448 });
-  const tmp = path5.join(dir, `.${path5.basename(file)}.${crypto5.randomBytes(6).toString("hex")}.tmp`);
-  const fd = fs5.openSync(tmp, "wx", 384);
-  try {
-    fs5.writeFileSync(fd, JSON.stringify(data, null, 2) + "\n", "utf8");
-    fs5.fsyncSync(fd);
-  } finally {
-    fs5.closeSync(fd);
-  }
-  fs5.renameSync(tmp, file);
-}
-function readState(rozoPaymentId) {
-  const file = statePath(rozoPaymentId);
-  let raw;
-  try {
-    raw = fs5.readFileSync(file, "utf8");
-  } catch (err) {
-    if (err.code === "ENOENT") return null;
-    throw new SkillError("STATE_UNREADABLE", `Cannot read local state: ${err.code}`);
-  }
-  try {
-    return JSON.parse(raw);
-  } catch {
-    throw new SkillError(
-      "STATE_CORRUPT",
-      "The local state file for this order is corrupt. Refusing to act; inspect it manually."
-    );
-  }
-}
-function depositDigest(source) {
-  const canonical = JSON.stringify({
-    chainId: String(source?.chainId ?? ""),
-    tokenSymbol: String(source?.tokenSymbol ?? "").toUpperCase(),
-    tokenAddress: String(source?.tokenAddress ?? ""),
-    receiverAddress: String(source?.receiverAddress ?? ""),
-    receiverMemo: source?.receiverMemo ?? null,
-    amount: String(source?.amount ?? ""),
-    amountUnit: source?.amountUnit ?? null,
-    lnInvoice: source?.lnInvoice ?? null
-  });
-  return crypto5.createHash("sha256").update(canonical, "utf8").digest("hex");
-}
-function claimSend(rozoPaymentId, intent, { skipCaps = false } = {}) {
-  return withLock(() => {
-    const state = readState(rozoPaymentId);
-    if (!state) {
-      throw new SkillError(
-        "NO_ORDER_STATE",
-        "No local record for this order. Run create-order.js in this same session first."
-      );
-    }
-    if (state.send) {
-      throw new SkillError(
-        "ALREADY_SENT",
-        `A send was already recorded for this order at ${state.send.claimedAt} (status: ${state.send.status}). Refusing to send twice. Check the backend for the pay-in before doing anything else.`,
-        { send: state.send }
-      );
-    }
-    const caps = skipCaps ? null : assertPaymentLimit(state.invoiceAmount);
-    const next = {
-      ...state,
-      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      send: {
-        status: "claimed",
-        claimedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        chainId: intent.chainId,
-        tokenSymbol: intent.tokenSymbol,
-        from: intent.from,
-        to: intent.to,
-        amountAtomic: intent.amountAtomic,
-        memo: intent.memo ?? null,
-        nonceBefore: intent.nonceBefore ?? null,
-        expectedTxHash: intent.expectedTxHash ?? null,
-        txHash: null
-      }
-    };
-    writeAtomic(statePath(rozoPaymentId), next);
-    return { state: next, caps };
-  });
-}
-function recordSendResult(rozoPaymentId, { status, txHash = null, note = null }) {
-  return withLock(() => {
-    const state = readState(rozoPaymentId);
-    if (!state || !state.send) {
-      throw new SkillError("NO_SEND_CLAIM", "No send claim to update for this order.");
-    }
-    const next = {
-      ...state,
-      updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      send: {
-        ...state.send,
-        status,
-        txHash: txHash ?? state.send.txHash,
-        note,
-        resolvedAt: (/* @__PURE__ */ new Date()).toISOString()
-      }
-    };
-    writeAtomic(statePath(rozoPaymentId), next);
-    return next;
-  });
-}
-var MAX_PAYMENT_USD = 1100;
-function assertPaymentLimit(invoiceUsd) {
-  if (invoiceUsd === null || invoiceUsd === void 0 || String(invoiceUsd).trim() === "") {
-    throw new SkillError("BAD_INVOICE_AMOUNT", "Cannot evaluate the payment limit without a USD amount.");
-  }
-  const usd = Number(invoiceUsd);
-  if (!Number.isFinite(usd) || usd < 0) {
-    throw new SkillError("BAD_INVOICE_AMOUNT", "Cannot evaluate the payment limit without a USD amount.");
-  }
-  if (usd > MAX_PAYMENT_USD) {
-    throw new SkillError(
-      "CAP_PER_TX",
-      `$${usd} is above the $${MAX_PAYMENT_USD} per-payment limit for automated sending. This limit has no override. Pay this invoice from a wallet you control instead \u2014 that path needs no key and has no limit.`
-    );
-  }
-  return { usd, limitUsd: MAX_PAYMENT_USD };
 }
 
 // scripts/src/lib/bitrefill.mjs

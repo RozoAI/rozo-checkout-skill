@@ -48,6 +48,7 @@ import { run as runCreateOrder } from './create-order.mjs';
 import { run as runCreateBitrefill } from './create-bitrefill-order.mjs';
 import { run as runStatus } from './status.mjs';
 import { run as runReceipt } from './receipt.mjs';
+import { run as runResume } from './resume.mjs';
 import { run as runSendEvm } from './send-evm.mjs';
 import { run as runSendSol } from './send-sol.mjs';
 
@@ -356,6 +357,71 @@ async function cmdReceipt(opts) {
   out(`  Next: ${r.nextAction.type === 'contact_support' ? red(r.nextAction.message) : r.nextAction.message}`);
   if (payload.support) printSupport();
   out();
+  return exitCode;
+}
+
+/**
+ * Pick an unpaid order back up. Read-only: the flow decides whether the order
+ * is still payable; this only renders it and, like pay, asks before the full
+ * deposit address is released.
+ */
+async function cmdResume(opts) {
+  if (!opts.json) out(dim('  Reading the order… (no money moves)'));
+  const first = await step(runResume, [opts.target]);
+  let payload = first.payload;
+  let exitCode = first.exitCode;
+
+  if (payload.resumable && !opts.json) {
+    out();
+    out(`  Order     ${payload.rozoPaymentId}  ${dim('(unpaid)')}`);
+    out(`  You send  ${bold(payload.display?.amount)} on ${bold(payload.display?.chain)}`);
+    out(`  To        ${payload.display?.payToMasked} ${dim('(full address shown after you confirm)')}`);
+    if (payload.display?.hasMemo) {
+      out(`  Memo      ${payload.display.receiverMemoMasked} ${dim(`(${payload.display.memoType})`)}`);
+    }
+    if (payload.expiry?.expiresIn) out(`  Expires   in ${bold(payload.expiry.expiresIn)}`);
+    if (payload.paymentLink) out(`  Pay page  ${payload.paymentLink}`);
+    out();
+  }
+
+  if (payload.resumable) {
+    let go = opts.yes;
+    if (!go && !opts.json && process.stdin.isTTY) {
+      go = await askYesNo(`  ${bold('Show the deposit details to pay this now?')} [y/N] `);
+    }
+    if (go) {
+      const second = await step(runResume, [opts.target, '--confirm']);
+      payload = second.payload;
+      exitCode = second.exitCode;
+    }
+  }
+
+  if (opts.json) {
+    printJson(payload);
+    return exitCode;
+  }
+  if (payload.error) {
+    printError(payload);
+    printMoneyWarning(payload);
+    printSupport();
+    out();
+    return exitCode;
+  }
+  if (!payload.resumable) {
+    out();
+    out(`  State   ${stateLabel(payload.state)}`);
+    out(`  ${payload.message}`);
+    out();
+    return exitCode;
+  }
+  if (payload.deposit) {
+    printDeposit(payload.deposit, opts);
+    out(dim(`  Then: rozo-checkout status ${payload.rozoPaymentId} --watch`));
+    out();
+  } else {
+    out(dim('  Deposit details withheld. Open the pay page above, or re-run with --yes.'));
+    out();
+  }
   return exitCode;
 }
 
@@ -784,6 +850,8 @@ async function main() {
       return cmdStatus(opts);
     case 'receipt':
       return cmdReceipt(opts);
+    case 'resume':
+      return cmdResume(opts);
     case 'pay':
       try {
         return await cmdPay(opts);
