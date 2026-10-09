@@ -23,6 +23,10 @@ import { capture, emit, redact, redactDeep } from '../scripts/src/lib/output.mjs
 import { run as runCreateOrder } from '../scripts/src/create-order.mjs';
 import { run as runCreateBitrefill } from '../scripts/src/create-bitrefill-order.mjs';
 
+// The anonymous install_id / account_hash fields are covered in identity.test.mjs.
+// Off here so these shape assertions stay exact and nothing is written to ~/.rozo-checkout.
+process.env.ROZO_CHECKOUT_ANON_ID = 'off';
+
 async function captureBodies(fn) {
   const bodies = [];
   const originalFetch = globalThis.fetch;

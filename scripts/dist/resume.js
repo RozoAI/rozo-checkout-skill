@@ -19,7 +19,6 @@ var PUBLIC_SUPPORT_URLS = /* @__PURE__ */ new Set([SUPPORT.x, SUPPORT.discord]);
 var EXIT_OK = 0;
 var EXIT_ERROR = 1;
 var EXIT_USAGE = 2;
-var EXIT_UNCONFIRMED = 3;
 function redact(text) {
   if (text === null || text === void 0) return text;
   let s = typeof text === "string" ? text : String(text);
@@ -52,6 +51,22 @@ var PublicHash = class {
 var TX_HASH_VALUE = /^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{86,88})$/;
 function publicHash(value) {
   return typeof value === "string" && TX_HASH_VALUE.test(value) ? new PublicHash(value) : value;
+}
+var PUBLIC_PAY_PAGE_HOSTS = /* @__PURE__ */ new Set(["invoice.rozo.ai", "checkout.rozo.ai"]);
+var PAY_PAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function publicPayPage(value) {
+  if (typeof value !== "string") return value;
+  let u;
+  try {
+    u = new URL(value);
+  } catch {
+    return value;
+  }
+  if (u.protocol !== "https:" || u.username || u.password || u.port || !PUBLIC_PAY_PAGE_HOSTS.has(u.hostname)) return value;
+  if (u.pathname !== "/checkout") return value;
+  const id = u.searchParams.get("id");
+  if (!id || !PAY_PAGE_ID.test(id)) return value;
+  return new PublicHash(`https://${u.hostname}/checkout?id=${id.toLowerCase()}`);
 }
 function redactDeep(value) {
   if (value instanceof PublicHash) return value.value;
@@ -137,6 +152,12 @@ function maskAddress(address) {
   if (!s) return "(none)";
   if (s.length <= 12) return s;
   return `${s.slice(0, 6)}...${s.slice(-4)}`;
+}
+function maskMemo(memo) {
+  const s = String(memo ?? "").trim();
+  if (!s) return null;
+  if (s.length <= 8) return s;
+  return `${s.slice(0, 4)}...${s.slice(-3)}`;
 }
 
 // scripts/src/lib/api.mjs
@@ -297,6 +318,15 @@ var CHAIN_NAMES = {
   1500: "Stellar",
   lightning: "Bitcoin Lightning"
 };
+var CHAIN_FAMILY = {
+  1: "evm",
+  56: "evm",
+  137: "evm",
+  8453: "evm",
+  900: "solana",
+  1500: "stellar",
+  lightning: "lightning"
+};
 var DECIMALS = {
   "1:USDC": 6,
   "1:USDT": 6,
@@ -402,8 +432,13 @@ function formatAmount(source) {
 function chainName(chainId) {
   return CHAIN_NAMES[String(chainId)] || CHAIN_NAMES[chainId] || `chain ${chainId}`;
 }
+var STELLAR_MEMO_TYPE = "MEMO_TEXT";
+function chainFamily(chainId) {
+  return CHAIN_FAMILY[String(chainId)] || CHAIN_FAMILY[chainId] || null;
+}
 
 // scripts/src/lib/guards.mjs
+var UNPAID_STATUS = "payment_unpaid";
 function receiptSignal(source) {
   const raw = source?.amountReceived;
   if (raw === null || raw === void 0 || raw === "") {
@@ -415,6 +450,123 @@ function receiptSignal(source) {
   } catch {
     return { money: true, receipt: null, unparsable: true };
   }
+}
+function validateDepositInstructions(source) {
+  const family = chainFamily(source?.chainId);
+  const address = typeof source?.receiverAddress === "string" ? source.receiverAddress.trim() : "";
+  const memo = typeof source?.receiverMemo === "string" ? source.receiverMemo.trim() : "";
+  const bolt11 = typeof source?.lnInvoice === "string" && source.lnInvoice.trim() ? source.lnInvoice.trim() : "";
+  let amountAtomic;
+  try {
+    amountAtomic = sourceAtomic(source, "amount");
+  } catch (err) {
+    return {
+      ok: false,
+      code: "DEPOSIT_INCOMPLETE",
+      reason: `The deposit amount is unusable: ${err.message}`
+    };
+  }
+  if (amountAtomic === null || amountAtomic <= 0n) {
+    return {
+      ok: false,
+      code: "DEPOSIT_INCOMPLETE",
+      reason: "The order carries no positive deposit amount."
+    };
+  }
+  if (family === "lightning") {
+    if (!bolt11) {
+      return {
+        ok: false,
+        code: "DEPOSIT_INCOMPLETE",
+        reason: "The Lightning order has no BOLT11 invoice yet (the swap may still be being created). Nothing is payable until it appears."
+      };
+    }
+    return { ok: true, code: null, reason: null, family, amountAtomic, payTo: bolt11, memo: null };
+  }
+  if (!address) {
+    return {
+      ok: false,
+      code: "DEPOSIT_NOT_LIVE",
+      reason: "The live payments response returned no deposit address."
+    };
+  }
+  if (family === "stellar" && !memo) {
+    return {
+      ok: false,
+      code: "DEPOSIT_MEMO_REQUIRED",
+      reason: "A Stellar deposit requires a memo, and this order did not supply one. Sending without it would very likely lose the funds. Refusing to display it as payable."
+    };
+  }
+  return {
+    ok: true,
+    code: null,
+    reason: null,
+    family,
+    amountAtomic,
+    payTo: address,
+    memo: memo || null
+  };
+}
+function reuseGuard({ payment, requested, reused = false }) {
+  const source = payment?.source || {};
+  const evidence = {
+    reused: Boolean(reused),
+    status: payment?.status ?? null,
+    txHash: source.txHash ?? null,
+    amountReceived: source.amountReceived ?? null,
+    confirmedAt: source.confirmedAt ?? null,
+    chainId: source.chainId ?? null,
+    tokenSymbol: source.tokenSymbol ?? null,
+    senderAddress: source.senderAddress ?? null
+  };
+  const hasTx = source.txHash !== null && source.txHash !== void 0 && source.txHash !== "";
+  const signal = receiptSignal(source);
+  const hasConfirm = source.confirmedAt !== null && source.confirmedAt !== void 0 && source.confirmedAt !== "";
+  if (hasTx || signal.money || hasConfirm) {
+    return {
+      ok: false,
+      code: "ORDER_ALREADY_FUNDED",
+      reason: signal.unparsable ? "This order reports an amountReceived that cannot be read. It is treated as funded until a human confirms otherwise \u2014 do NOT pay again." : "This Coinbase link already has a funded Rozo order (it may have been paid elsewhere). Do NOT pay again \u2014 escalate for manual reconciliation.",
+      moneyDetected: true,
+      evidence: { ...evidence, receipt: signal.receipt, receiptUnparsable: signal.unparsable }
+    };
+  }
+  if (payment?.status !== UNPAID_STATUS) {
+    const terminal = ["payment_expired", "payment_bounced", "payment_refunded"].includes(
+      payment?.status
+    );
+    return {
+      ok: false,
+      code: terminal ? "ORDER_NOT_PAYABLE" : "ORDER_ALREADY_FUNDED",
+      reason: `Existing order status is "${payment?.status ?? "unknown"}", not "${UNPAID_STATUS}".`,
+      moneyDetected: !terminal,
+      evidence
+    };
+  }
+  const wantChain = String(requested?.chainId ?? "").trim();
+  const wantToken = String(requested?.tokenSymbol ?? "").trim().toUpperCase();
+  const gotChain = String(source.chainId ?? "").trim();
+  const gotToken = String(source.tokenSymbol ?? "").trim().toUpperCase();
+  if (!gotChain || !gotToken || gotChain !== wantChain || gotToken !== wantToken) {
+    return {
+      ok: false,
+      code: "REUSED_SOURCE_MISMATCH",
+      reason: `The order expects ${gotToken || "?"} on chain ${gotChain || "?"}, but you chose ${wantToken} on chain ${wantChain}. Paying the wrong asset or network is usually unrecoverable.`,
+      moneyDetected: false,
+      evidence
+    };
+  }
+  const deposit = validateDepositInstructions(source);
+  if (!deposit.ok) {
+    return {
+      ok: false,
+      code: deposit.code,
+      reason: deposit.reason,
+      moneyDetected: false,
+      evidence
+    };
+  }
+  return { ok: true, code: null, reason: null, moneyDetected: false, evidence, deposit };
 }
 function checkPayable(statusResponse, now = Date.now()) {
   const cb = statusResponse?.coinbase;
@@ -607,6 +759,129 @@ function classifyStatus({
   );
 }
 
+// scripts/src/lib/blacklist.mjs
+import fs2 from "node:fs";
+import path2 from "node:path";
+import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
+var BlacklistError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+};
+function normalizeAddress(address, family) {
+  if (typeof address !== "string") return null;
+  const trimmed = address.trim();
+  if (!trimmed) return null;
+  if (family === "evm" || /^0x[0-9a-fA-F]{40}$/.test(trimmed)) {
+    return trimmed.toLowerCase();
+  }
+  return trimmed;
+}
+function parseBlacklist(doc) {
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist document is not an object.");
+  }
+  const { provenance, entries } = doc;
+  if (!provenance || typeof provenance !== "object") {
+    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist provenance header is missing.");
+  }
+  if (!Array.isArray(entries) || entries.length === 0) {
+    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist is empty or not an array.");
+  }
+  const addresses = [];
+  for (const e of entries) {
+    if (!e || typeof e !== "object" || typeof e.address !== "string" || !e.address.trim()) {
+      throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist entry has no address.");
+    }
+    addresses.push(e.address);
+  }
+  const digest = crypto.createHash("sha256").update(JSON.stringify(addresses), "utf8").digest("hex");
+  if (typeof provenance.addressesSha256 !== "string" || !provenance.addressesSha256) {
+    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist provenance digest is missing.");
+  }
+  if (digest !== provenance.addressesSha256) {
+    throw new BlacklistError(
+      "BLACKLIST_UNAVAILABLE",
+      "Blacklist digest mismatch \u2014 the vendored address list was modified without re-signing."
+    );
+  }
+  if (provenance.addressCount !== void 0 && provenance.addressCount !== entries.length) {
+    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Blacklist addressCount does not match entries.");
+  }
+  const index = /* @__PURE__ */ new Map();
+  for (const e of entries) {
+    const key = normalizeAddress(e.address, e.family);
+    if (key) index.set(key, e);
+    const lower = e.address.trim().toLowerCase();
+    if (/^0x[0-9a-f]{40}$/.test(lower)) index.set(lower, e);
+  }
+  return { entries, index, provenance, digest };
+}
+function candidatePaths(moduleUrl) {
+  const here = path2.dirname(fileURLToPath(moduleUrl));
+  return [
+    path2.join(here, "blacklist.json"),
+    path2.join(here, "..", "src", "lib", "blacklist.json"),
+    path2.join(here, "..", "..", "src", "lib", "blacklist.json")
+  ];
+}
+var cached = null;
+function loadBlacklist(explicitPath) {
+  if (!explicitPath && cached) return cached;
+  const paths = explicitPath ? [explicitPath] : candidatePaths(import.meta.url);
+  let lastErr = null;
+  for (const p of paths) {
+    let raw;
+    try {
+      raw = fs2.readFileSync(p, "utf8");
+    } catch (err) {
+      lastErr = err;
+      continue;
+    }
+    let doc;
+    try {
+      doc = JSON.parse(raw);
+    } catch {
+      throw new BlacklistError("BLACKLIST_UNAVAILABLE", `Blacklist file is not valid JSON: ${p}`);
+    }
+    const parsed = parseBlacklist(doc);
+    parsed.sourceFile = p;
+    if (!explicitPath) cached = parsed;
+    return parsed;
+  }
+  throw new BlacklistError(
+    "BLACKLIST_UNAVAILABLE",
+    `Blacklist file not found (looked in ${paths.length} locations). Refusing to proceed.` + (lastErr ? ` Last error: ${lastErr.code || lastErr.message}` : "")
+  );
+}
+function checkAddress(address, family, blacklist) {
+  const bl = blacklist || loadBlacklist();
+  const normalized = normalizeAddress(address, family);
+  if (!normalized) {
+    throw new BlacklistError("BLACKLIST_UNAVAILABLE", "Cannot check an empty address.");
+  }
+  const entry = bl.index.get(normalized) || bl.index.get(normalized.toLowerCase()) || null;
+  return { hit: Boolean(entry), entry, normalized };
+}
+function assertNotBlacklisted(targets, blacklist) {
+  const bl = blacklist || loadBlacklist();
+  for (const t of targets) {
+    if (!t || !t.address) continue;
+    const { hit, entry } = checkAddress(t.address, t.family, bl);
+    if (hit) {
+      const err = new BlacklistError(
+        "BLACKLIST_HIT",
+        `${t.role || "address"} is on the compromised-wallet blacklist (reported ${entry.reportedOn}: ${entry.note}). Refusing.`
+      );
+      err.role = t.role || "address";
+      throw err;
+    }
+  }
+  return true;
+}
+
 // scripts/src/lib/expiry.mjs
 var MINUTE = 6e4;
 var MARGINS_MS = {
@@ -751,7 +1026,6 @@ function intentBitrefillExpiry(payment) {
 }
 
 // scripts/src/lib/receipt.mjs
-var SCHEMA_VERSION = 1;
 var PAYMENT_OUTCOMES = Object.freeze([
   "awaiting_payment",
   "processing",
@@ -782,124 +1056,8 @@ var STATE_TO_OUTCOME = Object.freeze({
   stuck_after_payment: "needs_attention",
   unknown: "unknown"
 });
-function merchantSettlementProved(result) {
-  if (result?.provider === "bitrefill") return result?.state === "settled";
-  return result?.backend?.coinbaseSettled === true;
-}
-function hasLocalSend(result) {
-  return Boolean(result?.localSend && result.localSend.status);
-}
-function paymentOutcomeFor(result) {
-  if (!result) return "unknown";
-  if (result.escalate) return "needs_attention";
-  if (result.unknown) return "unknown";
-  let outcome = Object.prototype.hasOwnProperty.call(STATE_TO_OUTCOME, result.state) ? STATE_TO_OUTCOME[result.state] : "unknown";
-  if (outcome === "settled" && !merchantSettlementProved(result)) outcome = "processing";
-  if (outcome === "settled" && result.provider !== "bitrefill") {
-    const router = result.backend?.routerStatus ?? null;
-    if (router && router.startsWith("failed_")) return "needs_attention";
-    if (router && router !== "paid") outcome = "processing";
-  }
-  if (!result.authoritativeView && (outcome === "awaiting_payment" || outcome === "expired_unfunded")) {
-    return "unknown";
-  }
-  if ((result.moneyDetected || hasLocalSend(result)) && outcome === "expired_unfunded") {
-    return "needs_attention";
-  }
-  if (result.moneyDetected && outcome === "awaiting_payment") return "processing";
-  return outcome;
-}
-function nextActionFor(result, outcome = paymentOutcomeFor(result)) {
-  const locked = Boolean(result?.moneyDetected) || hasLocalSend(result);
-  const base = { canRetryQuery: true, canCreateOrder: false, canSend: false };
-  const bitrefill = result?.provider === "bitrefill";
-  switch (outcome) {
-    case "awaiting_payment":
-      if (locked) {
-        return {
-          ...base,
-          type: "check_status",
-          message: "A send was already recorded for this order. Do NOT pay again; poll status until the pay-in shows up."
-        };
-      }
-      if (!result?.sendWindow?.ok) {
-        const code = result?.sendWindow?.code ?? "SEND_WINDOW_UNKNOWN";
-        if (code === "LINK_NO_LONGER_PAYABLE") {
-          return {
-            ...base,
-            type: "request_new_invoice",
-            reason: code,
-            message: "The merchant link no longer accepts payment. Do NOT fund this order; get a new payment link."
-          };
-        }
-        if (code === "EXPIRED" || code === "EXPIRY_MARGIN") {
-          return {
-            ...base,
-            type: "check_status",
-            reason: code,
-            message: "Too little time is left to pay this order safely. Do NOT fund it. Once it shows expired_unfunded, run pay again on the same link for a new order."
-          };
-        }
-        return {
-          ...base,
-          type: "check_status",
-          reason: code,
-          message: "Whether this order can still be paid could not be proved. Do NOT fund it on a guess; retry."
-        };
-      }
-      return {
-        ...base,
-        type: "pay",
-        canSend: true,
-        message: "Send the exact amount from the order deposit block, once."
-      };
-    case "processing":
-      return {
-        ...base,
-        type: "check_status",
-        message: "Funds are moving. Do NOT pay again; poll status."
-      };
-    case "settled":
-      return { ...base, type: "none", canRetryQuery: false, message: "Nothing to do." };
-    case "expired_unfunded":
-      if (bitrefill) {
-        return {
-          ...base,
-          type: "request_new_invoice",
-          message: "Nothing was funded. Create a fresh Bitrefill invoice and pay that one."
-        };
-      }
-      return {
-        ...base,
-        type: "choose_method",
-        canCreateOrder: true,
-        message: "Nothing arrived for this order. If your own wallet shows no send to the old deposit address and no pending Lightning payment, run pay again on the same link: it creates a new order, and you may pick a different coin. Never fund the old deposit address."
-      };
-    case "needs_attention":
-      if (result?.state === "deadline_unknown" && !locked) {
-        return {
-          ...base,
-          type: "request_new_invoice",
-          message: "The invoice deadline is unknown here, so the order is not payable. Re-run pay with the invoice details, or create a fresh invoice."
-        };
-      }
-      return {
-        ...base,
-        type: "contact_support",
-        message: "Do NOT pay again and do NOT create a new order. Keep linkId, rozoPaymentId and every tx hash, and contact Rozo support."
-      };
-    default:
-      return {
-        ...base,
-        type: "check_status",
-        message: "The order state could not be established. This is not evidence that nothing was paid. Retry with the rozoPaymentId before doing anything else."
-      };
-  }
-}
 
 // scripts/src/status.mjs
-var POLL_INTERVAL_MS = 1e4;
-var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function resolveProvider(explicit, rozoPaymentId) {
   if (explicit) return String(explicit).toLowerCase();
   if (rozoPaymentId && isRozoPaymentId(rozoPaymentId)) {
@@ -1088,58 +1246,241 @@ function statusGuidance(result) {
   if (result.state === "expired_unfunded") return EXPIRED_UNFUNDED_GUIDANCE;
   return result.terminal ? "Done." : "Still in flight. Poll again in ~10s.";
 }
+
+// scripts/src/resume.mjs
+var PAID_STATES = /* @__PURE__ */ new Set([
+  "payin_detected",
+  "payin_confirmed",
+  "bridging",
+  "paying_coinbase",
+  "settled"
+]);
+var EXPIRED_STATES = /* @__PURE__ */ new Set(["expired_unfunded", "invoice_expired"]);
+function localPaymentLink(id) {
+  try {
+    return readState(id)?.paymentLink ?? null;
+  } catch {
+    return null;
+  }
+}
+function resumeVerdict(snap) {
+  const base = {
+    rozoPaymentId: snap.rozoPaymentId,
+    linkId: snap.linkId ?? null,
+    provider: snap.provider,
+    state: snap.state,
+    moneyDetected: Boolean(snap.moneyDetected)
+  };
+  if (snap.escalate) {
+    return { ...base, resumable: false, outcome: "needs_attention", code: "ORDER_NEEDS_ATTENTION", exitCode: EXIT_ERROR, message: statusGuidance(snap) };
+  }
+  if (snap.unknown || !snap.authoritativeView) {
+    return { ...base, resumable: false, outcome: "unknown", code: "ORDER_STATE_UNKNOWN", exitCode: EXIT_ERROR, message: statusGuidance(snap) };
+  }
+  if (snap.moneyDetected || PAID_STATES.has(snap.state)) {
+    const done = snap.state === "settled";
+    return {
+      ...base,
+      resumable: false,
+      outcome: done ? "paid" : "paid_in_progress",
+      code: "ORDER_ALREADY_PAID",
+      exitCode: EXIT_OK,
+      message: done ? "This order is already paid and settled. Nothing to resume. Do not pay again." : `A payment for this order was already detected (state: ${snap.state}). Do NOT pay again. Follow it with: rozo-checkout status ${snap.rozoPaymentId} --watch`
+    };
+  }
+  if (EXPIRED_STATES.has(snap.state)) {
+    return {
+      ...base,
+      resumable: false,
+      outcome: "expired",
+      code: "ORDER_EXPIRED",
+      exitCode: EXIT_ERROR,
+      message: snap.provider === "bitrefill" ? "This order expired before any funds arrived. Nothing was lost. Create a fresh Bitrefill invoice and run pay again." : EXPIRED_UNFUNDED_GUIDANCE
+    };
+  }
+  if (snap.localSend) {
+    return {
+      ...base,
+      resumable: false,
+      outcome: "sent_locally",
+      code: "ALREADY_SENT",
+      exitCode: EXIT_ERROR,
+      message: `This machine already recorded a send for this order (${snap.localSend.status}). Do NOT pay again. Check it with: rozo-checkout status ${snap.rozoPaymentId}`
+    };
+  }
+  if (snap.state !== "awaiting_deposit") {
+    return {
+      ...base,
+      resumable: false,
+      outcome: "not_payable",
+      code: "ORDER_NOT_RESUMABLE",
+      exitCode: EXIT_ERROR,
+      message: `This order is in state "${snap.state}" and cannot be paid now. ${statusGuidance(snap)}`
+    };
+  }
+  if (!snap.sendWindow?.ok) {
+    return {
+      ...base,
+      resumable: false,
+      outcome: "expired",
+      code: snap.sendWindow?.code ?? "SEND_WINDOW_CLOSED",
+      exitCode: EXIT_ERROR,
+      message: `${snap.sendWindow?.reason ?? "Not enough time is left to pay this order safely."} Do not fund it. Let it expire unfunded, then create a new order for the same link.`
+    };
+  }
+  return { ...base, resumable: true, outcome: "awaiting_deposit", code: null, exitCode: EXIT_OK, message: null };
+}
 async function main(argv) {
   const args = parseArgs(argv);
-  const rozoPaymentId = args["rozo-payment-id"] || (isRozoPaymentId(args._[0]) ? args._[0] : null);
-  const linkId = args["link-id"] || (!rozoPaymentId ? args._[0] : null);
-  const provider = args.provider ? String(args.provider) : null;
-  if (provider && provider !== "bitrefill" && provider !== "coinbase") {
-    usage("--provider must be coinbase or bitrefill");
+  const rozoPaymentId = args["rozo-payment-id"] || args._[0];
+  if (!rozoPaymentId || rozoPaymentId === true) usage("Required: <rozoPaymentId> (the order id printed by pay)");
+  if (!isRozoPaymentId(String(rozoPaymentId))) {
+    usage("resume takes the order id (rozoPaymentId, a UUID) printed by pay, not a payment link.");
   }
-  if (provider === "bitrefill" && !rozoPaymentId) {
-    usage("A Bitrefill order is tracked by --rozo-payment-id <uuid>.");
+  const id = String(rozoPaymentId);
+  const confirmed = Boolean(args.confirm);
+  let blacklist;
+  try {
+    blacklist = loadBlacklist();
+  } catch (err) {
+    throw new SkillError("BLACKLIST_UNAVAILABLE", `Compromised-address list unusable: ${err.message} Refusing to proceed.`);
   }
-  if (!rozoPaymentId && !linkId) {
-    usage("Required: --rozo-payment-id <uuid> and/or --link-id <pl_* | paymentSession_*>");
+  const snap = await snapshot({ rozoPaymentId: id });
+  const verdict = resumeVerdict(snap);
+  if (!verdict.resumable) {
+    emit(
+      {
+        success: verdict.exitCode === EXIT_OK,
+        step: "resume",
+        resumable: false,
+        outcome: verdict.outcome,
+        rozoPaymentId: id,
+        linkId: verdict.linkId,
+        state: verdict.state,
+        moneyDetected: verdict.moneyDetected,
+        ...verdict.exitCode === EXIT_OK ? { message: verdict.message } : { error: { code: verdict.code, message: verdict.message } },
+        payin: snap.payin,
+        ...verdict.exitCode === EXIT_OK ? {} : { support: SUPPORT }
+      },
+      verdict.exitCode
+    );
   }
-  const watch = Boolean(args.watch);
-  const timeoutMs = Math.max(0, Number(args.timeout ?? 600) * 1e3);
-  const deadline = Date.now() + timeoutMs;
-  let result = await snapshot({ rozoPaymentId, linkId, provider });
-  const history = [{ at: (/* @__PURE__ */ new Date()).toISOString(), state: result.state }];
-  while (watch && !result.terminal && !result.escalate && !result.unknown && Date.now() < deadline) {
-    await sleep(POLL_INTERVAL_MS);
-    const next = await snapshot({ rozoPaymentId: result.rozoPaymentId || rozoPaymentId, linkId, provider });
-    if (next.state !== result.state) history.push({ at: (/* @__PURE__ */ new Date()).toISOString(), state: next.state });
-    result = next;
+  const payment = await getPayment(id);
+  const source = payment?.source || {};
+  const guard = reuseGuard({ payment, requested: { chainId: source.chainId, tokenSymbol: source.tokenSymbol }, reused: true });
+  if (!guard.ok) {
+    emit(
+      {
+        success: false,
+        step: "resume",
+        resumable: false,
+        outcome: guard.moneyDetected ? "paid_in_progress" : "not_payable",
+        rozoPaymentId: id,
+        moneyDetected: guard.moneyDetected,
+        error: { code: guard.code, message: guard.reason },
+        guidance: guard.moneyDetected ? "A payment for this order was detected. Do NOT pay again." : "This order cannot be paid as it stands. Do not fund it.",
+        support: SUPPORT
+      },
+      EXIT_ERROR
+    );
   }
-  const guidance = statusGuidance(result);
-  const unresolved = watch && !result.terminal && !result.escalate && !result.unknown;
-  const failed = result.escalate || result.unknown || !result.authoritativeView;
-  const paymentOutcome = paymentOutcomeFor(result);
-  emit(
-    {
-      // `success` keeps its historical meaning (the query produced a clean
-      // answer). It is NOT "the invoice is paid": read paymentOutcome.
-      success: !failed,
-      schemaVersion: SCHEMA_VERSION,
-      operationOk: !result.unknown,
-      paymentOutcome,
-      nextAction: nextActionFor(result, paymentOutcome),
-      step: "status",
-      ...result,
-      history,
-      guidance,
-      timedOut: unresolved,
-      // Anything short of a clean answer gets a human contact.
-      ...failed || unresolved ? { support: SUPPORT } : {}
+  const finalWindow = checkExpiry({
+    now: Date.now(),
+    chainId: source.chainId,
+    intentExpiresAt: payment?.expiresAt ?? snap.sendWindow?.deadlineMs,
+    coinbaseExpiry: snap.sendWindow?.deadlineMs
+  });
+  if (!finalWindow.ok) {
+    emit(
+      {
+        success: false,
+        step: "resume",
+        resumable: false,
+        outcome: "expired",
+        rozoPaymentId: id,
+        moneyDetected: false,
+        error: { code: finalWindow.code, message: finalWindow.reason },
+        guidance: "Not enough time is left to pay this order safely. Do not fund it; let it expire unfunded and create a new order.",
+        support: SUPPORT
+      },
+      EXIT_ERROR
+    );
+  }
+  const lightning = String(source.chainId) === "lightning";
+  if (!lightning) {
+    try {
+      assertNotBlacklisted(
+        [{ address: source.receiverAddress, family: chainFamily(source.chainId), role: "deposit address" }],
+        blacklist
+      );
+    } catch (err) {
+      emit(
+        {
+          success: false,
+          step: "resume",
+          resumable: false,
+          rozoPaymentId: id,
+          error: { code: err.code, message: err.message },
+          guidance: "Do NOT send anything. Report this to the operator immediately.",
+          support: SUPPORT
+        },
+        EXIT_ERROR
+      );
+    }
+  }
+  const expiresAt = payment?.expiresAt ?? snap.expiry?.expiresAt ?? null;
+  const msRemaining = expiresAt ? Date.parse(expiresAt) - Date.now() : NaN;
+  const expiresIn = Number.isFinite(msRemaining) ? formatRemaining(msRemaining) : null;
+  const paymentLink = payment?.paymentLink ?? localPaymentLink(id);
+  const bolt11 = source.lnInvoice ?? payment?.lnInvoice ?? null;
+  emit({
+    success: true,
+    step: "resume",
+    resumable: true,
+    outcome: "awaiting_deposit",
+    confirmed,
+    rozoPaymentId: id,
+    linkId: snap.linkId ?? payment?.orderId ?? null,
+    provider: snap.provider,
+    state: snap.state,
+    // Hosted pay page for this order: a human can open it and pay from there.
+    // Shown in full only for Rozo's own pay-page hosts; anything else is
+    // reduced to its host by the normal output redaction.
+    paymentLink: publicPayPage(paymentLink),
+    deposit: confirmed ? {
+      chainId: source.chainId,
+      chain: chainName(source.chainId),
+      tokenSymbol: source.tokenSymbol,
+      tokenAddress: source.tokenAddress || null,
+      receiverAddress: lightning ? null : source.receiverAddress,
+      receiverMemo: source.receiverMemo ?? null,
+      receiverMemoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
+      amount: source.amount,
+      amountUnit: source.amountUnit ?? null,
+      isSats: isSatsUnit(source.amountUnit),
+      lnInvoice: bolt11 || null,
+      payTo: guard.deposit.payTo,
+      expiresAt,
+      expiresIn
+    } : null,
+    depositWithheld: !confirmed,
+    display: {
+      chain: chainName(source.chainId),
+      token: source.tokenSymbol,
+      amount: formatAmount(source),
+      isSats: isSatsUnit(source.amountUnit),
+      payToMasked: maskAddress(guard.deposit.payTo),
+      receiverMemoMasked: maskMemo(source.receiverMemo),
+      hasMemo: Boolean(source.receiverMemo),
+      memoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null
     },
-    failed ? EXIT_ERROR : unresolved ? EXIT_UNCONFIRMED : 0
-  );
+    expiry: { expiresAt, expiresIn, minutesOfSlack: snap.sendWindow?.minutesOfSlack ?? null },
+    note: confirmed ? "Send exactly once, exactly this amount, on this chain. Then: rozo-checkout status <id> --watch" : "Deposit address withheld. Confirm the chain, token and amount with the payer, then re-run with --confirm, or open paymentLink."
+  });
 }
 async function run(argv = process.argv.slice(2)) {
   return main(argv);
 }
 
-// scripts/src/bin/status.mjs
+// scripts/src/bin/resume.mjs
 run().catch((err) => fail(err));

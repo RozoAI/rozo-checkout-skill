@@ -17,6 +17,7 @@ import { createRequire } from 'node:module';
 import { getJson, postJson } from './http.mjs';
 import { SkillError } from './output.mjs';
 import { normalizeUtmSource } from './utm.mjs';
+import { attributionIdentity } from './identity.mjs';
 
 // This module is published bundled into scripts/dist/, one directory shallower
 // than its home at scripts/src/lib/, so package.json sits at a different depth
@@ -67,11 +68,21 @@ export const ATTRIBUTION_CLIENT = `rozo-checkout-skill/${PKG_VERSION}`;
  * The `attribution` object sent on create-invoice. An explicit `utmSource`
  * (the --utm-source flag) wins over ROZO_CHECKOUT_UTM_SOURCE; an invalid or
  * empty value omits the key rather than falling back or failing.
+ *
+ * It also carries the anonymous `install_id` and, when an OpenRouter
+ * identifier is present locally, its salted `account_hash` (identity.mjs).
+ * ROZO_CHECKOUT_ANON_ID=off omits both.
  */
-export function buildAttribution({ utmSource } = {}) {
+export function buildAttribution({ utmSource, identity } = {}) {
   const raw = utmSource !== undefined ? utmSource : process.env.ROZO_CHECKOUT_UTM_SOURCE;
   const utm_source = normalizeUtmSource(raw);
-  return { client: ATTRIBUTION_CLIENT, ...(utm_source ? { utm_source } : {}) };
+  const ids = identity ?? attributionIdentity();
+  return {
+    client: ATTRIBUTION_CLIENT,
+    ...(utm_source ? { utm_source } : {}),
+    ...(ids.install_id ? { install_id: ids.install_id } : {}),
+    ...(ids.account_hash ? { account_hash: ids.account_hash } : {}),
+  };
 }
 
 export const INTENTS_BASE =

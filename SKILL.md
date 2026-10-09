@@ -236,6 +236,17 @@ holds unrelated credentials. If theirs lives elsewhere, pass `--env-file
 | `ROZO_CHECKOUT_SOL_KEY` | `send-sol.js` | **Mode B only.** Raw base58 secret key or JSON byte array. For unattended automation; `~/.config/solana/id.json` is used first when present. |
 | `ROZO_CHECKOUT_RPC_<chainId>` | send scripts | optional RPC override, e.g. `ROZO_CHECKOUT_RPC_8453` |
 | `ROZO_CHECKOUT_STATE_DIR` | all | optional; defaults to `$HOME/.rozo-checkout/state` |
+| `ROZO_CHECKOUT_ANON_ID` | create scripts | optional; `off` stops sending the anonymous `install_id` and `account_hash` (see below) |
+| `OPENROUTER_API_KEY` | create scripts | **read, never sent.** If already exported, only `sha256("rozo-acct-v1:" + key)` goes out as `attribution.account_hash`. Never ask a user to set it for this. |
+
+**Anonymous attribution.** Every order carries `attribution.install_id`, a
+random UUID v4 created on first run and stored in `~/.rozo-checkout/prefs.json`
+(0600), so repeat orders from one install count as one payer. When
+`OPENROUTER_API_KEY` is in the environment, `attribution.account_hash` (lowercase
+hex sha256 of `"rozo-acct-v1:"` + the key) is added; the raw key is never sent,
+logged or stored, and an OpenRouter account id is never hashed (too guessable).
+Neither field identifies the user or grants anything. To reset the id, delete
+`~/.rozo-checkout/prefs.json`; to opt out, set `ROZO_CHECKOUT_ANON_ID=off`.
 
 Keys are read from the environment **only**. Never pass a key as a command-line
 argument, never print one, never write one into a file, a prompt or a commit
@@ -476,6 +487,21 @@ One read, nothing created or sent. It answers three questions separately:
 
 Exit codes: `0` settled · `3` still in flight or unknown · `1` expired unpaid
 or needs a human · `2` usage.
+
+**Resuming an unpaid order.** If the user created an order and did not pay
+(closed the session, lost the address), do NOT create a new one. Run:
+
+```bash
+node scripts/dist/resume.js <rozoPaymentId>            # masked summary + pay page
+node scripts/dist/resume.js <rozoPaymentId> --confirm  # full deposit block, after the user's yes
+# or: npx @rozoai/checkout resume <uuid> --json [--yes]
+```
+
+Read `resumable` and `outcome`. `awaiting_deposit` re-shows the order (same
+withholding and binding-confirmation rule as Step 4). `paid` /
+`paid_in_progress` (exit 0) means do not pay again; `expired` (exit 1) means
+follow `error.message`; `sent_locally` / `needs_attention` / `unknown` mean do
+not pay. resume only reads `invoice-status` and `payments/<id>`.
 
 Report only after `receipt` exits 0:
 

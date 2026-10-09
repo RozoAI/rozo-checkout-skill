@@ -11,6 +11,10 @@ import { ATTRIBUTION_CLIENT, buildAttribution, createInvoice, createBitrefillInv
 import { normalizeUtmSource } from '../scripts/src/lib/utm.mjs';
 import { parseCliArgs, CliError } from '../scripts/src/lib/cli-args.mjs';
 
+// The anonymous install_id / account_hash fields are covered in identity.test.mjs.
+// Off here so these shape assertions stay exact and nothing is written to ~/.rozo-checkout.
+process.env.ROZO_CHECKOUT_ANON_ID = 'off';
+
 const ENV = 'ROZO_CHECKOUT_UTM_SOURCE';
 
 function withEnv(value, fn) {

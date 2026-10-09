@@ -20544,7 +20544,7 @@ var require_dist = __commonJS({
           }
         }
       }
-      function* run8(value, struct2, options = {}) {
+      function* run9(value, struct2, options = {}) {
         const { path: path7 = [], branch = [value], coerce: coerce2 = false, mask: mask2 = false } = options;
         const ctx = { path: path7, branch, mask: mask2 };
         if (coerce2) {
@@ -20557,7 +20557,7 @@ var require_dist = __commonJS({
           yield [failure, void 0];
         }
         for (let [k, v, s] of struct2.entries(value, ctx)) {
-          const ts = run8(v, s, {
+          const ts = run9(v, s, {
             path: k === void 0 ? path7 : [...path7, k],
             branch: k === void 0 ? branch : [...branch, v],
             coerce: coerce2,
@@ -20685,7 +20685,7 @@ var require_dist = __commonJS({
         return !result[0];
       }
       function validate7(value, struct2, options = {}) {
-        const tuples = run8(value, struct2, options);
+        const tuples = run9(value, struct2, options);
         const tuple2 = shiftIterator(tuples);
         if (tuple2[0]) {
           const error = new StructError(tuple2[0], function* () {
@@ -21098,7 +21098,7 @@ var require_dist = __commonJS({
           validator(value, ctx) {
             const failures = [];
             for (const S of Structs) {
-              const [...tuples] = run8(value, S, ctx);
+              const [...tuples] = run9(value, S, ctx);
               const [first] = tuples;
               if (!first[0]) {
                 return [];
@@ -41526,6 +41526,22 @@ var TX_HASH_VALUE = /^(0x[0-9a-fA-F]{64}|[1-9A-HJ-NP-Za-km-z]{86,88})$/;
 function publicHash(value) {
   return typeof value === "string" && TX_HASH_VALUE.test(value) ? new PublicHash(value) : value;
 }
+var PUBLIC_PAY_PAGE_HOSTS = /* @__PURE__ */ new Set(["invoice.rozo.ai", "checkout.rozo.ai"]);
+var PAY_PAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function publicPayPage(value) {
+  if (typeof value !== "string") return value;
+  let u;
+  try {
+    u = new URL(value);
+  } catch {
+    return value;
+  }
+  if (u.protocol !== "https:" || u.username || u.password || u.port || !PUBLIC_PAY_PAGE_HOSTS.has(u.hostname)) return value;
+  if (u.pathname !== "/checkout") return value;
+  const id = u.searchParams.get("id");
+  if (!id || !PAY_PAGE_ID.test(id)) return value;
+  return new PublicHash(`https://${u.hostname}/checkout?id=${id.toLowerCase()}`);
+}
 function redactDeep(value) {
   if (value instanceof PublicHash) return value.value;
   if (typeof value === "string") return redact(value);
@@ -41769,8 +41785,61 @@ function normalizeUtmSource(value) {
   return s;
 }
 
+// scripts/src/lib/ids.mjs
+var IdError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+};
+var PL_RE = /(pl_[0-9a-zA-Z]+)/;
+var SESSION_RE = /(paymentSession_[A-Za-z0-9_-]+)/;
+var UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+function extractLinkId(urlOrId) {
+  if (typeof urlOrId !== "string" || !urlOrId.trim()) {
+    throw new IdError("BAD_LINK", "A Coinbase payment link URL or id is required.");
+  }
+  const s = urlOrId.trim();
+  const session = s.match(SESSION_RE);
+  if (session) return { linkId: session[1], kind: "payment_session" };
+  const link = s.match(PL_RE);
+  if (link) return { linkId: link[1], kind: "payment_link" };
+  if (/commerce\.coinbase\.com\/pay\//.test(s)) {
+    throw new IdError(
+      "LEGACY_COMMERCE_URL",
+      "commerce.coinbase.com/pay/<uuid> uses the legacy protocol; this skill does not handle it."
+    );
+  }
+  throw new IdError(
+    "BAD_LINK",
+    "Could not find a `pl_*` or `paymentSession_*` id in the supplied value."
+  );
+}
+function assertRozoPaymentId(value) {
+  const s = String(value || "").trim();
+  if (!UUID_RE.test(s)) {
+    throw new IdError("BAD_ROZO_PAYMENT_ID", "rozoPaymentId must be a UUID.");
+  }
+  return s;
+}
+function isRozoPaymentId(value) {
+  return UUID_RE.test(String(value || "").trim());
+}
+function maskAddress2(address) {
+  const s = String(address ?? "").trim();
+  if (!s) return "(none)";
+  if (s.length <= 12) return s;
+  return `${s.slice(0, 6)}...${s.slice(-4)}`;
+}
+function maskMemo(memo) {
+  const s = String(memo ?? "").trim();
+  if (!s) return null;
+  if (s.length <= 8) return s;
+  return `${s.slice(0, 4)}...${s.slice(-3)}`;
+}
+
 // scripts/src/lib/cli-args.mjs
-var COMMANDS = ["pay", "quote", "status", "receipt", "help", "version"];
+var COMMANDS = ["pay", "quote", "status", "receipt", "resume", "help", "version"];
 var CHAIN_ALIASES = {
   ethereum: "1",
   eth: "1",
@@ -41998,6 +42067,18 @@ function parseCliArgs(argv) {
     }
     return { command, target, json, provider: flags.provider };
   }
+  if (command === "resume") {
+    if (!target) {
+      throw new CliError("MISSING_TARGET", "Usage: rozo-checkout resume <rozoPaymentId>");
+    }
+    if (!isRozoPaymentId(target)) {
+      throw new CliError(
+        "BAD_VALUE",
+        "resume takes the order id (rozoPaymentId, a UUID) that pay printed, not a payment link."
+      );
+    }
+    return { command, target, json, yes: flags.yes === true };
+  }
   if (command === "status") {
     if (!target) {
       throw new CliError(
@@ -42116,6 +42197,7 @@ USAGE
   npx @rozoai/checkout quote <coinbase-link>
   npx @rozoai/checkout status <rozoPaymentId | coinbase-link>
   npx @rozoai/checkout receipt <rozoPaymentId | coinbase-link>
+  npx @rozoai/checkout resume <rozoPaymentId>
 
 COINS (--with)
   usdt-solana   usdc-solana   usdt-bnb      usdc-bnb
@@ -42179,6 +42261,20 @@ RECEIPT
   In --json output from status and receipt, read paymentOutcome and
   nextAction. The older "success" field means the query worked, not that the
   invoice is paid.
+
+RESUME
+  resume picks up an order you created earlier and did not pay yet. It reads
+  the order (nothing is created or sent), and if it is still unpaid and has
+  enough time left it prints the hosted payment page and, after you confirm
+  (or with --yes), the exact deposit instructions again. A paid order is
+  reported as paid (exit 0); an expired one says so and how to start over.
+
+PRIVACY
+  Each order carries an anonymous install id: a random UUID created on first
+  run and stored in ~/.rozo-checkout/prefs.json. If OPENROUTER_API_KEY is set,
+  a one-way salted sha256 hash of it is sent too; the key itself is never
+  sent, logged or stored. Delete prefs.json
+  to reset the id; set ROZO_CHECKOUT_ANON_ID=off to send neither.
 
 Creating an order moves no money; an unfunded order simply expires. Nothing is
 paid until you confirm, and --send is required before anything is signed.
@@ -42601,7 +42697,42 @@ function prefsPath() {
   const root = process.env.ROZO_CHECKOUT_STATE_DIR ? path2.dirname(stateRoot()) : path2.join(os2.homedir(), ".rozo-checkout");
   return path2.join(root, "prefs.json");
 }
-var ALLOWED = ["lastPayerAddress", "lastAddressFamily", "lastPreset", "updatedAt"];
+var ALLOWED = ["lastPayerAddress", "lastAddressFamily", "lastPreset", "installId", "updatedAt"];
+var INSTALL_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+var LOCK_WAIT_MS2 = 2e3;
+var LOCK_STALE_MS2 = 1e4;
+function sleepSync2(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function withPrefsLock(fn) {
+  const lock = `${prefsPath()}.lock`;
+  fs2.mkdirSync(path2.dirname(lock), { recursive: true, mode: 448 });
+  const deadline = Date.now() + LOCK_WAIT_MS2;
+  for (; ; ) {
+    try {
+      fs2.closeSync(fs2.openSync(lock, "wx", 384));
+      break;
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+    }
+    try {
+      if (Date.now() - fs2.statSync(lock).mtimeMs > LOCK_STALE_MS2) {
+        fs2.rmSync(lock, { force: true });
+        continue;
+      }
+    } catch {
+      continue;
+    }
+    if (Date.now() > deadline) return void 0;
+    sleepSync2(10);
+  }
+  try {
+    return fn();
+  } finally {
+    fs2.rmSync(lock, { force: true });
+  }
+}
+var USER_FIELDS = ["lastPayerAddress", "lastAddressFamily", "lastPreset"];
 function readPrefs() {
   let raw;
   try {
@@ -42623,21 +42754,26 @@ function readPrefs() {
   }
   return Object.keys(out2).length ? out2 : null;
 }
-function savePrefs(update) {
-  const existing = readPrefs() || {};
-  const next = { ...existing };
-  for (const k of ALLOWED) {
-    if (k === "updatedAt") continue;
-    const v = update?.[k];
-    if (typeof v === "string" && v.trim()) next[k] = v.trim();
-  }
-  next.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+function savePrefs(update, { installIdIfAbsent } = {}) {
   try {
-    writeAtomic(prefsPath(), next);
+    const saved = withPrefsLock(() => {
+      const existing = readPrefs() || {};
+      const next = { ...existing };
+      for (const k of USER_FIELDS) {
+        const v = update?.[k];
+        if (typeof v === "string" && v.trim()) next[k] = v.trim();
+      }
+      if (!INSTALL_ID_RE.test(String(existing.installId ?? "")) && INSTALL_ID_RE.test(String(installIdIfAbsent ?? ""))) {
+        next.installId = installIdIfAbsent;
+      }
+      next.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      writeAtomic(prefsPath(), next);
+      return next;
+    });
+    return saved ?? null;
   } catch {
     return null;
   }
-  return next;
 }
 
 // scripts/src/lib/blacklist.mjs
@@ -42761,59 +42897,6 @@ function assertNotBlacklisted(targets, blacklist) {
     }
   }
   return true;
-}
-
-// scripts/src/lib/ids.mjs
-var IdError = class extends Error {
-  constructor(code, message) {
-    super(message);
-    this.code = code;
-  }
-};
-var PL_RE = /(pl_[0-9a-zA-Z]+)/;
-var SESSION_RE = /(paymentSession_[A-Za-z0-9_-]+)/;
-var UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-function extractLinkId(urlOrId) {
-  if (typeof urlOrId !== "string" || !urlOrId.trim()) {
-    throw new IdError("BAD_LINK", "A Coinbase payment link URL or id is required.");
-  }
-  const s = urlOrId.trim();
-  const session = s.match(SESSION_RE);
-  if (session) return { linkId: session[1], kind: "payment_session" };
-  const link = s.match(PL_RE);
-  if (link) return { linkId: link[1], kind: "payment_link" };
-  if (/commerce\.coinbase\.com\/pay\//.test(s)) {
-    throw new IdError(
-      "LEGACY_COMMERCE_URL",
-      "commerce.coinbase.com/pay/<uuid> uses the legacy protocol; this skill does not handle it."
-    );
-  }
-  throw new IdError(
-    "BAD_LINK",
-    "Could not find a `pl_*` or `paymentSession_*` id in the supplied value."
-  );
-}
-function assertRozoPaymentId(value) {
-  const s = String(value || "").trim();
-  if (!UUID_RE.test(s)) {
-    throw new IdError("BAD_ROZO_PAYMENT_ID", "rozoPaymentId must be a UUID.");
-  }
-  return s;
-}
-function isRozoPaymentId(value) {
-  return UUID_RE.test(String(value || "").trim());
-}
-function maskAddress2(address) {
-  const s = String(address ?? "").trim();
-  if (!s) return "(none)";
-  if (s.length <= 12) return s;
-  return `${s.slice(0, 6)}...${s.slice(-4)}`;
-}
-function maskMemo(memo) {
-  const s = String(memo ?? "").trim();
-  if (!s) return null;
-  if (s.length <= 8) return s;
-  return `${s.slice(0, 4)}...${s.slice(-3)}`;
 }
 
 // scripts/src/lib/expiry.mjs
@@ -54603,6 +54686,44 @@ function postJson(url, body, opts) {
   return request("POST", url, { ...opts, body });
 }
 
+// scripts/src/lib/identity.mjs
+import crypto7 from "node:crypto";
+var ACCOUNT_HASH_PREFIX = "rozo-acct-v1:";
+function isValidInstallId(value) {
+  return typeof value === "string" && INSTALL_ID_RE.test(value);
+}
+function attributionDisabled(env = process.env) {
+  const v = String(env.ROZO_CHECKOUT_ANON_ID ?? "").trim().toLowerCase();
+  return ["off", "0", "false", "no"].includes(v);
+}
+function getOrCreateInstallId() {
+  const existing = readPrefs()?.installId;
+  if (isValidInstallId(existing)) return existing;
+  const saved = savePrefs({}, { installIdIfAbsent: crypto7.randomUUID().toLowerCase() });
+  if (isValidInstallId(saved?.installId)) return saved.installId;
+  const onDisk = readPrefs()?.installId;
+  return isValidInstallId(onDisk) ? onDisk : crypto7.randomUUID().toLowerCase();
+}
+function hashAccount(raw) {
+  return crypto7.createHash("sha256").update(`${ACCOUNT_HASH_PREFIX}${raw}`, "utf8").digest("hex");
+}
+function rawApiKey(env) {
+  const v = typeof env.OPENROUTER_API_KEY === "string" ? env.OPENROUTER_API_KEY.trim() : "";
+  return v && v.length <= 1024 ? v : null;
+}
+function attributionIdentity(env = process.env) {
+  if (attributionDisabled(env)) return {};
+  const out2 = {};
+  try {
+    const id = getOrCreateInstallId();
+    if (isValidInstallId(id)) out2.install_id = id;
+  } catch {
+  }
+  const raw = rawApiKey(env);
+  if (raw) out2.account_hash = hashAccount(raw);
+  return out2;
+}
+
 // scripts/src/lib/api.mjs
 var PKG_VERSION = (() => {
   const requireFrom = createRequire(import.meta.url);
@@ -54618,10 +54739,16 @@ var PKG_VERSION = (() => {
 var MPP_BASE = process.env.ROZO_CHECKOUT_MPP_BASE || "https://apiserver.mpprouter.dev/v1/services/rozo-agent-api";
 var CLIENT_LABEL = `rozo-checkout-cli/${PKG_VERSION}`;
 var ATTRIBUTION_CLIENT = `rozo-checkout-skill/${PKG_VERSION}`;
-function buildAttribution({ utmSource } = {}) {
+function buildAttribution({ utmSource, identity } = {}) {
   const raw = utmSource !== void 0 ? utmSource : process.env.ROZO_CHECKOUT_UTM_SOURCE;
   const utm_source = normalizeUtmSource(raw);
-  return { client: ATTRIBUTION_CLIENT, ...utm_source ? { utm_source } : {} };
+  const ids = identity ?? attributionIdentity();
+  return {
+    client: ATTRIBUTION_CLIENT,
+    ...utm_source ? { utm_source } : {},
+    ...ids.install_id ? { install_id: ids.install_id } : {},
+    ...ids.account_hash ? { account_hash: ids.account_hash } : {}
+  };
 }
 var INTENTS_BASE = process.env.ROZO_CHECKOUT_INTENTS_BASE || "https://intentapiv4.rozo.ai/functions/v1/payment-api";
 async function quoteInvoice({ url, linkId }) {
@@ -56168,7 +56295,7 @@ function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, no
       intentExpiresAt: payment?.expiresAt ?? deadline,
       coinbaseExpiry: deadline
     });
-    return expiry2.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry2.msOfSlack / 6e4) } : { ok: false, code: expiry2.code, reason: expiry2.reason };
+    return expiry2.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry2.msOfSlack / 6e4), deadlineMs: expiry2.effectiveDeadlineMs } : { ok: false, code: expiry2.code, reason: expiry2.reason };
   }
   if (!status) {
     return { ok: false, code: "LINK_PAYABILITY_UNKNOWN", reason: "The Coinbase link state could not be read." };
@@ -56181,7 +56308,7 @@ function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, no
     intentExpiresAt: payment?.expiresAt ?? status?.rozoPayment?.expiresAt,
     coinbaseExpiry: status?.coinbase?.preApprovalExpiry
   });
-  return expiry.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4) } : { ok: false, code: expiry.code, reason: expiry.reason };
+  return expiry.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4), deadlineMs: expiry.effectiveDeadlineMs } : { ok: false, code: expiry.code, reason: expiry.reason };
 }
 async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   let provider = resolveProvider(explicitProvider, rozoPaymentId);
@@ -56409,6 +56536,241 @@ async function main5(argv) {
 }
 async function run5(argv = process.argv.slice(2)) {
   return main5(argv);
+}
+
+// scripts/src/resume.mjs
+var PAID_STATES = /* @__PURE__ */ new Set([
+  "payin_detected",
+  "payin_confirmed",
+  "bridging",
+  "paying_coinbase",
+  "settled"
+]);
+var EXPIRED_STATES = /* @__PURE__ */ new Set(["expired_unfunded", "invoice_expired"]);
+function localPaymentLink(id) {
+  try {
+    return readState(id)?.paymentLink ?? null;
+  } catch {
+    return null;
+  }
+}
+function resumeVerdict(snap) {
+  const base = {
+    rozoPaymentId: snap.rozoPaymentId,
+    linkId: snap.linkId ?? null,
+    provider: snap.provider,
+    state: snap.state,
+    moneyDetected: Boolean(snap.moneyDetected)
+  };
+  if (snap.escalate) {
+    return { ...base, resumable: false, outcome: "needs_attention", code: "ORDER_NEEDS_ATTENTION", exitCode: EXIT_ERROR, message: statusGuidance(snap) };
+  }
+  if (snap.unknown || !snap.authoritativeView) {
+    return { ...base, resumable: false, outcome: "unknown", code: "ORDER_STATE_UNKNOWN", exitCode: EXIT_ERROR, message: statusGuidance(snap) };
+  }
+  if (snap.moneyDetected || PAID_STATES.has(snap.state)) {
+    const done = snap.state === "settled";
+    return {
+      ...base,
+      resumable: false,
+      outcome: done ? "paid" : "paid_in_progress",
+      code: "ORDER_ALREADY_PAID",
+      exitCode: EXIT_OK,
+      message: done ? "This order is already paid and settled. Nothing to resume. Do not pay again." : `A payment for this order was already detected (state: ${snap.state}). Do NOT pay again. Follow it with: rozo-checkout status ${snap.rozoPaymentId} --watch`
+    };
+  }
+  if (EXPIRED_STATES.has(snap.state)) {
+    return {
+      ...base,
+      resumable: false,
+      outcome: "expired",
+      code: "ORDER_EXPIRED",
+      exitCode: EXIT_ERROR,
+      message: snap.provider === "bitrefill" ? "This order expired before any funds arrived. Nothing was lost. Create a fresh Bitrefill invoice and run pay again." : EXPIRED_UNFUNDED_GUIDANCE
+    };
+  }
+  if (snap.localSend) {
+    return {
+      ...base,
+      resumable: false,
+      outcome: "sent_locally",
+      code: "ALREADY_SENT",
+      exitCode: EXIT_ERROR,
+      message: `This machine already recorded a send for this order (${snap.localSend.status}). Do NOT pay again. Check it with: rozo-checkout status ${snap.rozoPaymentId}`
+    };
+  }
+  if (snap.state !== "awaiting_deposit") {
+    return {
+      ...base,
+      resumable: false,
+      outcome: "not_payable",
+      code: "ORDER_NOT_RESUMABLE",
+      exitCode: EXIT_ERROR,
+      message: `This order is in state "${snap.state}" and cannot be paid now. ${statusGuidance(snap)}`
+    };
+  }
+  if (!snap.sendWindow?.ok) {
+    return {
+      ...base,
+      resumable: false,
+      outcome: "expired",
+      code: snap.sendWindow?.code ?? "SEND_WINDOW_CLOSED",
+      exitCode: EXIT_ERROR,
+      message: `${snap.sendWindow?.reason ?? "Not enough time is left to pay this order safely."} Do not fund it. Let it expire unfunded, then create a new order for the same link.`
+    };
+  }
+  return { ...base, resumable: true, outcome: "awaiting_deposit", code: null, exitCode: EXIT_OK, message: null };
+}
+async function main6(argv) {
+  const args = parseArgs(argv);
+  const rozoPaymentId = args["rozo-payment-id"] || args._[0];
+  if (!rozoPaymentId || rozoPaymentId === true) usage("Required: <rozoPaymentId> (the order id printed by pay)");
+  if (!isRozoPaymentId(String(rozoPaymentId))) {
+    usage("resume takes the order id (rozoPaymentId, a UUID) printed by pay, not a payment link.");
+  }
+  const id = String(rozoPaymentId);
+  const confirmed = Boolean(args.confirm);
+  let blacklist;
+  try {
+    blacklist = loadBlacklist();
+  } catch (err) {
+    throw new SkillError("BLACKLIST_UNAVAILABLE", `Compromised-address list unusable: ${err.message} Refusing to proceed.`);
+  }
+  const snap = await snapshot({ rozoPaymentId: id });
+  const verdict = resumeVerdict(snap);
+  if (!verdict.resumable) {
+    emit(
+      {
+        success: verdict.exitCode === EXIT_OK,
+        step: "resume",
+        resumable: false,
+        outcome: verdict.outcome,
+        rozoPaymentId: id,
+        linkId: verdict.linkId,
+        state: verdict.state,
+        moneyDetected: verdict.moneyDetected,
+        ...verdict.exitCode === EXIT_OK ? { message: verdict.message } : { error: { code: verdict.code, message: verdict.message } },
+        payin: snap.payin,
+        ...verdict.exitCode === EXIT_OK ? {} : { support: SUPPORT }
+      },
+      verdict.exitCode
+    );
+  }
+  const payment = await getPayment(id);
+  const source = payment?.source || {};
+  const guard = reuseGuard({ payment, requested: { chainId: source.chainId, tokenSymbol: source.tokenSymbol }, reused: true });
+  if (!guard.ok) {
+    emit(
+      {
+        success: false,
+        step: "resume",
+        resumable: false,
+        outcome: guard.moneyDetected ? "paid_in_progress" : "not_payable",
+        rozoPaymentId: id,
+        moneyDetected: guard.moneyDetected,
+        error: { code: guard.code, message: guard.reason },
+        guidance: guard.moneyDetected ? "A payment for this order was detected. Do NOT pay again." : "This order cannot be paid as it stands. Do not fund it.",
+        support: SUPPORT
+      },
+      EXIT_ERROR
+    );
+  }
+  const finalWindow = checkExpiry({
+    now: Date.now(),
+    chainId: source.chainId,
+    intentExpiresAt: payment?.expiresAt ?? snap.sendWindow?.deadlineMs,
+    coinbaseExpiry: snap.sendWindow?.deadlineMs
+  });
+  if (!finalWindow.ok) {
+    emit(
+      {
+        success: false,
+        step: "resume",
+        resumable: false,
+        outcome: "expired",
+        rozoPaymentId: id,
+        moneyDetected: false,
+        error: { code: finalWindow.code, message: finalWindow.reason },
+        guidance: "Not enough time is left to pay this order safely. Do not fund it; let it expire unfunded and create a new order.",
+        support: SUPPORT
+      },
+      EXIT_ERROR
+    );
+  }
+  const lightning = String(source.chainId) === "lightning";
+  if (!lightning) {
+    try {
+      assertNotBlacklisted(
+        [{ address: source.receiverAddress, family: chainFamily(source.chainId), role: "deposit address" }],
+        blacklist
+      );
+    } catch (err) {
+      emit(
+        {
+          success: false,
+          step: "resume",
+          resumable: false,
+          rozoPaymentId: id,
+          error: { code: err.code, message: err.message },
+          guidance: "Do NOT send anything. Report this to the operator immediately.",
+          support: SUPPORT
+        },
+        EXIT_ERROR
+      );
+    }
+  }
+  const expiresAt = payment?.expiresAt ?? snap.expiry?.expiresAt ?? null;
+  const msRemaining = expiresAt ? Date.parse(expiresAt) - Date.now() : NaN;
+  const expiresIn = Number.isFinite(msRemaining) ? formatRemaining(msRemaining) : null;
+  const paymentLink = payment?.paymentLink ?? localPaymentLink(id);
+  const bolt11 = source.lnInvoice ?? payment?.lnInvoice ?? null;
+  emit({
+    success: true,
+    step: "resume",
+    resumable: true,
+    outcome: "awaiting_deposit",
+    confirmed,
+    rozoPaymentId: id,
+    linkId: snap.linkId ?? payment?.orderId ?? null,
+    provider: snap.provider,
+    state: snap.state,
+    // Hosted pay page for this order: a human can open it and pay from there.
+    // Shown in full only for Rozo's own pay-page hosts; anything else is
+    // reduced to its host by the normal output redaction.
+    paymentLink: publicPayPage(paymentLink),
+    deposit: confirmed ? {
+      chainId: source.chainId,
+      chain: chainName(source.chainId),
+      tokenSymbol: source.tokenSymbol,
+      tokenAddress: source.tokenAddress || null,
+      receiverAddress: lightning ? null : source.receiverAddress,
+      receiverMemo: source.receiverMemo ?? null,
+      receiverMemoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
+      amount: source.amount,
+      amountUnit: source.amountUnit ?? null,
+      isSats: isSatsUnit(source.amountUnit),
+      lnInvoice: bolt11 || null,
+      payTo: guard.deposit.payTo,
+      expiresAt,
+      expiresIn
+    } : null,
+    depositWithheld: !confirmed,
+    display: {
+      chain: chainName(source.chainId),
+      token: source.tokenSymbol,
+      amount: formatAmount(source),
+      isSats: isSatsUnit(source.amountUnit),
+      payToMasked: maskAddress2(guard.deposit.payTo),
+      receiverMemoMasked: maskMemo(source.receiverMemo),
+      hasMemo: Boolean(source.receiverMemo),
+      memoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null
+    },
+    expiry: { expiresAt, expiresIn, minutesOfSlack: snap.sendWindow?.minutesOfSlack ?? null },
+    note: confirmed ? "Send exactly once, exactly this amount, on this chain. Then: rozo-checkout status <id> --watch" : "Deposit address withheld. Confirm the chain, token and amount with the payer, then re-run with --confirm, or open paymentLink."
+  });
+}
+async function run6(argv = process.argv.slice(2)) {
+  return main6(argv);
 }
 
 // scripts/src/lib/passphrase.mjs
@@ -57127,7 +57489,7 @@ function chainDef(chainId, rpcUrl) {
     rpcUrls: { default: { http: [rpcUrl] } }
   });
 }
-async function main6(argv) {
+async function main7(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = assertRozoPaymentId(args["rozo-payment-id"] || args._[0]);
   assertNoTrackedDotEnv();
@@ -57370,8 +57732,8 @@ async function main6(argv) {
     outcome.exitCode
   );
 }
-async function run6(argv = process.argv.slice(2)) {
-  return main6(argv);
+async function run7(argv = process.argv.slice(2)) {
+  return main7(argv);
 }
 
 // scripts/src/send-sol.mjs
@@ -57441,7 +57803,7 @@ function createTransferCheckedInstruction(source, mint, destination, owner, amou
 var MEMO_PROGRAM_ID = new import_web32.PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 var MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 var B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-async function main7(argv) {
+async function main8(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = assertRozoPaymentId(args["rozo-payment-id"] || args._[0]);
   assertNoTrackedDotEnv();
@@ -57740,8 +58102,8 @@ function base58Encode(buf) {
   }
   return out2;
 }
-async function run7(argv = process.argv.slice(2)) {
-  return main7(argv);
+async function run8(argv = process.argv.slice(2)) {
+  return main8(argv);
 }
 
 // scripts/src/cli.mjs
@@ -57981,6 +58343,62 @@ async function cmdReceipt(opts) {
   out();
   return exitCode;
 }
+async function cmdResume(opts) {
+  if (!opts.json) out(dim("  Reading the order\u2026 (no money moves)"));
+  const first = await step(run6, [opts.target]);
+  let payload = first.payload;
+  let exitCode = first.exitCode;
+  if (payload.resumable && !opts.json) {
+    out();
+    out(`  Order     ${payload.rozoPaymentId}  ${dim("(unpaid)")}`);
+    out(`  You send  ${bold(payload.display?.amount)} on ${bold(payload.display?.chain)}`);
+    out(`  To        ${payload.display?.payToMasked} ${dim("(full address shown after you confirm)")}`);
+    if (payload.display?.hasMemo) {
+      out(`  Memo      ${payload.display.receiverMemoMasked} ${dim(`(${payload.display.memoType})`)}`);
+    }
+    if (payload.expiry?.expiresIn) out(`  Expires   in ${bold(payload.expiry.expiresIn)}`);
+    if (payload.paymentLink) out(`  Pay page  ${payload.paymentLink}`);
+    out();
+  }
+  if (payload.resumable) {
+    let go = opts.yes;
+    if (!go && !opts.json && process.stdin.isTTY) {
+      go = await askYesNo(`  ${bold("Show the deposit details to pay this now?")} [y/N] `);
+    }
+    if (go) {
+      const second = await step(run6, [opts.target, "--confirm"]);
+      payload = second.payload;
+      exitCode = second.exitCode;
+    }
+  }
+  if (opts.json) {
+    printJson(payload);
+    return exitCode;
+  }
+  if (payload.error) {
+    printError(payload);
+    printMoneyWarning(payload);
+    printSupport();
+    out();
+    return exitCode;
+  }
+  if (!payload.resumable) {
+    out();
+    out(`  State   ${stateLabel(payload.state)}`);
+    out(`  ${payload.message}`);
+    out();
+    return exitCode;
+  }
+  if (payload.deposit) {
+    printDeposit(payload.deposit, opts);
+    out(dim(`  Then: rozo-checkout status ${payload.rozoPaymentId} --watch`));
+    out();
+  } else {
+    out(dim("  Deposit details withheld. Open the pay page above, or re-run with --yes."));
+    out();
+  }
+  return exitCode;
+}
 function outcomeLabel(outcome) {
   if (outcome === "settled") return green(bold(outcome));
   if (outcome === "needs_attention" || outcome === "unknown") return red(bold(outcome));
@@ -58171,7 +58589,7 @@ async function cmdPay(opts) {
   }
   if (opts.send) {
     const family = chainFamily(deposit.chainId);
-    const sender = family === "evm" ? run6 : family === "solana" ? run7 : null;
+    const sender = family === "evm" ? run7 : family === "solana" ? run8 : null;
     if (!sender) {
       const payload = formatFailure({
         code: "SEND_UNSUPPORTED_CHAIN",
@@ -58283,7 +58701,7 @@ function printDeposit(deposit, opts) {
   out(dim("  Send it exactly once."));
   out();
 }
-async function main8() {
+async function main9() {
   let opts;
   try {
     opts = parseCliArgs(process.argv.slice(2));
@@ -58314,6 +58732,8 @@ async function main8() {
       return cmdStatus(opts);
     case "receipt":
       return cmdReceipt(opts);
+    case "resume":
+      return cmdResume(opts);
     case "pay":
       try {
         return await cmdPay(opts);
@@ -58334,7 +58754,7 @@ async function main8() {
       return EXIT_USAGE;
   }
 }
-main8().then((code) => process.exit(code ?? EXIT_OK)).catch((err) => {
+main9().then((code) => process.exit(code ?? EXIT_OK)).catch((err) => {
   const payload = formatFailure(err);
   if (process.argv.includes("--json")) printJson(payload);
   else {

@@ -82,7 +82,7 @@ export function sendWindowFor({ provider, chainId, payment, status, bitrefillExp
       coinbaseExpiry: deadline,
     });
     return expiry.ok
-      ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 60000) }
+      ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 60000), deadlineMs: expiry.effectiveDeadlineMs }
       : { ok: false, code: expiry.code, reason: expiry.reason };
   }
   if (!status) {
@@ -97,7 +97,7 @@ export function sendWindowFor({ provider, chainId, payment, status, bitrefillExp
     coinbaseExpiry: status?.coinbase?.preApprovalExpiry,
   });
   return expiry.ok
-    ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 60000) }
+    ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 60000), deadlineMs: expiry.effectiveDeadlineMs }
     : { ok: false, code: expiry.code, reason: expiry.reason };
 }
 

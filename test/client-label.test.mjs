@@ -11,6 +11,10 @@ import { createRequire } from 'node:module';
 
 import { ATTRIBUTION_CLIENT, CLIENT_LABEL, createInvoice, MPP_BASE } from '../scripts/src/lib/api.mjs';
 
+// The anonymous install_id / account_hash fields are covered in identity.test.mjs.
+// Off here so these shape assertions stay exact and nothing is written to ~/.rozo-checkout.
+process.env.ROZO_CHECKOUT_ANON_ID = 'off';
+
 const require_ = createRequire(import.meta.url);
 const pkg = require_('../package.json');
 

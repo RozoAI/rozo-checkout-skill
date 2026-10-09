@@ -95,6 +95,36 @@ export function publicHash(value) {
   return typeof value === 'string' && TX_HASH_VALUE.test(value) ? new PublicHash(value) : value;
 }
 
+/**
+ * Hosts whose pay-page URLs our own code may show in full. The pay page link
+ * for an order (payments/<id>.paymentLink) carries only the public order id,
+ * and a human needs the whole URL to open it. Same explicit-marker rule as
+ * publicHash: only code that read the field from a known response wraps it.
+ *
+ * Only the known shape is let through, and it is rebuilt rather than echoed:
+ * https://<allowed host>/checkout?id=<uuid>. Any other query parameter or
+ * fragment is dropped, so a token added to this URL later can never be
+ * printed. Anything else stays redacted to its host.
+ */
+const PUBLIC_PAY_PAGE_HOSTS = new Set(['invoice.rozo.ai', 'checkout.rozo.ai']);
+const PAY_PAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Mark a Rozo pay-page URL as public, reduced to its id. Anything else is returned unchanged (and gets redacted). */
+export function publicPayPage(value) {
+  if (typeof value !== 'string') return value;
+  let u;
+  try {
+    u = new URL(value);
+  } catch {
+    return value;
+  }
+  if (u.protocol !== 'https:' || u.username || u.password || u.port || !PUBLIC_PAY_PAGE_HOSTS.has(u.hostname)) return value;
+  if (u.pathname !== '/checkout') return value;
+  const id = u.searchParams.get('id');
+  if (!id || !PAY_PAGE_ID.test(id)) return value;
+  return new PublicHash(`https://${u.hostname}/checkout?id=${id.toLowerCase()}`);
+}
+
 export function redactDeep(value) {
   if (value instanceof PublicHash) return value.value;
   if (typeof value === 'string') return redact(value);

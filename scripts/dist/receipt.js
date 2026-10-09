@@ -206,6 +206,57 @@ function getJson(url, opts) {
   return request("GET", url, opts);
 }
 
+// scripts/src/lib/state.mjs
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+function stateRoot() {
+  return process.env.ROZO_CHECKOUT_STATE_DIR || path.join(os.homedir(), ".rozo-checkout", "state");
+}
+function statePath(rozoPaymentId) {
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(String(rozoPaymentId || ""))) {
+    throw new SkillError("BAD_ROZO_PAYMENT_ID", "Refusing to build a state path from that id.");
+  }
+  return path.join(stateRoot(), `${rozoPaymentId}.json`);
+}
+function readState(rozoPaymentId) {
+  const file = statePath(rozoPaymentId);
+  let raw;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return null;
+    throw new SkillError("STATE_UNREADABLE", `Cannot read local state: ${err.code}`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new SkillError(
+      "STATE_CORRUPT",
+      "The local state file for this order is corrupt. Refusing to act; inspect it manually."
+    );
+  }
+}
+function findByLinkId(linkId) {
+  const dir = stateRoot();
+  let files = [];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
+  } catch {
+    return null;
+  }
+  let best = null;
+  for (const f of files) {
+    try {
+      const s = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+      if (s?.linkId !== linkId) continue;
+      if (!best || String(s.createdAt) > String(best.createdAt)) best = s;
+    } catch {
+    }
+  }
+  return best;
+}
+
 // scripts/src/lib/api.mjs
 var PKG_VERSION = (() => {
   const requireFrom = createRequire(import.meta.url);
@@ -677,57 +728,6 @@ function checkExpiry({
   return { ...withDeadline, ok: true, code: null, reason: null };
 }
 
-// scripts/src/lib/state.mjs
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
-function stateRoot() {
-  return process.env.ROZO_CHECKOUT_STATE_DIR || path.join(os.homedir(), ".rozo-checkout", "state");
-}
-function statePath(rozoPaymentId) {
-  if (!/^[A-Za-z0-9-]{8,64}$/.test(String(rozoPaymentId || ""))) {
-    throw new SkillError("BAD_ROZO_PAYMENT_ID", "Refusing to build a state path from that id.");
-  }
-  return path.join(stateRoot(), `${rozoPaymentId}.json`);
-}
-function readState(rozoPaymentId) {
-  const file = statePath(rozoPaymentId);
-  let raw;
-  try {
-    raw = fs.readFileSync(file, "utf8");
-  } catch (err) {
-    if (err.code === "ENOENT") return null;
-    throw new SkillError("STATE_UNREADABLE", `Cannot read local state: ${err.code}`);
-  }
-  try {
-    return JSON.parse(raw);
-  } catch {
-    throw new SkillError(
-      "STATE_CORRUPT",
-      "The local state file for this order is corrupt. Refusing to act; inspect it manually."
-    );
-  }
-}
-function findByLinkId(linkId) {
-  const dir = stateRoot();
-  let files = [];
-  try {
-    files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
-  } catch {
-    return null;
-  }
-  let best = null;
-  for (const f of files) {
-    try {
-      const s = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
-      if (s?.linkId !== linkId) continue;
-      if (!best || String(s.createdAt) > String(best.createdAt)) best = s;
-    } catch {
-    }
-  }
-  return best;
-}
-
 // scripts/src/lib/bitrefill.mjs
 var PROVIDER_BITREFILL = "bitrefill";
 var BITREFILL_DESTINATION = Object.freeze({ chainId: "8453", tokenSymbol: "USDC" });
@@ -1017,7 +1017,7 @@ function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, no
       intentExpiresAt: payment?.expiresAt ?? deadline,
       coinbaseExpiry: deadline
     });
-    return expiry2.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry2.msOfSlack / 6e4) } : { ok: false, code: expiry2.code, reason: expiry2.reason };
+    return expiry2.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry2.msOfSlack / 6e4), deadlineMs: expiry2.effectiveDeadlineMs } : { ok: false, code: expiry2.code, reason: expiry2.reason };
   }
   if (!status) {
     return { ok: false, code: "LINK_PAYABILITY_UNKNOWN", reason: "The Coinbase link state could not be read." };
@@ -1030,7 +1030,7 @@ function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, no
     intentExpiresAt: payment?.expiresAt ?? status?.rozoPayment?.expiresAt,
     coinbaseExpiry: status?.coinbase?.preApprovalExpiry
   });
-  return expiry.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4) } : { ok: false, code: expiry.code, reason: expiry.reason };
+  return expiry.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4), deadlineMs: expiry.effectiveDeadlineMs } : { ok: false, code: expiry.code, reason: expiry.reason };
 }
 async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   let provider = resolveProvider(explicitProvider, rozoPaymentId);
