@@ -25,7 +25,7 @@ import { getPayment } from './lib/api.mjs';
 import { chainName, chainFamily, formatAmount, isSatsUnit, STELLAR_MEMO_TYPE } from './lib/amounts.mjs';
 import { reuseGuard } from './lib/guards.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
-import { formatRemaining } from './lib/expiry.mjs';
+import { formatRemaining, checkExpiry } from './lib/expiry.mjs';
 import { readState } from './lib/state.mjs';
 import { SUPPORT } from './lib/support.mjs';
 import { snapshot, statusGuidance, EXPIRED_UNFUNDED_GUIDANCE } from './status.mjs';
@@ -190,6 +190,33 @@ async function main(argv) {
         guidance: guard.moneyDetected
           ? 'A payment for this order was detected. Do NOT pay again.'
           : 'This order cannot be paid as it stands. Do not fund it.',
+        support: SUPPORT,
+      },
+      EXIT_ERROR,
+    );
+  }
+
+  // The send window was judged on the snapshot. Re-judge it now against the
+  // payment we are about to show: its deadline may be earlier, or the clock
+  // may have crossed the safety margin in between. The earlier snapshot
+  // deadline (Coinbase / Bitrefill) still bounds it.
+  const finalWindow = checkExpiry({
+    now: Date.now(),
+    chainId: source.chainId,
+    intentExpiresAt: payment?.expiresAt ?? snap.sendWindow?.deadlineMs,
+    coinbaseExpiry: snap.sendWindow?.deadlineMs,
+  });
+  if (!finalWindow.ok) {
+    emit(
+      {
+        success: false,
+        step: 'resume',
+        resumable: false,
+        outcome: 'expired',
+        rozoPaymentId: id,
+        moneyDetected: false,
+        error: { code: finalWindow.code, message: finalWindow.reason },
+        guidance: 'Not enough time is left to pay this order safely. Do not fund it; let it expire unfunded and create a new order.',
         support: SUPPORT,
       },
       EXIT_ERROR,

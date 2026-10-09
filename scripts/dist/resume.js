@@ -1086,7 +1086,7 @@ function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, no
       intentExpiresAt: payment?.expiresAt ?? deadline,
       coinbaseExpiry: deadline
     });
-    return expiry2.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry2.msOfSlack / 6e4) } : { ok: false, code: expiry2.code, reason: expiry2.reason };
+    return expiry2.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry2.msOfSlack / 6e4), deadlineMs: expiry2.effectiveDeadlineMs } : { ok: false, code: expiry2.code, reason: expiry2.reason };
   }
   if (!status) {
     return { ok: false, code: "LINK_PAYABILITY_UNKNOWN", reason: "The Coinbase link state could not be read." };
@@ -1099,7 +1099,7 @@ function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, no
     intentExpiresAt: payment?.expiresAt ?? status?.rozoPayment?.expiresAt,
     coinbaseExpiry: status?.coinbase?.preApprovalExpiry
   });
-  return expiry.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4) } : { ok: false, code: expiry.code, reason: expiry.reason };
+  return expiry.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4), deadlineMs: expiry.effectiveDeadlineMs } : { ok: false, code: expiry.code, reason: expiry.reason };
 }
 async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   let provider = resolveProvider(explicitProvider, rozoPaymentId);
@@ -1375,6 +1375,28 @@ async function main(argv) {
         moneyDetected: guard.moneyDetected,
         error: { code: guard.code, message: guard.reason },
         guidance: guard.moneyDetected ? "A payment for this order was detected. Do NOT pay again." : "This order cannot be paid as it stands. Do not fund it.",
+        support: SUPPORT
+      },
+      EXIT_ERROR
+    );
+  }
+  const finalWindow = checkExpiry({
+    now: Date.now(),
+    chainId: source.chainId,
+    intentExpiresAt: payment?.expiresAt ?? snap.sendWindow?.deadlineMs,
+    coinbaseExpiry: snap.sendWindow?.deadlineMs
+  });
+  if (!finalWindow.ok) {
+    emit(
+      {
+        success: false,
+        step: "resume",
+        resumable: false,
+        outcome: "expired",
+        rozoPaymentId: id,
+        moneyDetected: false,
+        error: { code: finalWindow.code, message: finalWindow.reason },
+        guidance: "Not enough time is left to pay this order safely. Do not fund it; let it expire unfunded and create a new order.",
         support: SUPPORT
       },
       EXIT_ERROR

@@ -143,6 +143,35 @@ test('resume refuses when too little time is left, even though still unpaid', as
   });
 });
 
+test('resume re-checks the deadline on the final payment read before releasing it', async () => {
+  const live = liveOrder();
+  const nearlyExpired = clone(live.payment);
+  nearlyExpired.expiresAt = new Date(Date.now() + 30 * 1000).toISOString();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rozo-resume-'));
+  process.env.ROZO_CHECKOUT_STATE_DIR = dir;
+  const originalFetch = globalThis.fetch;
+  let paymentReads = 0;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('/invoice-status')) return json(live.status);
+    if (u.includes('/payments/')) return json(++paymentReads === 1 ? live.payment : nearlyExpired);
+    throw new Error(`unexpected fetch ${u}`);
+  };
+  try {
+    const { payload, exitCode } = await capture(() => runResume([ID, '--confirm']));
+    assert.ok(paymentReads >= 2, 'the final read must be a separate fetch');
+    assert.equal(exitCode, 1);
+    assert.equal(payload.resumable, false);
+    assert.equal(payload.outcome, 'expired');
+    assert.equal(payload.deposit, undefined);
+    assert.ok(!JSON.stringify(payload).includes(RECEIVER));
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.ROZO_CHECKOUT_STATE_DIR;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('resume refuses when this machine already recorded a send', async () => {
   const live = liveOrder();
   await withStubs(live, async () => {

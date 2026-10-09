@@ -71,6 +71,24 @@ test('install_id is the same in two separate processes (real persistence)', asyn
   });
 });
 
+test('concurrent first runs in separate processes agree on one install_id', async () => {
+  await withTempHome(async () => {
+    const { execFile } = await import('node:child_process');
+    const script = `import { getOrCreateInstallId } from ${JSON.stringify(path.join(here, '../scripts/src/lib/identity.mjs'))}; process.stdout.write(getOrCreateInstallId());`;
+    const one = () =>
+      new Promise((resolve, reject) =>
+        execFile(process.execPath, ['--input-type=module', '-e', script], { env: process.env }, (err, out) =>
+          err ? reject(err) : resolve(String(out)),
+        ),
+      );
+    const ids = await Promise.all(Array.from({ length: 8 }, one));
+    for (const id of ids) assert.match(id, INSTALL_ID_RE);
+    assert.equal(new Set(ids).size, 1, `got ${new Set(ids).size} distinct ids`);
+    assert.equal(readPrefs().installId, ids[0]);
+    assert.equal(fs.existsSync(`${prefsPath()}.init.lock`), false, 'lock released');
+  });
+});
+
 test('deleting prefs.json resets the id; a corrupt value is replaced', async () => {
   await withTempHome(() => {
     const a = getOrCreateInstallId();

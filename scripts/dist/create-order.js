@@ -279,6 +279,8 @@ function normalizeUtmSource(value) {
 
 // scripts/src/lib/identity.mjs
 import crypto2 from "node:crypto";
+import fs3 from "node:fs";
+import path3 from "node:path";
 
 // scripts/src/lib/prefs.mjs
 import fs2 from "node:fs";
@@ -515,14 +517,52 @@ function attributionDisabled(env = process.env) {
   const v = String(env.ROZO_CHECKOUT_ANON_ID ?? "").trim().toLowerCase();
   return ["off", "0", "false", "no"].includes(v);
 }
+var INIT_LOCK_WAIT_MS = 2e3;
+var INIT_LOCK_STALE_MS = 1e4;
+function sleepSync2(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function withInitLock(fn) {
+  const lock = `${prefsPath()}.init.lock`;
+  fs3.mkdirSync(path3.dirname(lock), { recursive: true, mode: 448 });
+  const deadline = Date.now() + INIT_LOCK_WAIT_MS;
+  for (; ; ) {
+    try {
+      fs3.closeSync(fs3.openSync(lock, "wx", 384));
+      break;
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+    }
+    try {
+      if (Date.now() - fs3.statSync(lock).mtimeMs > INIT_LOCK_STALE_MS) {
+        fs3.rmSync(lock, { force: true });
+        continue;
+      }
+    } catch {
+      continue;
+    }
+    if (Date.now() > deadline) return void 0;
+    sleepSync2(20);
+  }
+  try {
+    return fn();
+  } finally {
+    fs3.rmSync(lock, { force: true });
+  }
+}
 function getOrCreateInstallId() {
   const existing = readPrefs()?.installId;
   if (isValidInstallId(existing)) return existing;
-  const fresh = crypto2.randomUUID().toLowerCase();
-  const saved = savePrefs({}, { installId: fresh });
+  const id = withInitLock(() => {
+    const current = readPrefs()?.installId;
+    if (isValidInstallId(current)) return current;
+    const fresh = crypto2.randomUUID().toLowerCase();
+    savePrefs({}, { installId: fresh });
+    return fresh;
+  });
+  if (isValidInstallId(id)) return id;
   const onDisk = readPrefs()?.installId;
-  if (saved && isValidInstallId(onDisk)) return onDisk;
-  return fresh;
+  return isValidInstallId(onDisk) ? onDisk : crypto2.randomUUID().toLowerCase();
 }
 function hashAccount(raw) {
   return crypto2.createHash("sha256").update(`${ACCOUNT_HASH_PREFIX}${raw}`, "utf8").digest("hex");
@@ -1164,8 +1204,8 @@ function checkPayable(statusResponse, now = Date.now()) {
 }
 
 // scripts/src/lib/blacklist.mjs
-import fs3 from "node:fs";
-import path3 from "node:path";
+import fs4 from "node:fs";
+import path4 from "node:path";
 import crypto3 from "node:crypto";
 import { fileURLToPath } from "node:url";
 var BlacklistError = class extends Error {
@@ -1224,11 +1264,11 @@ function parseBlacklist(doc) {
   return { entries, index, provenance, digest };
 }
 function candidatePaths(moduleUrl) {
-  const here = path3.dirname(fileURLToPath(moduleUrl));
+  const here = path4.dirname(fileURLToPath(moduleUrl));
   return [
-    path3.join(here, "blacklist.json"),
-    path3.join(here, "..", "src", "lib", "blacklist.json"),
-    path3.join(here, "..", "..", "src", "lib", "blacklist.json")
+    path4.join(here, "blacklist.json"),
+    path4.join(here, "..", "src", "lib", "blacklist.json"),
+    path4.join(here, "..", "..", "src", "lib", "blacklist.json")
   ];
 }
 var cached = null;
@@ -1239,7 +1279,7 @@ function loadBlacklist(explicitPath) {
   for (const p of paths) {
     let raw;
     try {
-      raw = fs3.readFileSync(p, "utf8");
+      raw = fs4.readFileSync(p, "utf8");
     } catch (err) {
       lastErr = err;
       continue;

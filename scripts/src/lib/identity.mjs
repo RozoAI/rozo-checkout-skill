@@ -22,8 +22,10 @@
  */
 
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 
-import { readPrefs, savePrefs } from './prefs.mjs';
+import { prefsPath, readPrefs, savePrefs } from './prefs.mjs';
 
 export const ACCOUNT_HASH_PREFIX = 'rozo-acct-v1:';
 
@@ -41,21 +43,67 @@ export function attributionDisabled(env = process.env) {
   return ['off', '0', 'false', 'no'].includes(v);
 }
 
+const INIT_LOCK_WAIT_MS = 2_000;
+const INIT_LOCK_STALE_MS = 10_000;
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Run `fn` holding an exclusive first-run lock next to prefs.json, so two
+ * processes starting at once cannot each mint a different id. Returns
+ * undefined if the lock cannot be had in time.
+ */
+function withInitLock(fn) {
+  const lock = `${prefsPath()}.init.lock`;
+  fs.mkdirSync(path.dirname(lock), { recursive: true, mode: 0o700 });
+  const deadline = Date.now() + INIT_LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      fs.closeSync(fs.openSync(lock, 'wx', 0o600));
+      break;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+    }
+    try {
+      if (Date.now() - fs.statSync(lock).mtimeMs > INIT_LOCK_STALE_MS) {
+        fs.rmSync(lock, { force: true });
+        continue;
+      }
+    } catch {
+      continue;
+    }
+    if (Date.now() > deadline) return undefined;
+    sleepSync(20);
+  }
+  try {
+    return fn();
+  } finally {
+    fs.rmSync(lock, { force: true });
+  }
+}
+
 /**
  * Return this install's id, creating and persisting one on first use. A
- * missing, malformed or unreadable value is replaced. If the file cannot be
- * written the id is still returned for this run (it will simply not persist).
+ * missing, malformed or unreadable value is replaced. Creation is serialized
+ * across processes and re-checked inside the lock, so concurrent first runs
+ * agree on one id. If the file cannot be written (or the lock is stuck) the id
+ * is still returned for this run; it will simply not persist.
  */
 export function getOrCreateInstallId() {
   const existing = readPrefs()?.installId;
   if (isValidInstallId(existing)) return existing;
-  const fresh = crypto.randomUUID().toLowerCase();
-  const saved = savePrefs({}, { installId: fresh });
-  // Another process may have won a first-run race; prefer what is on disk so
-  // both runs agree from here on.
+  const id = withInitLock(() => {
+    const current = readPrefs()?.installId;
+    if (isValidInstallId(current)) return current;
+    const fresh = crypto.randomUUID().toLowerCase();
+    savePrefs({}, { installId: fresh });
+    return fresh;
+  });
+  if (isValidInstallId(id)) return id;
   const onDisk = readPrefs()?.installId;
-  if (saved && isValidInstallId(onDisk)) return onDisk;
-  return fresh;
+  return isValidInstallId(onDisk) ? onDisk : crypto.randomUUID().toLowerCase();
 }
 
 /** sha256 hex of the prefixed raw identifier. The input never leaves this function. */

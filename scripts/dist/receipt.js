@@ -1017,7 +1017,7 @@ function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, no
       intentExpiresAt: payment?.expiresAt ?? deadline,
       coinbaseExpiry: deadline
     });
-    return expiry2.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry2.msOfSlack / 6e4) } : { ok: false, code: expiry2.code, reason: expiry2.reason };
+    return expiry2.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry2.msOfSlack / 6e4), deadlineMs: expiry2.effectiveDeadlineMs } : { ok: false, code: expiry2.code, reason: expiry2.reason };
   }
   if (!status) {
     return { ok: false, code: "LINK_PAYABILITY_UNKNOWN", reason: "The Coinbase link state could not be read." };
@@ -1030,7 +1030,7 @@ function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, no
     intentExpiresAt: payment?.expiresAt ?? status?.rozoPayment?.expiresAt,
     coinbaseExpiry: status?.coinbase?.preApprovalExpiry
   });
-  return expiry.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4) } : { ok: false, code: expiry.code, reason: expiry.reason };
+  return expiry.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4), deadlineMs: expiry.effectiveDeadlineMs } : { ok: false, code: expiry.code, reason: expiry.reason };
 }
 async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   let provider = resolveProvider(explicitProvider, rozoPaymentId);
