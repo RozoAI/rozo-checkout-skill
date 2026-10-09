@@ -85,7 +85,37 @@ test('concurrent first runs in separate processes agree on one install_id', asyn
     for (const id of ids) assert.match(id, INSTALL_ID_RE);
     assert.equal(new Set(ids).size, 1, `got ${new Set(ids).size} distinct ids`);
     assert.equal(readPrefs().installId, ids[0]);
-    assert.equal(fs.existsSync(`${prefsPath()}.init.lock`), false, 'lock released');
+    assert.equal(fs.existsSync(`${prefsPath()}.lock`), false, 'lock released');
+  });
+});
+
+test('concurrent preference writes and install_id creation never clobber each other', async () => {
+  await withTempHome(async () => {
+    const { execFile } = await import('node:child_process');
+    const lib = (f) => JSON.stringify(path.join(here, '../scripts/src/lib', f));
+    const idScript = `import { getOrCreateInstallId } from ${lib('identity.mjs')}; process.stdout.write(getOrCreateInstallId());`;
+    const prefScript = (i) =>
+      `import { savePrefs } from ${lib('prefs.mjs')}; for (let n = 0; n < 20; n++) savePrefs({ lastPayerAddress: 'addr-${i}', lastPreset: 'usdt-solana' }); process.stdout.write('ok');`;
+    const spawn = (script) =>
+      new Promise((resolve, reject) =>
+        execFile(process.execPath, ['--input-type=module', '-e', script], { env: process.env }, (err, out) =>
+          err ? reject(err) : resolve(String(out)),
+        ),
+      );
+    const jobs = [];
+    for (let i = 0; i < 6; i++) {
+      jobs.push(spawn(idScript));
+      jobs.push(spawn(prefScript(i)));
+    }
+    const results = await Promise.all(jobs);
+    const ids = results.filter((r) => r !== 'ok');
+    assert.equal(ids.length, 6);
+    assert.equal(new Set(ids).size, 1, 'every process must see the same install_id');
+    const final = readPrefs();
+    assert.equal(final.installId, ids[0], 'a preference write clobbered the install_id');
+    assert.match(final.lastPayerAddress, /^addr-\d$/, 'an install_id write clobbered the preferences');
+    assert.equal(final.lastPreset, 'usdt-solana');
+    assert.equal(fs.existsSync(`${prefsPath()}.lock`), false, 'lock released');
   });
 });
 

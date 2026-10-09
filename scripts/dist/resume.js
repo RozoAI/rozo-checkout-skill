@@ -53,6 +53,7 @@ function publicHash(value) {
   return typeof value === "string" && TX_HASH_VALUE.test(value) ? new PublicHash(value) : value;
 }
 var PUBLIC_PAY_PAGE_HOSTS = /* @__PURE__ */ new Set(["invoice.rozo.ai", "checkout.rozo.ai"]);
+var PAY_PAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function publicPayPage(value) {
   if (typeof value !== "string") return value;
   let u;
@@ -61,8 +62,11 @@ function publicPayPage(value) {
   } catch {
     return value;
   }
-  if (u.protocol !== "https:" || u.username || u.password || !PUBLIC_PAY_PAGE_HOSTS.has(u.hostname)) return value;
-  return new PublicHash(value);
+  if (u.protocol !== "https:" || u.username || u.password || u.port || !PUBLIC_PAY_PAGE_HOSTS.has(u.hostname)) return value;
+  if (u.pathname !== "/checkout") return value;
+  const id = u.searchParams.get("id");
+  if (!id || !PAY_PAGE_ID.test(id)) return value;
+  return new PublicHash(`https://${u.hostname}/checkout?id=${id.toLowerCase()}`);
 }
 function redactDeep(value) {
   if (value instanceof PublicHash) return value.value;

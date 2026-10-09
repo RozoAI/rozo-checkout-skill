@@ -279,8 +279,6 @@ function normalizeUtmSource(value) {
 
 // scripts/src/lib/identity.mjs
 import crypto2 from "node:crypto";
-import fs3 from "node:fs";
-import path3 from "node:path";
 
 // scripts/src/lib/prefs.mjs
 import fs2 from "node:fs";
@@ -468,6 +466,40 @@ function prefsPath() {
   return path2.join(root, "prefs.json");
 }
 var ALLOWED = ["lastPayerAddress", "lastAddressFamily", "lastPreset", "installId", "updatedAt"];
+var INSTALL_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+var LOCK_WAIT_MS2 = 2e3;
+var LOCK_STALE_MS2 = 1e4;
+function sleepSync2(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function withPrefsLock(fn) {
+  const lock = `${prefsPath()}.lock`;
+  fs2.mkdirSync(path2.dirname(lock), { recursive: true, mode: 448 });
+  const deadline = Date.now() + LOCK_WAIT_MS2;
+  for (; ; ) {
+    try {
+      fs2.closeSync(fs2.openSync(lock, "wx", 384));
+      break;
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+    }
+    try {
+      if (Date.now() - fs2.statSync(lock).mtimeMs > LOCK_STALE_MS2) {
+        fs2.rmSync(lock, { force: true });
+        continue;
+      }
+    } catch {
+      continue;
+    }
+    if (Date.now() > deadline) return void 0;
+    sleepSync2(10);
+  }
+  try {
+    return fn();
+  } finally {
+    fs2.rmSync(lock, { force: true });
+  }
+}
 var USER_FIELDS = ["lastPayerAddress", "lastAddressFamily", "lastPreset"];
 function readPrefs() {
   let raw;
@@ -490,26 +522,30 @@ function readPrefs() {
   }
   return Object.keys(out).length ? out : null;
 }
-function savePrefs(update, { installId } = {}) {
-  const existing = readPrefs() || {};
-  const next = { ...existing };
-  for (const k of USER_FIELDS) {
-    const v = update?.[k];
-    if (typeof v === "string" && v.trim()) next[k] = v.trim();
-  }
-  if (typeof installId === "string" && installId) next.installId = installId;
-  next.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+function savePrefs(update, { installIdIfAbsent } = {}) {
   try {
-    writeAtomic(prefsPath(), next);
+    const saved = withPrefsLock(() => {
+      const existing = readPrefs() || {};
+      const next = { ...existing };
+      for (const k of USER_FIELDS) {
+        const v = update?.[k];
+        if (typeof v === "string" && v.trim()) next[k] = v.trim();
+      }
+      if (!INSTALL_ID_RE.test(String(existing.installId ?? "")) && INSTALL_ID_RE.test(String(installIdIfAbsent ?? ""))) {
+        next.installId = installIdIfAbsent;
+      }
+      next.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      writeAtomic(prefsPath(), next);
+      return next;
+    });
+    return saved ?? null;
   } catch {
     return null;
   }
-  return next;
 }
 
 // scripts/src/lib/identity.mjs
 var ACCOUNT_HASH_PREFIX = "rozo-acct-v1:";
-var INSTALL_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 function isValidInstallId(value) {
   return typeof value === "string" && INSTALL_ID_RE.test(value);
 }
@@ -517,50 +553,11 @@ function attributionDisabled(env = process.env) {
   const v = String(env.ROZO_CHECKOUT_ANON_ID ?? "").trim().toLowerCase();
   return ["off", "0", "false", "no"].includes(v);
 }
-var INIT_LOCK_WAIT_MS = 2e3;
-var INIT_LOCK_STALE_MS = 1e4;
-function sleepSync2(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-function withInitLock(fn) {
-  const lock = `${prefsPath()}.init.lock`;
-  fs3.mkdirSync(path3.dirname(lock), { recursive: true, mode: 448 });
-  const deadline = Date.now() + INIT_LOCK_WAIT_MS;
-  for (; ; ) {
-    try {
-      fs3.closeSync(fs3.openSync(lock, "wx", 384));
-      break;
-    } catch (err) {
-      if (err.code !== "EEXIST") throw err;
-    }
-    try {
-      if (Date.now() - fs3.statSync(lock).mtimeMs > INIT_LOCK_STALE_MS) {
-        fs3.rmSync(lock, { force: true });
-        continue;
-      }
-    } catch {
-      continue;
-    }
-    if (Date.now() > deadline) return void 0;
-    sleepSync2(20);
-  }
-  try {
-    return fn();
-  } finally {
-    fs3.rmSync(lock, { force: true });
-  }
-}
 function getOrCreateInstallId() {
   const existing = readPrefs()?.installId;
   if (isValidInstallId(existing)) return existing;
-  const id = withInitLock(() => {
-    const current = readPrefs()?.installId;
-    if (isValidInstallId(current)) return current;
-    const fresh = crypto2.randomUUID().toLowerCase();
-    savePrefs({}, { installId: fresh });
-    return fresh;
-  });
-  if (isValidInstallId(id)) return id;
+  const saved = savePrefs({}, { installIdIfAbsent: crypto2.randomUUID().toLowerCase() });
+  if (isValidInstallId(saved?.installId)) return saved.installId;
   const onDisk = readPrefs()?.installId;
   return isValidInstallId(onDisk) ? onDisk : crypto2.randomUUID().toLowerCase();
 }
@@ -1204,8 +1201,8 @@ function checkPayable(statusResponse, now = Date.now()) {
 }
 
 // scripts/src/lib/blacklist.mjs
-import fs4 from "node:fs";
-import path4 from "node:path";
+import fs3 from "node:fs";
+import path3 from "node:path";
 import crypto3 from "node:crypto";
 import { fileURLToPath } from "node:url";
 var BlacklistError = class extends Error {
@@ -1264,11 +1261,11 @@ function parseBlacklist(doc) {
   return { entries, index, provenance, digest };
 }
 function candidatePaths(moduleUrl) {
-  const here = path4.dirname(fileURLToPath(moduleUrl));
+  const here = path3.dirname(fileURLToPath(moduleUrl));
   return [
-    path4.join(here, "blacklist.json"),
-    path4.join(here, "..", "src", "lib", "blacklist.json"),
-    path4.join(here, "..", "..", "src", "lib", "blacklist.json")
+    path3.join(here, "blacklist.json"),
+    path3.join(here, "..", "src", "lib", "blacklist.json"),
+    path3.join(here, "..", "..", "src", "lib", "blacklist.json")
   ];
 }
 var cached = null;
@@ -1279,7 +1276,7 @@ function loadBlacklist(explicitPath) {
   for (const p of paths) {
     let raw;
     try {
-      raw = fs4.readFileSync(p, "utf8");
+      raw = fs3.readFileSync(p, "utf8");
     } catch (err) {
       lastErr = err;
       continue;

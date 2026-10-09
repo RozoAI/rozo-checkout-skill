@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { readFixture, clone } from './helpers.mjs';
-import { capture } from '../scripts/src/lib/output.mjs';
+import { capture, publicPayPage, redactDeep } from '../scripts/src/lib/output.mjs';
 import { parseCliArgs, CliError, COMMANDS } from '../scripts/src/lib/cli-args.mjs';
 import { run as runResume, resumeVerdict } from '../scripts/src/resume.mjs';
 import { createOrderRecord, claimSend } from '../scripts/src/lib/state.mjs';
@@ -198,6 +198,26 @@ test('a pay-page link on an unknown host stays redacted', async () => {
     const { payload } = await capture(() => runResume([ID]));
     assert.equal(payload.paymentLink, 'https://evil.example/<redacted>');
   });
+});
+
+test('publicPayPage prints only https://<rozo host>/checkout?id=<uuid>, nothing else', () => {
+  const shown = (v) => redactDeep({ v: publicPayPage(v) }).v;
+  assert.equal(shown(`https://invoice.rozo.ai/checkout?id=${ID}`), `https://invoice.rozo.ai/checkout?id=${ID}`);
+  // Extra params and fragments are dropped, never echoed.
+  assert.equal(shown(`https://invoice.rozo.ai/checkout?id=${ID}&token=s3cr3t#k=v`), `https://invoice.rozo.ai/checkout?id=${ID}`);
+  assert.equal(shown(`https://invoice.rozo.ai/checkout?token=s3cr3t&id=${ID}`), `https://invoice.rozo.ai/checkout?id=${ID}`);
+  // Wrong shape stays redacted to the host.
+  for (const bad of [
+    `https://invoice.rozo.ai/other?id=${ID}`,
+    'https://invoice.rozo.ai/checkout?id=not-a-uuid&token=s3cr3t',
+    `http://invoice.rozo.ai/checkout?id=${ID}`,
+    `https://invoice.rozo.ai:8443/checkout?id=${ID}`,
+    `https://u:p@invoice.rozo.ai/checkout?id=${ID}`,
+    `https://invoice.rozo.ai.evil.example/checkout?id=${ID}`,
+  ]) {
+    const out = shown(bad);
+    assert.ok(!out.includes('s3cr3t') && !out.includes(ID), `${bad} -> ${out}`);
+  }
 });
 
 test('resumeVerdict: unknown state is never resumable', () => {

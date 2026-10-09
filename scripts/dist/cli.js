@@ -20473,8 +20473,8 @@ var require_dist = __commonJS({
         constructor(failure, failures) {
           let cached2;
           const { message, explanation, ...rest } = failure;
-          const { path: path8 } = failure;
-          const msg = path8.length === 0 ? message : `At path: ${path8.join(".")} -- ${message}`;
+          const { path: path7 } = failure;
+          const msg = path7.length === 0 ? message : `At path: ${path7.join(".")} -- ${message}`;
           super(explanation ?? msg);
           if (explanation != null)
             this.cause = msg;
@@ -20519,15 +20519,15 @@ var require_dist = __commonJS({
         } else if (typeof result === "string") {
           result = { message: result };
         }
-        const { path: path8, branch } = context;
+        const { path: path7, branch } = context;
         const { type: type2 } = struct2;
         const { refinement, message = `Expected a value of type \`${type2}\`${refinement ? ` with refinement \`${refinement}\`` : ""}, but received: \`${print(value)}\`` } = result;
         return {
           value,
           type: type2,
           refinement,
-          key: path8[path8.length - 1],
-          path: path8,
+          key: path7[path7.length - 1],
+          path: path7,
           branch,
           ...result,
           message
@@ -20545,8 +20545,8 @@ var require_dist = __commonJS({
         }
       }
       function* run9(value, struct2, options = {}) {
-        const { path: path8 = [], branch = [value], coerce: coerce2 = false, mask: mask2 = false } = options;
-        const ctx = { path: path8, branch, mask: mask2 };
+        const { path: path7 = [], branch = [value], coerce: coerce2 = false, mask: mask2 = false } = options;
+        const ctx = { path: path7, branch, mask: mask2 };
         if (coerce2) {
           value = struct2.coercer(value, ctx);
         }
@@ -20558,7 +20558,7 @@ var require_dist = __commonJS({
         }
         for (let [k, v, s] of struct2.entries(value, ctx)) {
           const ts = run9(v, s, {
-            path: k === void 0 ? path8 : [...path8, k],
+            path: k === void 0 ? path7 : [...path7, k],
             branch: k === void 0 ? branch : [...branch, v],
             coerce: coerce2,
             mask: mask2,
@@ -22744,14 +22744,14 @@ var require_url_state_machine = __commonJS({
       return url.replace(/\u0009|\u000A|\u000D/g, "");
     }
     function shortenPath(url) {
-      const path8 = url.path;
-      if (path8.length === 0) {
+      const path7 = url.path;
+      if (path7.length === 0) {
         return;
       }
-      if (url.scheme === "file" && path8.length === 1 && isNormalizedWindowsDriveLetter(path8[0])) {
+      if (url.scheme === "file" && path7.length === 1 && isNormalizedWindowsDriveLetter(path7[0])) {
         return;
       }
-      path8.pop();
+      path7.pop();
     }
     function includesCredentials(url) {
       return url.username !== "" || url.password !== "";
@@ -25046,8 +25046,8 @@ var require_constants = __commonJS({
 // node_modules/node-gyp-build/node-gyp-build.js
 var require_node_gyp_build = __commonJS({
   "node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
-    var fs8 = __require("fs");
-    var path8 = __require("path");
+    var fs7 = __require("fs");
+    var path7 = __require("path");
     var os5 = __require("os");
     var runtimeRequire = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
     var vars = process.config && process.config.variables || {};
@@ -25064,21 +25064,21 @@ var require_node_gyp_build = __commonJS({
       return runtimeRequire(load.resolve(dir));
     }
     load.resolve = load.path = function(dir) {
-      dir = path8.resolve(dir || ".");
+      dir = path7.resolve(dir || ".");
       try {
-        var name = runtimeRequire(path8.join(dir, "package.json")).name.toUpperCase().replace(/-/g, "_");
+        var name = runtimeRequire(path7.join(dir, "package.json")).name.toUpperCase().replace(/-/g, "_");
         if (process.env[name + "_PREBUILD"]) dir = process.env[name + "_PREBUILD"];
       } catch (err) {
       }
       if (!prebuildsOnly) {
-        var release = getFirst(path8.join(dir, "build/Release"), matchBuild);
+        var release = getFirst(path7.join(dir, "build/Release"), matchBuild);
         if (release) return release;
-        var debug = getFirst(path8.join(dir, "build/Debug"), matchBuild);
+        var debug = getFirst(path7.join(dir, "build/Debug"), matchBuild);
         if (debug) return debug;
       }
       var prebuild = resolve(dir);
       if (prebuild) return prebuild;
-      var nearby = resolve(path8.dirname(process.execPath));
+      var nearby = resolve(path7.dirname(process.execPath));
       if (nearby) return nearby;
       var target = [
         "platform=" + platform,
@@ -25095,26 +25095,26 @@ var require_node_gyp_build = __commonJS({
       ].filter(Boolean).join(" ");
       throw new Error("No native build was found for " + target + "\n    loaded from: " + dir + "\n");
       function resolve(dir2) {
-        var tuples = readdirSync(path8.join(dir2, "prebuilds")).map(parseTuple);
+        var tuples = readdirSync(path7.join(dir2, "prebuilds")).map(parseTuple);
         var tuple = tuples.filter(matchTuple(platform, arch)).sort(compareTuples)[0];
         if (!tuple) return;
-        var prebuilds = path8.join(dir2, "prebuilds", tuple.name);
+        var prebuilds = path7.join(dir2, "prebuilds", tuple.name);
         var parsed = readdirSync(prebuilds).map(parseTags);
         var candidates = parsed.filter(matchTags(runtime, abi2));
         var winner = candidates.sort(compareTags(runtime))[0];
-        if (winner) return path8.join(prebuilds, winner.file);
+        if (winner) return path7.join(prebuilds, winner.file);
       }
     };
     function readdirSync(dir) {
       try {
-        return fs8.readdirSync(dir);
+        return fs7.readdirSync(dir);
       } catch (err) {
         return [];
       }
     }
     function getFirst(dir, filter) {
       var files = readdirSync(dir).filter(filter);
-      return files[0] && path8.join(dir, files[0]);
+      return files[0] && path7.join(dir, files[0]);
     }
     function matchBuild(name) {
       return /\.node$/.test(name);
@@ -25201,7 +25201,7 @@ var require_node_gyp_build = __commonJS({
       return typeof window !== "undefined" && window.process && window.process.type === "renderer";
     }
     function isAlpine(platform2) {
-      return platform2 === "linux" && fs8.existsSync("/etc/alpine-release");
+      return platform2 === "linux" && fs7.existsSync("/etc/alpine-release");
     }
     load.parseTags = parseTags;
     load.matchTags = matchTags;
@@ -41527,6 +41527,7 @@ function publicHash(value) {
   return typeof value === "string" && TX_HASH_VALUE.test(value) ? new PublicHash(value) : value;
 }
 var PUBLIC_PAY_PAGE_HOSTS = /* @__PURE__ */ new Set(["invoice.rozo.ai", "checkout.rozo.ai"]);
+var PAY_PAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function publicPayPage(value) {
   if (typeof value !== "string") return value;
   let u;
@@ -41535,8 +41536,11 @@ function publicPayPage(value) {
   } catch {
     return value;
   }
-  if (u.protocol !== "https:" || u.username || u.password || !PUBLIC_PAY_PAGE_HOSTS.has(u.hostname)) return value;
-  return new PublicHash(value);
+  if (u.protocol !== "https:" || u.username || u.password || u.port || !PUBLIC_PAY_PAGE_HOSTS.has(u.hostname)) return value;
+  if (u.pathname !== "/checkout") return value;
+  const id = u.searchParams.get("id");
+  if (!id || !PAY_PAGE_ID.test(id)) return value;
+  return new PublicHash(`https://${u.hostname}/checkout?id=${id.toLowerCase()}`);
 }
 function redactDeep(value) {
   if (value instanceof PublicHash) return value.value;
@@ -42694,6 +42698,40 @@ function prefsPath() {
   return path2.join(root, "prefs.json");
 }
 var ALLOWED = ["lastPayerAddress", "lastAddressFamily", "lastPreset", "installId", "updatedAt"];
+var INSTALL_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+var LOCK_WAIT_MS2 = 2e3;
+var LOCK_STALE_MS2 = 1e4;
+function sleepSync2(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+function withPrefsLock(fn) {
+  const lock = `${prefsPath()}.lock`;
+  fs2.mkdirSync(path2.dirname(lock), { recursive: true, mode: 448 });
+  const deadline = Date.now() + LOCK_WAIT_MS2;
+  for (; ; ) {
+    try {
+      fs2.closeSync(fs2.openSync(lock, "wx", 384));
+      break;
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+    }
+    try {
+      if (Date.now() - fs2.statSync(lock).mtimeMs > LOCK_STALE_MS2) {
+        fs2.rmSync(lock, { force: true });
+        continue;
+      }
+    } catch {
+      continue;
+    }
+    if (Date.now() > deadline) return void 0;
+    sleepSync2(10);
+  }
+  try {
+    return fn();
+  } finally {
+    fs2.rmSync(lock, { force: true });
+  }
+}
 var USER_FIELDS = ["lastPayerAddress", "lastAddressFamily", "lastPreset"];
 function readPrefs() {
   let raw;
@@ -42716,21 +42754,26 @@ function readPrefs() {
   }
   return Object.keys(out2).length ? out2 : null;
 }
-function savePrefs(update, { installId } = {}) {
-  const existing = readPrefs() || {};
-  const next = { ...existing };
-  for (const k of USER_FIELDS) {
-    const v = update?.[k];
-    if (typeof v === "string" && v.trim()) next[k] = v.trim();
-  }
-  if (typeof installId === "string" && installId) next.installId = installId;
-  next.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+function savePrefs(update, { installIdIfAbsent } = {}) {
   try {
-    writeAtomic(prefsPath(), next);
+    const saved = withPrefsLock(() => {
+      const existing = readPrefs() || {};
+      const next = { ...existing };
+      for (const k of USER_FIELDS) {
+        const v = update?.[k];
+        if (typeof v === "string" && v.trim()) next[k] = v.trim();
+      }
+      if (!INSTALL_ID_RE.test(String(existing.installId ?? "")) && INSTALL_ID_RE.test(String(installIdIfAbsent ?? ""))) {
+        next.installId = installIdIfAbsent;
+      }
+      next.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+      writeAtomic(prefsPath(), next);
+      return next;
+    });
+    return saved ?? null;
   } catch {
     return null;
   }
-  return next;
 }
 
 // scripts/src/lib/blacklist.mjs
@@ -54645,10 +54688,7 @@ function postJson(url, body, opts) {
 
 // scripts/src/lib/identity.mjs
 import crypto7 from "node:crypto";
-import fs7 from "node:fs";
-import path7 from "node:path";
 var ACCOUNT_HASH_PREFIX = "rozo-acct-v1:";
-var INSTALL_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 function isValidInstallId(value) {
   return typeof value === "string" && INSTALL_ID_RE.test(value);
 }
@@ -54656,50 +54696,11 @@ function attributionDisabled(env = process.env) {
   const v = String(env.ROZO_CHECKOUT_ANON_ID ?? "").trim().toLowerCase();
   return ["off", "0", "false", "no"].includes(v);
 }
-var INIT_LOCK_WAIT_MS = 2e3;
-var INIT_LOCK_STALE_MS = 1e4;
-function sleepSync2(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-function withInitLock(fn) {
-  const lock = `${prefsPath()}.init.lock`;
-  fs7.mkdirSync(path7.dirname(lock), { recursive: true, mode: 448 });
-  const deadline = Date.now() + INIT_LOCK_WAIT_MS;
-  for (; ; ) {
-    try {
-      fs7.closeSync(fs7.openSync(lock, "wx", 384));
-      break;
-    } catch (err) {
-      if (err.code !== "EEXIST") throw err;
-    }
-    try {
-      if (Date.now() - fs7.statSync(lock).mtimeMs > INIT_LOCK_STALE_MS) {
-        fs7.rmSync(lock, { force: true });
-        continue;
-      }
-    } catch {
-      continue;
-    }
-    if (Date.now() > deadline) return void 0;
-    sleepSync2(20);
-  }
-  try {
-    return fn();
-  } finally {
-    fs7.rmSync(lock, { force: true });
-  }
-}
 function getOrCreateInstallId() {
   const existing = readPrefs()?.installId;
   if (isValidInstallId(existing)) return existing;
-  const id = withInitLock(() => {
-    const current = readPrefs()?.installId;
-    if (isValidInstallId(current)) return current;
-    const fresh = crypto7.randomUUID().toLowerCase();
-    savePrefs({}, { installId: fresh });
-    return fresh;
-  });
-  if (isValidInstallId(id)) return id;
+  const saved = savePrefs({}, { installIdIfAbsent: crypto7.randomUUID().toLowerCase() });
+  if (isValidInstallId(saved?.installId)) return saved.installId;
   const onDisk = readPrefs()?.installId;
   return isValidInstallId(onDisk) ? onDisk : crypto7.randomUUID().toLowerCase();
 }
