@@ -177,9 +177,105 @@ x402 safety rules:
 - Refuse a payment above what the user approved; refuse a payTo on a
   compromised-wallet list.
 - 503 X402_RETRY, X402_PAYER_MODE_CHANGED or X402_LEDGER_UNAVAILABLE: retry
-  with the same idempotencyKey. Any other 503 from /v1/x402 = "x402 payer not
-  enabled" for this key. Nothing was charged; stop.
+  with the same idempotencyKey. Any other 503 from /v1/x402 means x402 is not
+  available for this key right now. Nothing new was charged; stop. Every server
+  code is listed below.
 - The agent key owns the balance. Store it 0600, never print or log it.
+
+x402 server error codes (returned by https://apiserver.mpprouter.dev/v1/x402/*):
+Every error body looks like
+{"ok":false,"code":"X402_...","error":{"code":"X402_...","message":"..."}},
+sometimes with extra top level fields (limitUsd, balanceUsd, ...).
+These are separate from the codes the CLI raises on its own (X402_UNSUPPORTED,
+X402_OVER_BUDGET, X402_BAD_CHALLENGE, X402_PAYMENT_REJECTED and others). The balance is
+debited only by the ledger commit inside /sign, after signing; every error
+raised before that commit charges nothing. If /sign answers
+X402_LEDGER_UNAVAILABLE or X402_INTERNAL the commit may have landed: retry
+with the same idempotencyKey, and a payment that did land comes back as the
+stored signature (replay:true), never as a second charge.
+The CLI reports every 503 except X402_RETRY, X402_PAYER_MODE_CHANGED and
+X402_LEDGER_UNAVAILABLE as X402_PAYER_DISABLED, with the server code in
+error.details.serverCode. On /sign it retries 429, 500, 502, 504 and those
+three 503 codes itself, with the same idempotencyKey.
+
+balance, topup and sign (keys does not read a key):
+- 401 X402_KEY_INVALID: agent key missing, malformed or unknown. Send
+  "Authorization: Bearer ak_...". Do not mint a new key to get around it: the
+  balance belongs to the old key.
+- 403 X402_KEY_SUSPENDED: the key is not active. Stop; email hi@rozo.ai.
+
+Any route:
+- 503 X402_PAYER_DISABLED: the payer is switched off. Stop, tell the user.
+- 503 X402_PAYER_NOT_CONFIGURED: payer not set up on this deployment. Stop.
+- 503 X402_LEDGER_UNAVAILABLE: ledger unreachable. Retry shortly with the same
+  idempotencyKey.
+- 500 X402_INTERNAL: unexpected error. Retry with the same idempotencyKey a few
+  times, then stop and report it.
+- 405 METHOD_NOT_ALLOWED: wrong HTTP method (keys/topup/sign are POST, balance is GET).
+
+POST /v1/x402/keys:
+- 429 X402_KEY_RATE_LIMITED: too many keys created from this IP this hour.
+  Reuse the key you have, or retry later.
+- 503 X402_RETRY: key collision. Retry.
+
+POST /v1/x402/topup (no deposit address is shown on any error, so nothing can
+be sent to it; only pay an address from a 200 response):
+- 400 X402_INVALID_REQUEST: body is not JSON, or amount is not a USD amount
+  with at most 2 decimals.
+- 400 X402_TOPUP_AMOUNT_OUT_OF_RANGE: top up must be between $5 and $500.
+- 400 X402_TOPUP_SOURCE_REQUIRED: say which coin you pay with: chain and
+  token. The response lists accepted chains.
+- 400 X402_UNSUPPORTED_CHAIN: unknown chain. Use a CAIP-2 id or a name such as
+  solana, base, ethereum, bsc, polygon, arbitrum, stellar.
+- 400 X402_TOPUP_SOURCE_UNSUPPORTED: that coin is not accepted for top ups.
+  The server currently refuses native coins and Lightning here; top up with
+  USDC or USDT. May carry a "supported" list.
+- 502 INTENTS_API_FAILED: the top up order could not be created. Retry later.
+- 503 X402_TOPUP_MISCONFIGURED or X402_TOPUP_NOT_REGISTERED: the order was not
+  usable, the address was withheld. Retry later; email hi@rozo.ai if it repeats.
+- 503 X402_PAYER_SHADOW, X402_TOPUP_NOT_CONFIGURED or X402_SIGNER_NOT_CONFIGURED:
+  top ups are closed right now. Stop.
+
+POST /v1/x402/sign:
+- 400 X402_INVALID_REQUEST: body is not JSON, or budget is not a positive USD amount.
+- 400 X402_IDEMPOTENCY_KEY_REQUIRED: send idempotencyKey, 8 to 128 chars of
+  [A-Za-z0-9_.:-], one per 402 challenge.
+- 400 X402_UNSUPPORTED_VERSION: only x402Version 2 is accepted.
+- 400 X402_UNSUPPORTED_NETWORK, X402_UNSUPPORTED_SCHEME, X402_UNSUPPORTED_ASSET,
+  X402_INVALID_REQUIREMENT or X402_SIGN_UNSUPPORTED: the accepts entry is
+  malformed or asks for something not covered (only exact USDC is signed).
+  Do not retry the same entry; tell the user.
+- 402 X402_BUDGET_EXCEEDED: the challenge asks more than your budget. Stop and
+  ask the user.
+- 402 X402_PER_TX_LIMIT_EXCEEDED: above this key's single-payment limit
+  (limitUsd). Stop and ask the user.
+- 402 X402_INSUFFICIENT_BALANCE: balance too low (balanceUsd). Top up, wait
+  for the credit, then pay again.
+- 403 X402_PAYTO_NOT_ALLOWED: payTo is not on this key's allowlist. Stop.
+- 403 X402_PAYTO_BLOCKED: this payTo is blocked. Stop, do not retry.
+- 409 X402_IDEMPOTENCY_CONFLICT: this idempotencyKey was already used for a
+  different requirement. Nothing new was charged. Use a new key only for a new
+  402 challenge.
+- 410 X402_CREDENTIAL_REFUNDED: the stored signature expired unused and its
+  amount went back to the balance. Fetch a new 402 and sign it with a new key.
+- 429 X402_DAILY_LIMIT_EXCEEDED: this key's daily limit would be exceeded
+  (limitUsd, spentTodayUsd). Wait for the daily
+  window to reset, or ask hi@rozo.ai for a higher limit.
+- 429 X402_GLOBAL_DAILY_CAP_REACHED or X402_SIGNER_DAILY_CAP_REACHED: a
+  platform-wide daily cap was reached. Retry after 00:00 UTC.
+- 429 X402_SIGNER_CAP_REACHED: the signing service refused this amount. Try a
+  smaller payment or later.
+- 503 X402_RETRY or X402_PAYER_MODE_CHANGED: transient. Retry with the same
+  idempotencyKey.
+- 503 X402_PAYER_SHADOW: the payer is not live for this key. A fresh request
+  was checked and recorded but not signed, and nothing was charged. With
+  "replay":true it refers to an earlier payment under this idempotencyKey,
+  which may have been charged: check /balance, never pay again with a new key.
+  Stop.
+- 503 X402_SIGNER_NOT_CONFIGURED or X402_SIGNER_DISABLED: signing for this
+  network is off right now. Stop.
+A 200 with "replay":true is the stored signature for an idempotencyKey that
+was already paid; it is not a second charge.
 
 ## Safety rules (encode these, they prevent fund loss)
 
