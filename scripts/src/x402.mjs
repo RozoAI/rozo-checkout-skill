@@ -67,11 +67,18 @@ const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Rozo x402 API client
 // ---------------------------------------------------------------------------
 
+/**
+ * 503 codes that mean "try again with the same idempotencyKey". Every other
+ * 503 (X402_PAYER_DISABLED, X402_PAYER_SHADOW, *_NOT_CONFIGURED, or no code)
+ * means the payer is not switched on for you yet.
+ */
+export const RETRYABLE_503 = new Set(['X402_RETRY', 'X402_PAYER_MODE_CHANGED', 'X402_LEDGER_UNAVAILABLE']);
+
 function isTransient(err) {
   if (!(err instanceof SkillError)) return false;
   if (err.code === 'HTTP_TIMEOUT' || err.code === 'HTTP_UNREACHABLE') return true;
+  if (RETRYABLE_503.has(err.code)) return true;
   const status = err.details?.httpStatus;
-  // 503 is the "switch is off" answer, not a blip: never retried.
   return status === 500 || status === 502 || status === 504 || status === 429;
 }
 
@@ -117,7 +124,11 @@ export async function x402Api(method, path, { body, key, fetchImpl = globalThis.
   }
 
   if (res.status === 503) {
-    throw new SkillError('X402_PAYER_DISABLED', DISABLED_MESSAGE, { httpStatus: 503 });
+    const serverCode = json?.code || json?.error?.code || null;
+    if (RETRYABLE_503.has(serverCode)) {
+      throw new SkillError(serverCode, redact(String(json?.error?.message || json?.message || 'Retry.')), { httpStatus: 503 });
+    }
+    throw new SkillError('X402_PAYER_DISABLED', DISABLED_MESSAGE, { httpStatus: 503, ...(serverCode ? { serverCode } : {}) });
   }
   if (!res.ok) {
     const code =
@@ -172,8 +183,8 @@ export function normalizeTopup(resp) {
     memoType: pick(resp, 'memoType', 'receiverMemoType', 'deposit.memoType'),
     lnInvoice: pick(resp, 'lnInvoice', 'invoice', 'deposit.lnInvoice'),
     amount: pick(resp, 'payAmount', 'amountToSend', 'deposit.amount', 'amount'),
-    token: pick(resp, 'token', 'tokenSymbol', 'deposit.token'),
-    chain: pick(resp, 'chain', 'chainId', 'deposit.chain'),
+    token: pick(resp, 'deposit.tokenSymbol', 'deposit.token', 'tokenSymbol', 'token'),
+    chain: pick(resp, 'deposit.chainId', 'deposit.chain', 'chainId', 'chain'),
     creditUsd: pick(resp, 'creditUsd', 'credit', 'amountUsd'),
     expiresAt: pick(resp, 'expiresAt', 'deposit.expiresAt'),
     paymentLink: pick(resp, 'paymentLink', 'payUrl'),
@@ -204,11 +215,31 @@ export async function runTopup({ amountUsd, coin }, { fetchImpl, blacklist } = {
   }
 
   const resp = await x402Api('POST', '/topup', {
-    body: { amount: String(amountUsd).trim(), token: preset.token, chain: preset.chain },
+    // {amount, token, chain} is the documented contract; `source` is the same
+    // choice in create-invoice's shape, sent too because a router that reads
+    // only `source` would otherwise fall back to its default coin.
+    body: {
+      amount: String(amountUsd).trim(),
+      token: preset.token,
+      chain: preset.chain,
+      source: { chainId: preset.chain, tokenSymbol: preset.token },
+    },
     key: found.key,
     fetchImpl,
   });
   const deposit = normalizeTopup(resp);
+  // Never show a deposit for a different coin than the one asked for: paying
+  // USDT on Solana into a Base USDC address loses the money.
+  if (
+    (deposit.chain !== null && String(deposit.chain) !== preset.chain) ||
+    (deposit.token !== null && String(deposit.token).toUpperCase() !== preset.token)
+  ) {
+    throw new SkillError(
+      'X402_TOPUP_MISMATCH',
+      `Rozo returned a deposit for ${deposit.token ?? '?'} on chain ${deposit.chain ?? '?'}, not ${preset.token} on chain ${preset.chain}. Do not send anything; the address is withheld.`,
+      { orderId: deposit.orderId },
+    );
+  }
   if (!deposit.address && !deposit.lnInvoice) {
     throw new SkillError('X402_BAD_TOPUP', 'Rozo returned a topup order without a deposit address.', {
       orderId: deposit.orderId,
@@ -244,7 +275,14 @@ export async function runBalance({ fetchImpl } = {}) {
     key: { masked: maskKey(found.key), source: found.source },
     balanceUsd: pick(resp, 'balanceUsd', 'balance', 'available'),
     pendingUsd: pick(resp, 'pendingUsd', 'pending'),
-    limits: pick(resp, 'limits'),
+    status: pick(resp, 'status'),
+    mode: pick(resp, 'mode'),
+    limits: pick(resp, 'limits') ?? {
+      perPaymentUsd: pick(resp, 'perTxLimitUsd'),
+      dailyUsd: pick(resp, 'dailyLimitUsd'),
+      spentTodayUsd: pick(resp, 'spentTodayUsd'),
+      payToAllowlist: pick(resp, 'payToAllowlist'),
+    },
     recent: pick(resp, 'recent', 'payments', 'history'),
   };
 }
@@ -407,6 +445,8 @@ export async function runPay(
     ...(challenge.resource ? { resource: challenge.resource } : {}),
     accepts: [option.requirement],
     budget: plan.budgetUsd,
+    // Same cap under the name the router reads.
+    maxAmountUsd: plan.budgetUsd,
     idempotencyKey: key,
   };
   const { resp: signed, attempts } = await signWithRetry(signBody, { key: found.key, fetchImpl, sleep });
@@ -416,7 +456,8 @@ export async function runPay(
       idempotencyKey: key,
     });
   }
-  const headerName = typeof signed.headerName === 'string' && signed.headerName ? signed.headerName : paymentHeaderName(challenge.x402Version);
+  const named = [signed.headerName, signed.header].find((h) => typeof h === 'string' && /^[A-Za-z-]+$/.test(h));
+  const headerName = named || paymentHeaderName(challenge.x402Version);
 
   // 4. Replay the original request with the payment header. A network failure
   //    is retried once with the SAME signature (the seller settles at most once

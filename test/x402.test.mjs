@@ -287,6 +287,7 @@ test('pay: 402 -> /sign (key, accepts, budget, idempotencyKey) -> replay with PA
   const signBody = JSON.parse(sign.body);
   assert.equal(signBody.idempotencyKey, '11111111-2222-4333-8444-555555555555');
   assert.equal(signBody.budget, '0.05');
+  assert.equal(signBody.maxAmountUsd, '0.05');
   assert.equal(signBody.x402Version, 2);
   assert.deepEqual(signBody.accepts, [challenge.accepts[0]]);
   // Rozo never sees the request body or the seller's credentials.
@@ -441,7 +442,7 @@ test('topup: creates a key once (0600 file), then sends {amount, token, chain} w
   state.routes['POST /v1/x402/keys'] = { status: 200, body: { key: 'ak_new_9876543210fedcba' } };
   state.routes['POST /v1/x402/topup'] = {
     status: 200,
-    body: { orderId: 'ord_1', depositAddress: SELLER_SOL, payAmount: '20.2', token: 'USDT', chain: '900', expiresAt: '2026-10-10T12:00:00Z' },
+    body: { orderId: 'ord_1', depositAddress: SELLER_SOL, payAmount: '20.2', expiresAt: '2026-10-10T12:00:00Z' },
   };
 
   const out = await flows.runTopup({ amountUsd: '20', coin: 'usdt-solana' });
@@ -455,14 +456,14 @@ test('topup: creates a key once (0600 file), then sends {amount, token, chain} w
   assert.equal(fs.readFileSync(keyPath(), 'utf8').trim(), 'ak_new_9876543210fedcba');
 
   const topupCall = state.calls.find((c) => c.key === 'POST /v1/x402/topup');
-  assert.deepEqual(JSON.parse(topupCall.body), { amount: '20', token: 'USDT', chain: '900' });
+  assert.deepEqual(JSON.parse(topupCall.body), { amount: '20', token: 'USDT', chain: '900', source: { chainId: '900', tokenSymbol: 'USDT' } });
   assert.equal(topupCall.headers.authorization, 'Bearer ak_new_9876543210fedcba');
 
   // Second topup reuses the stored key; no second /keys call.
   await flows.runTopup({ amountUsd: '5', coin: 'sol-solana' });
   assert.equal(state.calls.filter((c) => c.key === 'POST /v1/x402/keys').length, 1);
   const second = JSON.parse(state.calls.filter((c) => c.key === 'POST /v1/x402/topup')[1].body);
-  assert.deepEqual(second, { amount: '5', token: 'SOL', chain: '900' });
+  assert.deepEqual(second, { amount: '5', token: 'SOL', chain: '900', source: { chainId: '900', tokenSymbol: 'SOL' } });
   fs.rmSync(keyPath(), { force: true });
 });
 
@@ -533,4 +534,57 @@ test('pay: the request URL (query may hold seller credentials) is never sent to 
   const sign = state.calls.find((c) => c.key === 'POST /v1/x402/sign');
   assert.doesNotMatch(sign.body, /seller-secret-123|api_key/);
   assert.equal('resource' in JSON.parse(sign.body), false);
+}));
+
+test('topup: router response shape (paymentId + deposit.{chainId,tokenSymbol,address,amount}) is read', withKey(async () => {
+  resetServer();
+  state.routes['POST /v1/x402/topup'] = {
+    status: 200,
+    body: { ok: true, paymentId: 'pay_1', expiresAt: '2026-10-10T12:00:00Z', deposit: { chainId: '900', tokenSymbol: 'USDT', address: SELLER_SOL, memo: null, amount: '20.20' }, creditUsd: '20' },
+  };
+  const out = await flows.runTopup({ amountUsd: '20', coin: 'usdt-solana' });
+  assert.equal(out.deposit.orderId, 'pay_1');
+  assert.equal(out.deposit.address, SELLER_SOL);
+  assert.equal(out.deposit.amount, '20.20');
+  assert.equal(out.deposit.chain, '900');
+}));
+
+test('topup: a deposit for a different coin than requested is withheld', withKey(async () => {
+  resetServer();
+  // e.g. a router that ignored the requested source and fell back to Base USDC
+  state.routes['POST /v1/x402/topup'] = {
+    status: 200,
+    body: { paymentId: 'pay_2', deposit: { chainId: '8453', tokenSymbol: 'USDC', address: SELLER_EVM, amount: '20' } },
+  };
+  await assert.rejects(
+    flows.runTopup({ amountUsd: '20', coin: 'usdt-solana' }),
+    (e) => e.code === 'X402_TOPUP_MISMATCH' && !JSON.stringify(e).includes(SELLER_EVM),
+  );
+}));
+
+test('pay: a 503 X402_RETRY is retried with the same key; X402_PAYER_SHADOW is "not enabled yet"', withKey(async () => {
+  resetServer();
+  state.routes['GET /paid'] = paidEndpoint({ challenge: v2Challenge([v2Requirement()]) });
+  state.routes['POST /v1/x402/sign'] = [
+    { status: 503, body: { ok: false, code: 'X402_RETRY', error: { code: 'X402_RETRY', message: 'Transient signing conflict.' } } },
+    { status: 200, body: { ok: true, header: 'PAYMENT-SIGNATURE', paymentSignature: 'S2', paymentId: 'p' } },
+  ];
+  const out = await flows.runPay({ url: `${ORIGIN}/paid` }, { sleep: noSleep });
+  assert.equal(out.payment.signAttempts, 2);
+  const keys = state.calls.filter((c) => c.key === 'POST /v1/x402/sign').map((c) => JSON.parse(c.body).idempotencyKey);
+  assert.equal(new Set(keys).size, 1);
+
+  resetServer();
+  state.routes['GET /paid'] = paidEndpoint({ challenge: v2Challenge([v2Requirement()]) });
+  state.routes['POST /v1/x402/sign'] = { status: 503, body: { ok: false, code: 'X402_PAYER_SHADOW', error: { code: 'X402_PAYER_SHADOW', message: 'shadow' } } };
+  await assert.rejects(flows.runPay({ url: `${ORIGIN}/paid` }, { sleep: noSleep }), (e) => e.code === 'X402_PAYER_DISABLED' && e.details.serverCode === 'X402_PAYER_SHADOW');
+}));
+
+test('balance: router field names become limits', withKey(async () => {
+  resetServer();
+  state.routes['GET /v1/x402/balance'] = { status: 200, body: { ok: true, mode: 'on', status: 'active', balanceUsd: '9.5', perTxLimitUsd: '5', dailyLimitUsd: '100', spentTodayUsd: '0.5', payToAllowlist: null } };
+  const out = await flows.runBalance();
+  assert.equal(out.limits.perPaymentUsd, '5');
+  assert.equal(out.limits.dailyUsd, '100');
+  assert.equal(out.mode, 'on');
 }));
