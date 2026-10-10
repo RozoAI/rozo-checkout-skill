@@ -58233,11 +58233,11 @@ PAY OPTIONS
   --body <s>              request body, sent as is
   --header 'Name: value'  extra request header; repeat for more
   --max-usd <n>           most this one call may cost (default 1.00)
-  --prefer base|solana    which payment network to use when both are offered
   --idempotency-key <id>  reuse after an interrupted run so you are not charged twice
   --dry-run               read the 402 and show what would be paid; sign nothing
 
-Payment leg: USDC on Base or USDC on Solana only (x402 scheme "exact").
+Payment leg: USDC on Base only (eip155:8453, x402 scheme "exact").
+Solana payment leg is coming later.
 Your request goes straight from this machine to the endpoint; Rozo only sees
 the 402 payment requirements it is asked to sign.`;
 function parseX402Args(argv) {
@@ -58372,6 +58372,8 @@ var USDC_ASSET = {
   [NETWORK_SOLANA]: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 };
 var USDC_DECIMALS = 6;
+var PAYABLE_NETWORKS = /* @__PURE__ */ new Set([NETWORK_BASE]);
+var SOLANA_COMING_LATER = "Solana payment leg is coming later";
 var V1_NETWORK_ALIASES = {
   base: NETWORK_BASE,
   solana: NETWORK_SOLANA
@@ -58466,7 +58468,11 @@ function classifyRequirement(req) {
   }
   const usdc = USDC_ASSET[network];
   if (!usdc) {
-    return { supported: false, reason: `network ${req.network} (only Base and Solana USDC)`, network };
+    return { supported: false, reason: `network ${req.network} (only Base USDC)`, network };
+  }
+  if (!PAYABLE_NETWORKS.has(network)) {
+    const reason = network === NETWORK_SOLANA ? `USDC on Solana (${SOLANA_COMING_LATER})` : `network ${req.network} (only Base USDC)`;
+    return { supported: false, reason, network };
   }
   const assetOk = network === NETWORK_BASE ? String(req.asset ?? "").toLowerCase() === usdc.toLowerCase() : String(req.asset ?? "") === usdc;
   if (!assetOk) {
@@ -58495,9 +58501,10 @@ function selectRequirement(challenge2, { budgetAtomic, prefer } = {}) {
   const classified = challenge2.accepts.map(classifyRequirement);
   const supported = classified.filter((c2) => c2.supported).map((c2) => c2.option);
   if (supported.length === 0) {
+    const solanaOffered = classified.some((c2) => c2.network === NETWORK_SOLANA);
     throw new SkillError(
       "X402_UNSUPPORTED",
-      "This endpoint does not accept a payment Rozo can sign. Rozo pays with USDC on Base or USDC on Solana (scheme exact) only.",
+      "This endpoint does not accept a payment Rozo can sign. Rozo pays with USDC on Base (eip155:8453, scheme exact) only." + (solanaOffered ? ` It offers USDC on Solana; the ${SOLANA_COMING_LATER}.` : ""),
       { offered: classified.map((c2) => c2.reason ?? "supported") }
     );
   }
@@ -58585,7 +58592,7 @@ function maskKey(key) {
 
 // scripts/src/x402.mjs
 var X402_BASE = process.env.ROZO_CHECKOUT_X402_BASE || "https://apiserver.mpprouter.dev/v1/x402";
-var DISABLED_MESSAGE = "x402 payer not enabled yet. Rozo has not switched on x402 payments; nothing was charged. Try again later.";
+var DISABLED_MESSAGE = "x402 payer not enabled for this key right now; nothing was charged. Try again later, or email hi@rozo.ai with the masked key.";
 var SIGN_RETRIES = 2;
 var SIGN_BACKOFF_MS = [1e3, 3e3];
 var API_TIMEOUT_MS = 2e4;

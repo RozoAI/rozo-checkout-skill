@@ -171,7 +171,7 @@ test('parseChallenge: 402 without requirements is X402_BAD_CHALLENGE', () => {
   );
 });
 
-test('selectRequirement: only exact USDC on Base or Solana is payable', () => {
+test('selectRequirement: only exact USDC on Base is payable', () => {
   const ch = {
     x402Version: 2,
     accepts: [
@@ -183,19 +183,45 @@ test('selectRequirement: only exact USDC on Base or Solana is payable', () => {
   assert.throws(() => x402.selectRequirement(ch, { budgetAtomic: 10_000_000n }), (e) => e.code === 'X402_UNSUPPORTED');
 });
 
-test('selectRequirement: cheapest within budget, --prefer breaks the choice, over budget refused', () => {
+test('selectRequirement: cheapest Base option within budget, Solana skipped even if cheaper or preferred, over budget refused', () => {
   const ch = {
     x402Version: 2,
     accepts: [
       v2Requirement({ amount: '20000' }),
+      v2Requirement({ amount: '18000' }),
       v2Requirement({ network: x402.NETWORK_SOLANA, asset: x402.USDC_ASSET[x402.NETWORK_SOLANA], payTo: SELLER_SOL, amount: '15000' }),
     ],
   };
-  assert.equal(x402.selectRequirement(ch, { budgetAtomic: 1_000_000n }).network, x402.NETWORK_SOLANA);
+  const picked = x402.selectRequirement(ch, { budgetAtomic: 1_000_000n });
+  assert.equal(picked.network, x402.NETWORK_BASE);
+  assert.equal(picked.amountUsd, '0.018');
+  assert.equal(x402.selectRequirement(ch, { budgetAtomic: 1_000_000n, prefer: 'solana' }).network, x402.NETWORK_BASE);
   assert.equal(x402.selectRequirement(ch, { budgetAtomic: 1_000_000n, prefer: 'base' }).network, x402.NETWORK_BASE);
   assert.throws(
     () => x402.selectRequirement(ch, { budgetAtomic: 10_000n }),
-    (e) => e.code === 'X402_OVER_BUDGET' && e.details.askedUsd === '0.015',
+    (e) => e.code === 'X402_OVER_BUDGET' && e.details.askedUsd === '0.018',
+  );
+});
+
+test('classifyRequirement: Solana USDC is recognized but unsupported, "coming later"', () => {
+  const c = x402.classifyRequirement(
+    v2Requirement({ network: x402.NETWORK_SOLANA, asset: x402.USDC_ASSET[x402.NETWORK_SOLANA], payTo: SELLER_SOL }),
+  );
+  assert.equal(c.supported, false);
+  assert.equal(c.network, x402.NETWORK_SOLANA);
+  assert.match(c.reason, /Solana payment leg is coming later/);
+  // v1 short name maps to the same CAIP-2 network
+  assert.equal(x402.classifyRequirement({ scheme: 'exact', network: 'solana', maxAmountRequired: '1000', asset: x402.USDC_ASSET[x402.NETWORK_SOLANA], payTo: SELLER_SOL }).network, x402.NETWORK_SOLANA);
+});
+
+test('selectRequirement: Solana-only endpoint is X402_UNSUPPORTED with a "coming later" hint', () => {
+  const ch = {
+    x402Version: 2,
+    accepts: [v2Requirement({ network: x402.NETWORK_SOLANA, asset: x402.USDC_ASSET[x402.NETWORK_SOLANA], payTo: SELLER_SOL })],
+  };
+  assert.throws(
+    () => x402.selectRequirement(ch, { budgetAtomic: 10_000_000n }),
+    (e) => e.code === 'X402_UNSUPPORTED' && /Base \(eip155:8453/.test(e.message) && /Solana payment leg is coming later/.test(e.message),
   );
 });
 
@@ -311,13 +337,13 @@ test('pay: x402 v1 challenge is replayed with X-PAYMENT', withKey(async () => {
           status: 402,
           body: {
             x402Version: 1,
-            accepts: [{ scheme: 'exact', network: 'solana', maxAmountRequired: '1000', asset: x402.USDC_ASSET[x402.NETWORK_SOLANA], payTo: SELLER_SOL }],
+            accepts: [{ scheme: 'exact', network: 'base', maxAmountRequired: '1000', asset: x402.USDC_ASSET[x402.NETWORK_BASE], payTo: SELLER_EVM }],
           },
         };
   state.routes['POST /v1/x402/sign'] = { status: 200, body: { paymentSignature: 'V1SIG' } };
   const out = await flows.runPay({ url: `${ORIGIN}/v1paid` }, { sleep: noSleep });
   assert.equal(out.paid, true);
-  assert.equal(out.payment.network, x402.NETWORK_SOLANA);
+  assert.equal(out.payment.network, x402.NETWORK_BASE);
   assert.equal(state.calls.at(-1).headers['x-payment'], 'V1SIG');
 }));
 
@@ -367,7 +393,7 @@ test('pay: 503 from /sign is the friendly "x402 payer not enabled yet", not retr
   state.routes['POST /v1/x402/sign'] = { status: 503, body: { error: 'X402_PAYER_OFF' } };
   await assert.rejects(
     flows.runPay({ url: `${ORIGIN}/paid` }, { sleep: noSleep }),
-    (e) => e.code === 'X402_PAYER_DISABLED' && /x402 payer not enabled yet/.test(e.message),
+    (e) => e.code === 'X402_PAYER_DISABLED' && /x402 payer not enabled/.test(e.message),
   );
   assert.equal(state.calls.filter((c) => c.key === 'POST /v1/x402/sign').length, 1);
 }));
