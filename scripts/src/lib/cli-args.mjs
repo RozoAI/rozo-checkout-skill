@@ -327,7 +327,9 @@ export function parseCliArgs(argv) {
       json,
       provider: flags.provider,
       watch: flags.watch === true,
-      timeout: flags.timeout === undefined ? 600 : Number(flags.timeout),
+      // Left undefined when absent so status can size the window itself:
+      // 600s, or a Lightning invoice's remaining validity (max 60 min).
+      timeout: flags.timeout === undefined ? undefined : Number(flags.timeout),
     };
   }
 
@@ -427,6 +429,7 @@ export function parseCliArgs(argv) {
     dryRun: flags['dry-run'] === true,
     watch: flags['no-watch'] !== true,
     timeout,
+    timeoutExplicit: flags.timeout !== undefined,
     rpc: flags.rpc,
     payer: flags.payer,
     fresh: flags.fresh === true,
@@ -475,7 +478,8 @@ OPTIONS
   --dry-run       with --send, show what would be signed and sign nothing
   --json, -j      machine-readable output
   --no-watch      stop after showing the deposit instructions
-  --timeout <s>   how long to poll for settlement (default 900)
+  --timeout <s>   how long to poll for settlement (default 900; for Lightning,
+                  the invoice's remaining validity, at most 60 minutes)
   --bitrefill-invoice <id>  pay a Bitrefill invoice created with "USDC on Base"
                   instead of a Coinbase link. Needs --to <0x… address Bitrefill
                   shows>, --amount <exact USDC amount> and --expires-at <ISO>

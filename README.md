@@ -426,7 +426,8 @@ done < links.txt
 - `--yes` is required when stdin is not a terminal, `--json` prints exactly one
   JSON object, and `--no-watch` returns as soon as the deposit details exist.
   Without `--no-watch`, `pay --json` first waits for settlement (up to
-  `--timeout`, default 900 s) and prints nothing until then, invoice included.
+  `--timeout`, default 900 s; for Lightning, the invoice's remaining validity,
+  at most 60 minutes) and prints nothing until then, invoice included.
 - Without `--send` (the loop above), a successful `pay --no-watch` means the
   order and its deposit details exist. **No money has moved yet**, which is
   why the log says `pending`. With `--send`, the CLI may already have
@@ -519,7 +520,11 @@ a link again, run `status` on its `rozoPaymentId`:
 - `RATE_LIMITED`: order creation is capped per IP per hour (currently 30
   requests, and each `pay` makes two), so plan on about 15 links per hour from
   one IP. Wait for the next hour and resume with the links not yet `settled`.
-  Need more? Email us.
+  Need more? Email us. The CLI retries a 429 by itself, up to 3 times, when
+  the server's `Retry-After` (or `retryAfterSeconds`) fits in 2 minutes of
+  total waiting. A longer wait fails at once: read
+  `error.details.retryAfterSeconds`, and `error.details.rateLimit` (limit,
+  remaining, tier, scope) when the server sends it.
 
 Questions about a batch? Email hi@rozo.ai, or reach us on
 [X](https://x.com/ROZOai) or [Discord](https://discord.gg/EfWejgTbuU).
