@@ -32,11 +32,11 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 | BNB Chain | `usdt-bnb` `usdc-bnb` | `56` | 小数点以下 18 桁 |
 | Polygon | `usdt-polygon` `usdc-polygon` | `137` | 小数点以下 6 桁 |
 | Base | `usdc-base` | `8453` | 小数点以下 6 桁 |
-| Solana | `usdt-solana` `usdc-solana` | `900` | SPL。ネイティブの SOL は非対応 |
+| Solana | `usdt-solana` `usdc-solana` | `900` | SPL。ネイティブの SOL は Web のみ（下記参照） |
 | Stellar | `usdc-stellar` | `1500` | `MEMO_TEXT` のメモが必須 — 入金ブロックに表示されます |
 | Bitcoin Lightning | `btc-lightning` | `lightning` | BOLT11。金額は satoshi 単位 |
 
-ネイティブのガス通貨（SOL、BNB、ETH、MATIC）およびオンチェーンの BTC は受け付けません。
+この CLI はネイティブコインとオンチェーンの BTC を受け付けません。ネイティブコインは Web の [checkout.rozo.ai](https://checkout.rozo.ai) で支払えます：Ethereum・Base・Arbitrum の ETH、BNB Chain の BNB、Solana の SOL、Polygon の POL（Beta）。オンチェーンの BTC はどの経路でも受け付けません。
 
 ## どのウォレットが必要ですか？
 
