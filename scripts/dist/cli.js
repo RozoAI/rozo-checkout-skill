@@ -20473,8 +20473,8 @@ var require_dist = __commonJS({
         constructor(failure, failures) {
           let cached2;
           const { message, explanation, ...rest } = failure;
-          const { path: path7 } = failure;
-          const msg = path7.length === 0 ? message : `At path: ${path7.join(".")} -- ${message}`;
+          const { path: path8 } = failure;
+          const msg = path8.length === 0 ? message : `At path: ${path8.join(".")} -- ${message}`;
           super(explanation ?? msg);
           if (explanation != null)
             this.cause = msg;
@@ -20519,15 +20519,15 @@ var require_dist = __commonJS({
         } else if (typeof result === "string") {
           result = { message: result };
         }
-        const { path: path7, branch } = context;
+        const { path: path8, branch } = context;
         const { type: type2 } = struct2;
         const { refinement, message = `Expected a value of type \`${type2}\`${refinement ? ` with refinement \`${refinement}\`` : ""}, but received: \`${print(value)}\`` } = result;
         return {
           value,
           type: type2,
           refinement,
-          key: path7[path7.length - 1],
-          path: path7,
+          key: path8[path8.length - 1],
+          path: path8,
           branch,
           ...result,
           message
@@ -20545,8 +20545,8 @@ var require_dist = __commonJS({
         }
       }
       function* run9(value, struct2, options = {}) {
-        const { path: path7 = [], branch = [value], coerce: coerce2 = false, mask: mask2 = false } = options;
-        const ctx = { path: path7, branch, mask: mask2 };
+        const { path: path8 = [], branch = [value], coerce: coerce2 = false, mask: mask2 = false } = options;
+        const ctx = { path: path8, branch, mask: mask2 };
         if (coerce2) {
           value = struct2.coercer(value, ctx);
         }
@@ -20558,7 +20558,7 @@ var require_dist = __commonJS({
         }
         for (let [k, v, s] of struct2.entries(value, ctx)) {
           const ts = run9(v, s, {
-            path: k === void 0 ? path7 : [...path7, k],
+            path: k === void 0 ? path8 : [...path8, k],
             branch: k === void 0 ? branch : [...branch, v],
             coerce: coerce2,
             mask: mask2,
@@ -20793,7 +20793,7 @@ var require_dist = __commonJS({
         }
         return object(schema);
       }
-      function pick(struct2, keys) {
+      function pick2(struct2, keys) {
         const { schema } = struct2;
         const subschema = {};
         for (const key of keys) {
@@ -21254,7 +21254,7 @@ var require_dist = __commonJS({
       exports2.optional = optional;
       exports2.partial = partial;
       exports2.pattern = pattern;
-      exports2.pick = pick;
+      exports2.pick = pick2;
       exports2.record = record;
       exports2.refine = refine;
       exports2.regexp = regexp;
@@ -22744,14 +22744,14 @@ var require_url_state_machine = __commonJS({
       return url.replace(/\u0009|\u000A|\u000D/g, "");
     }
     function shortenPath(url) {
-      const path7 = url.path;
-      if (path7.length === 0) {
+      const path8 = url.path;
+      if (path8.length === 0) {
         return;
       }
-      if (url.scheme === "file" && path7.length === 1 && isNormalizedWindowsDriveLetter(path7[0])) {
+      if (url.scheme === "file" && path8.length === 1 && isNormalizedWindowsDriveLetter(path8[0])) {
         return;
       }
-      path7.pop();
+      path8.pop();
     }
     function includesCredentials(url) {
       return url.username !== "" || url.password !== "";
@@ -25046,16 +25046,16 @@ var require_constants = __commonJS({
 // node_modules/node-gyp-build/node-gyp-build.js
 var require_node_gyp_build = __commonJS({
   "node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
-    var fs7 = __require("fs");
-    var path7 = __require("path");
-    var os5 = __require("os");
+    var fs8 = __require("fs");
+    var path8 = __require("path");
+    var os6 = __require("os");
     var runtimeRequire = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
     var vars = process.config && process.config.variables || {};
     var prebuildsOnly = !!process.env.PREBUILDS_ONLY;
     var abi2 = process.versions.modules;
     var runtime = isElectron() ? "electron" : isNwjs() ? "node-webkit" : "node";
-    var arch = process.env.npm_config_arch || os5.arch();
-    var platform = process.env.npm_config_platform || os5.platform();
+    var arch = process.env.npm_config_arch || os6.arch();
+    var platform = process.env.npm_config_platform || os6.platform();
     var libc = process.env.LIBC || (isAlpine(platform) ? "musl" : "glibc");
     var armv = process.env.ARM_VERSION || (arch === "arm64" ? "8" : vars.arm_version) || "";
     var uv = (process.versions.uv || "").split(".")[0];
@@ -25064,21 +25064,21 @@ var require_node_gyp_build = __commonJS({
       return runtimeRequire(load.resolve(dir));
     }
     load.resolve = load.path = function(dir) {
-      dir = path7.resolve(dir || ".");
+      dir = path8.resolve(dir || ".");
       try {
-        var name = runtimeRequire(path7.join(dir, "package.json")).name.toUpperCase().replace(/-/g, "_");
+        var name = runtimeRequire(path8.join(dir, "package.json")).name.toUpperCase().replace(/-/g, "_");
         if (process.env[name + "_PREBUILD"]) dir = process.env[name + "_PREBUILD"];
       } catch (err) {
       }
       if (!prebuildsOnly) {
-        var release = getFirst(path7.join(dir, "build/Release"), matchBuild);
+        var release = getFirst(path8.join(dir, "build/Release"), matchBuild);
         if (release) return release;
-        var debug = getFirst(path7.join(dir, "build/Debug"), matchBuild);
+        var debug = getFirst(path8.join(dir, "build/Debug"), matchBuild);
         if (debug) return debug;
       }
       var prebuild = resolve(dir);
       if (prebuild) return prebuild;
-      var nearby = resolve(path7.dirname(process.execPath));
+      var nearby = resolve(path8.dirname(process.execPath));
       if (nearby) return nearby;
       var target = [
         "platform=" + platform,
@@ -25095,26 +25095,26 @@ var require_node_gyp_build = __commonJS({
       ].filter(Boolean).join(" ");
       throw new Error("No native build was found for " + target + "\n    loaded from: " + dir + "\n");
       function resolve(dir2) {
-        var tuples = readdirSync(path7.join(dir2, "prebuilds")).map(parseTuple);
+        var tuples = readdirSync(path8.join(dir2, "prebuilds")).map(parseTuple);
         var tuple = tuples.filter(matchTuple(platform, arch)).sort(compareTuples)[0];
         if (!tuple) return;
-        var prebuilds = path7.join(dir2, "prebuilds", tuple.name);
+        var prebuilds = path8.join(dir2, "prebuilds", tuple.name);
         var parsed = readdirSync(prebuilds).map(parseTags);
         var candidates = parsed.filter(matchTags(runtime, abi2));
         var winner = candidates.sort(compareTags(runtime))[0];
-        if (winner) return path7.join(prebuilds, winner.file);
+        if (winner) return path8.join(prebuilds, winner.file);
       }
     };
     function readdirSync(dir) {
       try {
-        return fs7.readdirSync(dir);
+        return fs8.readdirSync(dir);
       } catch (err) {
         return [];
       }
     }
     function getFirst(dir, filter) {
       var files = readdirSync(dir).filter(filter);
-      return files[0] && path7.join(dir, files[0]);
+      return files[0] && path8.join(dir, files[0]);
     }
     function matchBuild(name) {
       return /\.node$/.test(name);
@@ -25201,7 +25201,7 @@ var require_node_gyp_build = __commonJS({
       return typeof window !== "undefined" && window.process && window.process.type === "renderer";
     }
     function isAlpine(platform2) {
-      return platform2 === "linux" && fs7.existsSync("/etc/alpine-release");
+      return platform2 === "linux" && fs8.existsSync("/etc/alpine-release");
     }
     load.parseTags = parseTags;
     load.matchTags = matchTags;
@@ -41510,6 +41510,7 @@ function redact(text) {
     return `${scheme}://${host}${hadMore ? "/<redacted>" : ""}`;
   });
   s = s.replace(/\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}/gi, "$1 <redacted>");
+  s = s.replace(/\bak_[A-Za-z0-9_-]{8,}/g, "ak_<redacted>");
   s = s.replace(
     /\b(api[-_]?key|apikey|access[-_]?token|auth[-_]?token|secret|token|password|passwd|pwd)\b(\s*[:=]\s*)("?)[A-Za-z0-9._~+/=-]{6,}\3/gi,
     "$1$2<redacted>"
@@ -42203,6 +42204,7 @@ USAGE
   npx @rozoai/checkout status <rozoPaymentId | coinbase-link>
   npx @rozoai/checkout receipt <rozoPaymentId | coinbase-link>
   npx @rozoai/checkout resume <rozoPaymentId>
+  npx @rozoai/checkout x402 <topup|pay|balance>      (pay any x402 API; see x402 --help)
 
 COINS (--with)
   usdt-solana   usdc-solana   usdt-bnb      usdc-bnb
@@ -54677,12 +54679,12 @@ function bodyRetryAfterMs(json) {
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 1e3) : null;
 }
 function rateLimitInfo(res) {
-  const pick = (name) => res.headers?.get?.(name) ?? null;
+  const pick2 = (name) => res.headers?.get?.(name) ?? null;
   const info = {
-    limit: pick("x-ratelimit-limit"),
-    remaining: pick("x-ratelimit-remaining"),
-    tier: pick("x-ratelimit-tier"),
-    scope: pick("x-ratelimit-scope")
+    limit: pick2("x-ratelimit-limit"),
+    remaining: pick2("x-ratelimit-remaining"),
+    tier: pick2("x-ratelimit-tier"),
+    scope: pick2("x-ratelimit-scope")
   };
   const present = Object.fromEntries(Object.entries(info).filter(([, v]) => v !== null));
   return Object.keys(present).length ? present : null;
@@ -58208,6 +58210,735 @@ async function run8(argv = process.argv.slice(2)) {
   return main8(argv);
 }
 
+// scripts/src/lib/x402-args.mjs
+var X402_SUBCOMMANDS = ["topup", "pay", "balance"];
+var BOOLEAN = /* @__PURE__ */ new Set(["json", "dry-run", "help"]);
+var VALUE = /* @__PURE__ */ new Set(["with", "method", "body", "header", "max-usd", "prefer", "idempotency-key"]);
+var REPEATABLE = /* @__PURE__ */ new Set(["header"]);
+var UUID_RE2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var X402_HELP = `rozo-checkout x402: pay any x402 API from a prepaid Rozo balance.
+
+USAGE
+  npx @rozoai/checkout x402 topup <usd> --with <coin>
+  npx @rozoai/checkout x402 pay <url> [--method POST] [--body '{...}'] [--header 'Name: value']
+  npx @rozoai/checkout x402 balance
+
+TOPUP COINS (--with)
+  usdt-solana usdc-solana usdt-bnb usdc-bnb usdt-ethereum usdc-ethereum
+  usdt-polygon usdc-polygon usdc-base usdc-stellar btc-lightning
+  native (beta): eth-ethereum eth-base eth-arbitrum bnb-bnb sol-solana
+
+PAY OPTIONS
+  --method <m>            HTTP method (default GET)
+  --body <s>              request body, sent as is
+  --header 'Name: value'  extra request header; repeat for more
+  --max-usd <n>           most this one call may cost (default 1.00)
+  --prefer base|solana    which payment network to use when both are offered
+  --idempotency-key <id>  reuse after an interrupted run so you are not charged twice
+  --dry-run               read the 402 and show what would be paid; sign nothing
+
+Payment leg: USDC on Base or USDC on Solana only (x402 scheme "exact").
+Your request goes straight from this machine to the endpoint; Rozo only sees
+the 402 payment requirements it is asked to sign.`;
+function parseX402Args(argv) {
+  const positional = [];
+  const flags = { header: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--") {
+      positional.push(...argv.slice(i + 1));
+      break;
+    }
+    if (a.startsWith("--")) {
+      let key = a.slice(2);
+      let value;
+      const eq = key.indexOf("=");
+      if (eq !== -1) {
+        value = key.slice(eq + 1);
+        key = key.slice(0, eq);
+      }
+      if (BOOLEAN.has(key)) {
+        flags[key] = value === void 0 ? true : value !== "false";
+        continue;
+      }
+      if (VALUE.has(key)) {
+        if (value === void 0) {
+          value = argv[i + 1];
+          if (value === void 0 || value.startsWith("--") && key !== "body") {
+            throw new CliError("MISSING_VALUE", `--${key} needs a value.`);
+          }
+          i++;
+        }
+        if (REPEATABLE.has(key)) flags[key].push(value);
+        else flags[key] = value;
+        continue;
+      }
+      throw new CliError("UNKNOWN_FLAG", `Unknown option --${key} for x402.`);
+    }
+    if (a === "-j") {
+      flags.json = true;
+      continue;
+    }
+    if (a === "-h") {
+      flags.help = true;
+      continue;
+    }
+    positional.push(a);
+  }
+  const sub = positional[1];
+  const json = Boolean(flags.json);
+  if (flags.help || !sub || sub === "help") return { command: "x402", sub: "help", json };
+  if (!X402_SUBCOMMANDS.includes(sub)) {
+    throw new CliError("UNKNOWN_COMMAND", `Unknown x402 command "${sub}". Expected one of: ${X402_SUBCOMMANDS.join(", ")}.`);
+  }
+  if (sub === "balance") return { command: "x402", sub, json };
+  if (sub === "topup") {
+    const amount = positional[2];
+    if (!amount) throw new CliError("MISSING_TARGET", "Usage: rozo-checkout x402 topup <usd> --with <coin>");
+    if (!flags.with) throw new CliError("MISSING_PRESET", "A coin is required, e.g. --with usdt-solana");
+    return { command: "x402", sub, json, amount, coin: flags.with };
+  }
+  const url = positional[2];
+  if (!url) throw new CliError("MISSING_TARGET", "Usage: rozo-checkout x402 pay <url>");
+  if (flags.prefer !== void 0 && !["base", "solana"].includes(String(flags.prefer).toLowerCase())) {
+    throw new CliError("BAD_VALUE", "--prefer must be base or solana.");
+  }
+  if (flags["idempotency-key"] !== void 0 && !UUID_RE2.test(flags["idempotency-key"])) {
+    throw new CliError("BAD_VALUE", "--idempotency-key must be a UUID (the one a previous run printed).");
+  }
+  if (flags.method !== void 0 && !/^[A-Za-z]+$/.test(flags.method)) {
+    throw new CliError("BAD_VALUE", "--method must be an HTTP method like GET or POST.");
+  }
+  return {
+    command: "x402",
+    sub,
+    json,
+    url,
+    method: (flags.method ?? "GET").toUpperCase(),
+    body: flags.body,
+    headers: flags.header,
+    maxUsd: flags["max-usd"],
+    prefer: flags.prefer ? String(flags.prefer).toLowerCase() : void 0,
+    idempotencyKey: flags["idempotency-key"],
+    dryRun: flags["dry-run"] === true
+  };
+}
+function isX402Argv(argv) {
+  const first = argv.find((a) => !a.startsWith("-"));
+  return first === "x402";
+}
+
+// scripts/src/x402.mjs
+import crypto8 from "node:crypto";
+
+// scripts/src/lib/x402-key.mjs
+import fs7 from "node:fs";
+import path7 from "node:path";
+import os5 from "node:os";
+var KEY_ENV = "ROZO_CHECKOUT_X402_KEY";
+function keyPath() {
+  const root = process.env.ROZO_CHECKOUT_STATE_DIR ? path7.dirname(stateRoot()) : path7.join(os5.homedir(), ".rozo-checkout");
+  return path7.join(root, "x402-key");
+}
+function readAgentKey() {
+  const fromEnv = process.env[KEY_ENV];
+  if (fromEnv && fromEnv.trim()) return { key: fromEnv.trim(), source: "env" };
+  try {
+    const text = fs7.readFileSync(keyPath(), "utf8").trim();
+    if (text) return { key: text, source: "file" };
+  } catch {
+  }
+  return null;
+}
+function saveAgentKey(key) {
+  const file = keyPath();
+  fs7.mkdirSync(path7.dirname(file), { recursive: true, mode: 448 });
+  const fd = fs7.openSync(file, "wx", 384);
+  try {
+    fs7.writeSync(fd, `${key}
+`);
+    fs7.fsyncSync(fd);
+  } finally {
+    fs7.closeSync(fd);
+  }
+  return file;
+}
+
+// scripts/src/lib/x402.mjs
+var NETWORK_BASE = "eip155:8453";
+var NETWORK_SOLANA = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
+var USDC_ASSET = {
+  [NETWORK_BASE]: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  [NETWORK_SOLANA]: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+};
+var USDC_DECIMALS = 6;
+var V1_NETWORK_ALIASES = {
+  base: NETWORK_BASE,
+  solana: NETWORK_SOLANA
+};
+function networkFamily(network) {
+  if (network === NETWORK_BASE) return "evm";
+  if (network === NETWORK_SOLANA) return "solana";
+  return null;
+}
+function networkLabel(network) {
+  if (network === NETWORK_BASE) return "Base";
+  if (network === NETWORK_SOLANA) return "Solana";
+  return String(network);
+}
+function decodeBase64Json(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const normalized = value.trim().replace(/-/g, "+").replace(/_/g, "/");
+    const text = Buffer.from(normalized, "base64").toString("utf8");
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function encodeBase64Json(value) {
+  return Buffer.from(JSON.stringify(value), "utf8").toString("base64");
+}
+function parseJsonText(text) {
+  if (typeof text !== "string" || !text.trim()) return null;
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function parseChallenge({ status, getHeader, bodyText }) {
+  if (status !== 402) {
+    throw new SkillError("X402_NOT_402", `Expected HTTP 402, got ${status}.`);
+  }
+  const headerValue = getHeader("payment-required");
+  let doc = headerValue ? decodeBase64Json(headerValue) : null;
+  let source = doc ? "header" : null;
+  if (!doc) {
+    doc = parseJsonText(bodyText);
+    source = doc ? "body" : null;
+  }
+  if (!doc || !Array.isArray(doc.accepts) || doc.accepts.length === 0) {
+    throw new SkillError(
+      "X402_BAD_CHALLENGE",
+      "The endpoint returned 402 but no x402 payment requirements (no PAYMENT-REQUIRED header and no accepts list in the body)."
+    );
+  }
+  const x402Version = Number(doc.x402Version) || (source === "header" ? 2 : 1);
+  return {
+    x402Version,
+    source,
+    resource: doc.resource ?? null,
+    error: typeof doc.error === "string" ? doc.error : null,
+    extensions: doc.extensions ?? null,
+    accepts: doc.accepts
+  };
+}
+function atomicAmount(req) {
+  const raw = req?.amount ?? req?.maxAmountRequired;
+  if (raw === null || raw === void 0) return null;
+  const s = String(raw).trim();
+  if (!/^\d+$/.test(s)) return null;
+  return BigInt(s);
+}
+function formatUsdc(atomic) {
+  const a = BigInt(atomic);
+  const whole = a / 1000000n;
+  const frac = (a % 1000000n).toString().padStart(USDC_DECIMALS, "0").replace(/0+$/, "");
+  const fracOut = frac.length < 2 ? frac.padEnd(2, "0") : frac;
+  return `${whole}.${fracOut}`;
+}
+function usdToAtomic(value) {
+  const s = String(value ?? "").trim();
+  if (!/^\d+(\.\d{1,6})?$/.test(s)) {
+    throw new SkillError("BAD_VALUE", `"${value}" is not a USD amount like 0.50.`);
+  }
+  const [w, f = ""] = s.split(".");
+  return BigInt(w) * 1000000n + BigInt(f.padEnd(USDC_DECIMALS, "0"));
+}
+function classifyRequirement(req) {
+  if (!req || typeof req !== "object") return { supported: false, reason: "not an object" };
+  const network = V1_NETWORK_ALIASES[req.network] ?? req.network;
+  if (req.scheme !== "exact") {
+    return { supported: false, reason: `scheme ${req.scheme} (only exact)`, network };
+  }
+  const usdc = USDC_ASSET[network];
+  if (!usdc) {
+    return { supported: false, reason: `network ${req.network} (only Base and Solana USDC)`, network };
+  }
+  const assetOk = network === NETWORK_BASE ? String(req.asset ?? "").toLowerCase() === usdc.toLowerCase() : String(req.asset ?? "") === usdc;
+  if (!assetOk) {
+    return { supported: false, reason: `asset ${req.asset} on ${networkLabel(network)} is not USDC`, network };
+  }
+  const amount = atomicAmount(req);
+  if (amount === null || amount <= 0n) {
+    return { supported: false, reason: "missing or invalid amount", network };
+  }
+  if (typeof req.payTo !== "string" || !req.payTo.trim()) {
+    return { supported: false, reason: "missing payTo", network };
+  }
+  return {
+    supported: true,
+    option: {
+      network,
+      asset: req.asset,
+      payTo: req.payTo,
+      amountAtomic: amount,
+      amountUsd: formatUsdc(amount),
+      requirement: req
+    }
+  };
+}
+function selectRequirement(challenge2, { budgetAtomic, prefer } = {}) {
+  const classified = challenge2.accepts.map(classifyRequirement);
+  const supported = classified.filter((c2) => c2.supported).map((c2) => c2.option);
+  if (supported.length === 0) {
+    throw new SkillError(
+      "X402_UNSUPPORTED",
+      "This endpoint does not accept a payment Rozo can sign. Rozo pays with USDC on Base or USDC on Solana (scheme exact) only.",
+      { offered: classified.map((c2) => c2.reason ?? "supported") }
+    );
+  }
+  const within = supported.filter((o) => budgetAtomic === void 0 || o.amountAtomic <= budgetAtomic);
+  if (within.length === 0) {
+    const cheapest = supported.reduce((a, b) => b.amountAtomic < a.amountAtomic ? b : a);
+    throw new SkillError(
+      "X402_OVER_BUDGET",
+      `The endpoint asks for ${cheapest.amountUsd} USDC, above your budget of ${formatUsdc(budgetAtomic)} USD. Raise --max-usd if you mean to pay that much.`,
+      { askedUsd: cheapest.amountUsd, budgetUsd: formatUsdc(budgetAtomic) }
+    );
+  }
+  const preferNet = prefer === "base" ? NETWORK_BASE : prefer === "solana" ? NETWORK_SOLANA : null;
+  within.sort((a, b) => {
+    if (preferNet) {
+      const pa = a.network === preferNet ? 0 : 1;
+      const pb = b.network === preferNet ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+    }
+    return a.amountAtomic < b.amountAtomic ? -1 : a.amountAtomic > b.amountAtomic ? 1 : 0;
+  });
+  return within[0];
+}
+function paymentHeaderName(x402Version) {
+  return Number(x402Version) >= 2 ? "PAYMENT-SIGNATURE" : "X-PAYMENT";
+}
+function paymentResponseHeaderNames() {
+  return ["payment-response", "x-payment-response"];
+}
+function extractSignature(resp) {
+  if (!resp || typeof resp !== "object") return null;
+  const direct = resp.paymentSignature ?? resp.PAYMENT_SIGNATURE ?? resp["PAYMENT-SIGNATURE"] ?? resp.signature ?? resp.headerValue ?? resp.header?.value ?? null;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  if (resp.paymentPayload && typeof resp.paymentPayload === "object") {
+    return encodeBase64Json(resp.paymentPayload);
+  }
+  return null;
+}
+function decodeSettlement(headerValue) {
+  const doc = decodeBase64Json(headerValue);
+  if (!doc) return null;
+  return {
+    success: doc.success ?? null,
+    transaction: doc.transaction ?? doc.txHash ?? null,
+    network: doc.network ?? null,
+    payer: doc.payer ?? null,
+    errorReason: doc.errorReason ?? null
+  };
+}
+var TOPUP_PRESETS = {
+  "usdt-solana": { chain: "900", token: "USDT" },
+  "usdc-solana": { chain: "900", token: "USDC" },
+  "usdt-bnb": { chain: "56", token: "USDT" },
+  "usdc-bnb": { chain: "56", token: "USDC" },
+  "usdt-ethereum": { chain: "1", token: "USDT" },
+  "usdc-ethereum": { chain: "1", token: "USDC" },
+  "usdt-polygon": { chain: "137", token: "USDT" },
+  "usdc-polygon": { chain: "137", token: "USDC" },
+  "usdc-base": { chain: "8453", token: "USDC" },
+  "usdc-stellar": { chain: "1500", token: "USDC" },
+  "btc-lightning": { chain: "lightning", token: "BTC" },
+  "eth-ethereum": { chain: "1", token: "ETH", native: true },
+  "eth-base": { chain: "8453", token: "ETH", native: true },
+  "eth-arbitrum": { chain: "42161", token: "ETH", native: true },
+  "bnb-bnb": { chain: "56", token: "BNB", native: true },
+  "sol-solana": { chain: "900", token: "SOL", native: true }
+};
+var TOPUP_MIN_USD = 5;
+function resolveTopupPreset(value) {
+  const key = String(value ?? "").trim().toLowerCase();
+  const hit = TOPUP_PRESETS[key];
+  if (!hit) {
+    throw new SkillError(
+      "BAD_PRESET",
+      `"${value}" is not a topup coin. Known: ${Object.keys(TOPUP_PRESETS).join(", ")}`
+    );
+  }
+  return { preset: key, ...hit };
+}
+function maskKey(key) {
+  const s = String(key ?? "");
+  if (s.length <= 10) return "<redacted>";
+  return `${s.slice(0, 3)}\u2026${s.slice(-4)}`;
+}
+
+// scripts/src/x402.mjs
+var X402_BASE = process.env.ROZO_CHECKOUT_X402_BASE || "https://apiserver.mpprouter.dev/v1/x402";
+var DISABLED_MESSAGE = "x402 payer not enabled yet. Rozo has not switched on x402 payments; nothing was charged. Try again later.";
+var SIGN_RETRIES = 2;
+var SIGN_BACKOFF_MS = [1e3, 3e3];
+var API_TIMEOUT_MS = 2e4;
+var TARGET_TIMEOUT_MS = 6e4;
+var MAX_BODY_CHARS = 1e6;
+var DEFAULT_MAX_USD = "1.00";
+var defaultSleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
+function isTransient(err) {
+  if (!(err instanceof SkillError)) return false;
+  if (err.code === "HTTP_TIMEOUT" || err.code === "HTTP_UNREACHABLE") return true;
+  const status = err.details?.httpStatus;
+  return status === 500 || status === 502 || status === 504 || status === 429;
+}
+async function x402Api(method, path8, { body, key, fetchImpl = globalThis.fetch, base = X402_BASE } = {}) {
+  const url = `${base.replace(/\/+$/, "")}${path8}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  let res;
+  let text;
+  try {
+    res = await fetchImpl(url, {
+      method,
+      headers: {
+        accept: "application/json",
+        "user-agent": USER_AGENT,
+        "x-rozo-client": ATTRIBUTION_CLIENT,
+        ...key ? { authorization: `Bearer ${key}` } : {},
+        ...body !== void 0 ? { "content-type": "application/json" } : {}
+      },
+      body: body !== void 0 ? JSON.stringify(body) : void 0,
+      signal: controller.signal
+    });
+    text = await res.text();
+  } catch (err) {
+    throw new SkillError(
+      err?.name === "AbortError" ? "HTTP_TIMEOUT" : "HTTP_UNREACHABLE",
+      `${method} ${path8} failed: ${redact(err?.message || String(err))}`,
+      { url: redactUrl(url) }
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+  if (res.status === 503) {
+    throw new SkillError("X402_PAYER_DISABLED", DISABLED_MESSAGE, { httpStatus: 503 });
+  }
+  if (!res.ok) {
+    const code = json?.code || json?.error?.code || (typeof json?.error === "string" && /^[A-Z][A-Z0-9_]+$/.test(json.error) ? json.error : null) || `HTTP_${res.status}`;
+    const message = json?.message || (typeof json?.error === "string" ? json.error : json?.error?.message) || `HTTP ${res.status}`;
+    throw new SkillError(code, redact(String(message)), {
+      httpStatus: res.status,
+      url: redactUrl(url),
+      body: redactDeep(json ?? redact(String(text ?? "")).slice(0, 800))
+    });
+  }
+  if (json === null || typeof json !== "object") {
+    throw new SkillError("HTTP_BAD_JSON", `${method} ${path8} returned a non-JSON body.`, { url: redactUrl(url) });
+  }
+  return json;
+}
+function requireKey() {
+  const found = readAgentKey();
+  if (!found) {
+    throw new SkillError(
+      "X402_NO_KEY",
+      `No x402 agent key yet. Run "rozo-checkout x402 topup <usd> --with <coin>" first; it creates one and stores it in ${keyPath()}. Or set ${KEY_ENV}.`
+    );
+  }
+  return found;
+}
+function pick(obj, ...names) {
+  for (const n of names) {
+    const v = n.split(".").reduce((o, k) => o == null ? void 0 : o[k], obj);
+    if (v !== void 0 && v !== null && v !== "") return v;
+  }
+  return null;
+}
+function normalizeTopup(resp) {
+  return {
+    orderId: pick(resp, "orderId", "rozoPaymentId", "paymentId", "id", "order.id"),
+    address: pick(resp, "depositAddress", "receiverAddress", "address", "deposit.address", "order.receiverAddress"),
+    memo: pick(resp, "memo", "receiverMemo", "deposit.memo"),
+    memoType: pick(resp, "memoType", "receiverMemoType", "deposit.memoType"),
+    lnInvoice: pick(resp, "lnInvoice", "invoice", "deposit.lnInvoice"),
+    amount: pick(resp, "payAmount", "amountToSend", "deposit.amount", "amount"),
+    token: pick(resp, "token", "tokenSymbol", "deposit.token"),
+    chain: pick(resp, "chain", "chainId", "deposit.chain"),
+    creditUsd: pick(resp, "creditUsd", "credit", "amountUsd"),
+    expiresAt: pick(resp, "expiresAt", "deposit.expiresAt"),
+    paymentLink: pick(resp, "paymentLink", "payUrl")
+  };
+}
+async function runTopup({ amountUsd, coin }, { fetchImpl, blacklist } = {}) {
+  const usd = Number(amountUsd);
+  if (!/^\d+(\.\d{1,2})?$/.test(String(amountUsd ?? "").trim()) || !Number.isFinite(usd)) {
+    throw new SkillError("BAD_VALUE", `"${amountUsd}" is not a USD amount like 20 or 20.50.`);
+  }
+  if (usd < TOPUP_MIN_USD) {
+    throw new SkillError("BAD_VALUE", `Minimum topup is $${TOPUP_MIN_USD}.`);
+  }
+  const preset = resolveTopupPreset(coin);
+  let found = readAgentKey();
+  let created = null;
+  if (!found) {
+    const resp2 = await x402Api("POST", "/keys", { body: {}, fetchImpl });
+    const key = pick(resp2, "key", "agentKey", "apiKey");
+    if (typeof key !== "string" || !key.startsWith("ak_")) {
+      throw new SkillError("X402_BAD_KEY", "Rozo did not return an agent key (expected ak_\u2026).");
+    }
+    const file = saveAgentKey(key);
+    found = { key, source: "file" };
+    created = { keyMasked: maskKey(key), storedAt: file };
+  }
+  const resp = await x402Api("POST", "/topup", {
+    body: { amount: String(amountUsd).trim(), token: preset.token, chain: preset.chain },
+    key: found.key,
+    fetchImpl
+  });
+  const deposit = normalizeTopup(resp);
+  if (!deposit.address && !deposit.lnInvoice) {
+    throw new SkillError("X402_BAD_TOPUP", "Rozo returned a topup order without a deposit address.", {
+      orderId: deposit.orderId
+    });
+  }
+  if (deposit.address) {
+    const family = /^0x[0-9a-fA-F]{40}$/.test(deposit.address) ? "evm" : preset.chain === "900" ? "solana" : "other";
+    assertNotBlacklisted([{ address: deposit.address, family, role: "topup deposit address" }], blacklist ?? loadBlacklist());
+  }
+  return {
+    success: true,
+    command: "x402 topup",
+    ...created ? { keyCreated: created } : {},
+    key: { masked: maskKey(found.key), source: found.source },
+    coin: preset.preset,
+    native: Boolean(preset.native),
+    requestedUsd: String(amountUsd).trim(),
+    deposit,
+    note: "Send exactly once, from your own wallet. Your x402 balance is credited after the deposit confirms."
+  };
+}
+async function runBalance({ fetchImpl } = {}) {
+  const found = requireKey();
+  const resp = await x402Api("GET", "/balance", { key: found.key, fetchImpl });
+  return {
+    success: true,
+    command: "x402 balance",
+    key: { masked: maskKey(found.key), source: found.source },
+    balanceUsd: pick(resp, "balanceUsd", "balance", "available"),
+    pendingUsd: pick(resp, "pendingUsd", "pending"),
+    limits: pick(resp, "limits"),
+    recent: pick(resp, "recent", "payments", "history")
+  };
+}
+function parseHeaderFlags(list) {
+  const out2 = {};
+  for (const raw of list ?? []) {
+    const idx = String(raw).indexOf(":");
+    if (idx <= 0) throw new SkillError("BAD_VALUE", `--header must look like "Name: value", got "${raw}".`);
+    const name = raw.slice(0, idx).trim();
+    const value = raw.slice(idx + 1).trim();
+    if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(name)) {
+      throw new SkillError("BAD_VALUE", `--header name "${name}" is not a valid HTTP header name.`);
+    }
+    if (/^(payment-signature|x-payment)$/i.test(name)) {
+      throw new SkillError("BAD_VALUE", `--header ${name} is set by the payer; do not pass it.`);
+    }
+    out2[name] = value;
+  }
+  return out2;
+}
+async function callTarget(fetchImpl, { url, method, headers, body }, extraHeaders = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TARGET_TIMEOUT_MS);
+  try {
+    const res = await fetchImpl(url, {
+      method,
+      headers: { "user-agent": USER_AGENT, ...headers, ...extraHeaders },
+      body: body ?? void 0,
+      signal: controller.signal,
+      redirect: "manual"
+    });
+    const text = await res.text();
+    return { res, text };
+  } catch (err) {
+    throw new SkillError(
+      err?.name === "AbortError" ? "HTTP_TIMEOUT" : "HTTP_UNREACHABLE",
+      `${method} ${redactUrl(url)} failed: ${redact(err?.message || String(err))}`
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function headerGetter(res) {
+  return (name) => res.headers?.get?.(name) ?? null;
+}
+function bodyOut(text, contentType) {
+  const truncated = text.length > MAX_BODY_CHARS;
+  const s = truncated ? text.slice(0, MAX_BODY_CHARS) : text;
+  if (/json/i.test(contentType ?? "") && !truncated) {
+    try {
+      return { body: JSON.parse(s), truncated };
+    } catch {
+    }
+  }
+  return { body: s, truncated };
+}
+async function signWithRetry(signBody, { key, fetchImpl, sleep: sleep2 = defaultSleep2, retries = SIGN_RETRIES }) {
+  let attempt = 0;
+  for (; ; ) {
+    try {
+      const resp = await x402Api("POST", "/sign", { body: signBody, key, fetchImpl });
+      return { resp, attempts: attempt + 1 };
+    } catch (err) {
+      if (attempt < retries && isTransient(err)) {
+        await sleep2(SIGN_BACKOFF_MS[attempt] ?? 3e3);
+        attempt += 1;
+        continue;
+      }
+      if (err instanceof SkillError) {
+        err.details = { ...err.details ?? {}, idempotencyKey: signBody.idempotencyKey, attempts: attempt + 1 };
+      }
+      throw err;
+    }
+  }
+}
+async function runPay({ url, method = "GET", headers = {}, body, maxUsd = DEFAULT_MAX_USD, prefer, idempotencyKey, dryRun = false }, { fetchImpl = globalThis.fetch, sleep: sleep2 = defaultSleep2, blacklist, uuid = () => crypto8.randomUUID() } = {}) {
+  let target;
+  try {
+    target = new URL(url);
+  } catch {
+    throw new SkillError("BAD_VALUE", `"${url}" is not a URL.`);
+  }
+  if (target.protocol !== "https:" && target.protocol !== "http:") {
+    throw new SkillError("BAD_VALUE", "x402 pay only calls http(s) URLs.");
+  }
+  const budgetAtomic = usdToAtomic(maxUsd);
+  const request2 = { url: target.toString(), method: method.toUpperCase(), headers, body };
+  const first = await callTarget(fetchImpl, request2);
+  if (first.res.status !== 402) {
+    const { body: outBody2, truncated: truncated2 } = bodyOut(first.text, first.res.headers.get("content-type"));
+    return {
+      success: first.res.ok,
+      command: "x402 pay",
+      paid: false,
+      status: first.res.status,
+      contentType: first.res.headers.get("content-type"),
+      body: outBody2,
+      ...truncated2 ? { truncated: truncated2 } : {},
+      note: "The endpoint did not ask for payment (no 402). Nothing was charged."
+    };
+  }
+  const challenge2 = parseChallenge({ status: 402, getHeader: headerGetter(first.res), bodyText: first.text });
+  const option = selectRequirement(challenge2, { budgetAtomic, prefer });
+  assertNotBlacklisted(
+    [{ address: option.payTo, family: networkFamily(option.network), role: "x402 payTo" }],
+    blacklist ?? loadBlacklist()
+  );
+  const key = idempotencyKey || uuid();
+  const plan = {
+    network: option.network,
+    networkLabel: networkLabel(option.network),
+    asset: option.asset,
+    payTo: option.payTo,
+    amountUsd: option.amountUsd,
+    budgetUsd: formatUsdc(budgetAtomic),
+    idempotencyKey: key
+  };
+  if (dryRun) {
+    return {
+      success: true,
+      command: "x402 pay",
+      paid: false,
+      dryRun: true,
+      x402Version: challenge2.x402Version,
+      plan,
+      note: "Dry run: the challenge was read and an option chosen; Rozo was not asked to sign and nothing was charged."
+    };
+  }
+  const found = requireKey();
+  const signBody = {
+    x402Version: challenge2.x402Version,
+    // Only the seller's own declared resource, never our request URL: a query
+    // string can carry the caller's credential for that seller.
+    ...challenge2.resource ? { resource: challenge2.resource } : {},
+    accepts: [option.requirement],
+    budget: plan.budgetUsd,
+    idempotencyKey: key
+  };
+  const { resp: signed, attempts } = await signWithRetry(signBody, { key: found.key, fetchImpl, sleep: sleep2 });
+  const signature = extractSignature(signed);
+  if (!signature) {
+    throw new SkillError("X402_BAD_SIGNATURE", "Rozo answered /sign without a PAYMENT-SIGNATURE value.", {
+      idempotencyKey: key
+    });
+  }
+  const headerName = typeof signed.headerName === "string" && signed.headerName ? signed.headerName : paymentHeaderName(challenge2.x402Version);
+  let replay;
+  try {
+    try {
+      replay = await callTarget(fetchImpl, request2, { [headerName]: signature });
+    } catch (err) {
+      if (err.code !== "HTTP_TIMEOUT" && err.code !== "HTTP_UNREACHABLE") throw err;
+      await sleep2(1e3);
+      replay = await callTarget(fetchImpl, request2, { [headerName]: signature });
+    }
+  } catch (err) {
+    throw new SkillError(
+      "X402_REPLAY_FAILED",
+      `Rozo signed the payment but the paid request failed: ${redact(err?.message || String(err))}. The seller may or may not have settled it. Check "x402 balance", then rerun with the same --idempotency-key.`,
+      { idempotencyKey: key, paymentId: pick(signed, "paymentId", "id"), signed: true, cause: err?.code ?? null }
+    );
+  }
+  const settlementHeader = paymentResponseHeaderNames().map((n) => replay.res.headers.get(n)).find((v) => v);
+  const settlement = settlementHeader ? decodeSettlement(settlementHeader) : null;
+  const { body: outBody, truncated } = bodyOut(replay.text, replay.res.headers.get("content-type"));
+  const payment = {
+    ...plan,
+    paymentId: pick(signed, "paymentId", "id"),
+    signAttempts: attempts,
+    settlement
+  };
+  if (replay.res.status === 402) {
+    let reason = null;
+    try {
+      reason = parseChallenge({ status: 402, getHeader: headerGetter(replay.res), bodyText: replay.text }).error;
+    } catch {
+    }
+    throw new SkillError(
+      "X402_PAYMENT_REJECTED",
+      `The endpoint rejected the payment${reason ? `: ${redact(reason)}` : ""}. Do not retry with a new idempotency key; check "x402 balance" first.`,
+      { payment: redactDeep(payment) }
+    );
+  }
+  return {
+    success: replay.res.ok,
+    command: "x402 pay",
+    paid: true,
+    status: replay.res.status,
+    contentType: replay.res.headers.get("content-type"),
+    payment,
+    body: outBody,
+    ...truncated ? { truncated } : {},
+    ...replay.res.ok ? {} : {
+      note: 'The payment was signed but the endpoint did not return success. The seller may still have settled it; check "x402 balance" before trying again, and reuse --idempotency-key to avoid a second charge.'
+    }
+  };
+}
+
 // scripts/src/cli.mjs
 var SkillErrorLike = class extends Error {
   constructor(code, message) {
@@ -58813,7 +59544,129 @@ function printDeposit(deposit, opts) {
   out(dim("  Send it exactly once."));
   out();
 }
+function x402Printable(payload) {
+  const { body, ...rest } = payload;
+  if (rest.payment?.settlement?.transaction) {
+    rest.payment = {
+      ...rest.payment,
+      settlement: { ...rest.payment.settlement, transaction: publicHash(rest.payment.settlement.transaction) }
+    };
+  }
+  const safe = redactDeep(rest);
+  return body === void 0 ? safe : { ...safe, body };
+}
+async function cmdX402(opts) {
+  if (opts.sub === "help") {
+    if (opts.json) printJson({ success: true, help: X402_HELP, version: VERSION });
+    else out(X402_HELP);
+    return EXIT_OK;
+  }
+  let payload;
+  try {
+    if (opts.sub === "balance") payload = await runBalance();
+    else if (opts.sub === "topup") payload = await runTopup({ amountUsd: opts.amount, coin: opts.coin });
+    else {
+      payload = await runPay({
+        url: opts.url,
+        method: opts.method,
+        headers: parseHeaderFlags(opts.headers),
+        body: opts.body,
+        maxUsd: opts.maxUsd,
+        prefer: opts.prefer,
+        idempotencyKey: opts.idempotencyKey,
+        dryRun: opts.dryRun
+      });
+    }
+  } catch (err2) {
+    const failure = formatFailure(err2);
+    if (opts.json) printJson(failure);
+    else {
+      printError(failure);
+      if (failure.error?.details?.idempotencyKey && failure.error.code !== "X402_PAYER_DISABLED") {
+        out(`  ${dim(`idempotencyKey ${failure.error.details.idempotencyKey} (reuse it with --idempotency-key to avoid a second charge)`)}`);
+      }
+    }
+    return err2?.code === "BAD_VALUE" || err2?.code === "BAD_PRESET" ? EXIT_USAGE : EXIT_ERROR;
+  }
+  const printable = x402Printable(payload);
+  if (opts.json) {
+    printJson(printable);
+    return payload.success ? EXIT_OK : EXIT_ERROR;
+  }
+  if (opts.sub === "balance") {
+    out();
+    out(`  Balance  ${bold(`$${printable.balanceUsd ?? "?"}`)}`);
+    if (printable.pendingUsd) out(`  Pending  $${printable.pendingUsd}`);
+    if (printable.limits) out(`  Limits   ${dim(JSON.stringify(printable.limits))}`);
+    out(`  Key      ${printable.key.masked} ${dim(`(${printable.key.source})`)}`);
+    out();
+    return EXIT_OK;
+  }
+  if (opts.sub === "topup") {
+    const d = printable.deposit;
+    out();
+    if (printable.keyCreated) {
+      out(`  ${green("New x402 agent key")} ${printable.keyCreated.keyMasked}, stored in ${printable.keyCreated.storedAt}`);
+      out(`  ${dim("Keep that file private: it owns your x402 balance.")}`);
+      out();
+    }
+    out(`  ${bold("Send exactly:")}`);
+    out();
+    if (d.lnInvoice) {
+      if (d.amount) out(`    Amount   ${bold(String(d.amount))}`);
+      out(`    BOLT11   ${payload.deposit.lnInvoice}`);
+    } else {
+      out(`    Amount   ${bold(`${d.amount ?? "?"} ${d.token ?? ""}`.trim())}`);
+      if (d.chain) out(`    Chain    ${bold(String(d.chain))}`);
+      out(`    Address  ${bold(payload.deposit.address)}`);
+      if (d.memo) out(`    Memo     ${bold(String(d.memo))}  ${red(`(required${d.memoType ? `, ${d.memoType}` : ""})`)}`);
+    }
+    if (d.expiresAt) out(`    Expires  ${d.expiresAt}`);
+    if (d.orderId) out(`    Order    ${d.orderId}`);
+    out();
+    out(dim(`  ${printable.note}`));
+    out(dim("  Then: rozo-checkout x402 balance"));
+    out();
+    return EXIT_OK;
+  }
+  const err = (s = "") => process.stderr.write(`${s}
+`);
+  if (printable.dryRun) {
+    const p = printable.plan;
+    err(`  Would pay ${bold(`${p.amountUsd} USDC`)} on ${p.networkLabel} to ${p.payTo} (budget ${p.budgetUsd}).`);
+    err(dim(`  idempotencyKey ${p.idempotencyKey}`));
+    return EXIT_OK;
+  }
+  if (printable.paid) {
+    const p = printable.payment;
+    err(`  ${green("Paid")} ${p.amountUsd} USDC on ${p.networkLabel} \u2192 HTTP ${printable.status}`);
+    if (p.settlement?.transaction) err(dim(`  tx ${p.settlement.transaction}`));
+    err(dim(`  idempotencyKey ${p.idempotencyKey}`));
+  } else {
+    err(dim(`  HTTP ${printable.status}, no payment needed.`));
+  }
+  if (printable.note) err(yellow(`  ${printable.note}`));
+  const body = payload.body;
+  process.stdout.write(typeof body === "string" ? body : JSON.stringify(body, null, 2));
+  process.stdout.write("\n");
+  return payload.success ? EXIT_OK : EXIT_ERROR;
+}
 async function main9() {
+  if (isX402Argv(process.argv.slice(2))) {
+    let x402opts;
+    try {
+      x402opts = parseX402Args(process.argv.slice(2));
+    } catch (err) {
+      const payload = formatFailure(err);
+      if (process.argv.includes("--json")) printJson(payload);
+      else {
+        printError(payload);
+        out(dim("\n  rozo-checkout x402 --help for usage."));
+      }
+      return EXIT_USAGE;
+    }
+    return cmdX402(x402opts);
+  }
   let opts;
   try {
     opts = parseCliArgs(process.argv.slice(2));

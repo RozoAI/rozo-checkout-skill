@@ -451,6 +451,7 @@ USAGE
   npx @rozoai/checkout status <rozoPaymentId | coinbase-link>
   npx @rozoai/checkout receipt <rozoPaymentId | coinbase-link>
   npx @rozoai/checkout resume <rozoPaymentId>
+  npx @rozoai/checkout x402 <topup|pay|balance>      (pay any x402 API; see x402 --help)
 
 COINS (--with)
   usdt-solana   usdc-solana   usdt-bnb      usdc-bnb

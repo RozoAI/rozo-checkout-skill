@@ -20,7 +20,7 @@ import './lib/quiet-deps.mjs';
 import readline from 'node:readline';
 import { createRequire } from 'node:module';
 
-import { capture, formatFailure, EXIT_OK, EXIT_ERROR, EXIT_USAGE } from './lib/output.mjs';
+import { capture, formatFailure, redactDeep, publicHash, EXIT_OK, EXIT_ERROR, EXIT_USAGE } from './lib/output.mjs';
 import {
   parseCliArgs,
   CliError,
@@ -51,6 +51,8 @@ import { run as runReceipt } from './receipt.mjs';
 import { run as runResume } from './resume.mjs';
 import { run as runSendEvm } from './send-evm.mjs';
 import { run as runSendSol } from './send-sol.mjs';
+import { parseX402Args, isX402Argv, X402_HELP } from './lib/x402-args.mjs';
+import { runTopup, runPay, runBalance, parseHeaderFlags } from './x402.mjs';
 
 class SkillErrorLike extends Error {
   constructor(code, message) {
@@ -831,8 +833,142 @@ function printDeposit(deposit, opts) {
 }
 
 // ---------------------------------------------------------------------------
+// x402 payer
+// ---------------------------------------------------------------------------
+
+/** Redact everything except the paid response body, which is the user's own data. */
+function x402Printable(payload) {
+  const { body, ...rest } = payload;
+  if (rest.payment?.settlement?.transaction) {
+    rest.payment = {
+      ...rest.payment,
+      settlement: { ...rest.payment.settlement, transaction: publicHash(rest.payment.settlement.transaction) },
+    };
+  }
+  const safe = redactDeep(rest);
+  return body === undefined ? safe : { ...safe, body };
+}
+
+async function cmdX402(opts) {
+  if (opts.sub === 'help') {
+    if (opts.json) printJson({ success: true, help: X402_HELP, version: VERSION });
+    else out(X402_HELP);
+    return EXIT_OK;
+  }
+  let payload;
+  try {
+    if (opts.sub === 'balance') payload = await runBalance();
+    else if (opts.sub === 'topup') payload = await runTopup({ amountUsd: opts.amount, coin: opts.coin });
+    else {
+      payload = await runPay({
+        url: opts.url,
+        method: opts.method,
+        headers: parseHeaderFlags(opts.headers),
+        body: opts.body,
+        maxUsd: opts.maxUsd,
+        prefer: opts.prefer,
+        idempotencyKey: opts.idempotencyKey,
+        dryRun: opts.dryRun,
+      });
+    }
+  } catch (err) {
+    const failure = formatFailure(err);
+    if (opts.json) printJson(failure);
+    else {
+      printError(failure);
+      if (failure.error?.details?.idempotencyKey && failure.error.code !== 'X402_PAYER_DISABLED') {
+        out(`  ${dim(`idempotencyKey ${failure.error.details.idempotencyKey} (reuse it with --idempotency-key to avoid a second charge)`)}`);
+      }
+    }
+    return err?.code === 'BAD_VALUE' || err?.code === 'BAD_PRESET' ? EXIT_USAGE : EXIT_ERROR;
+  }
+
+  const printable = x402Printable(payload);
+  if (opts.json) {
+    printJson(printable);
+    return payload.success ? EXIT_OK : EXIT_ERROR;
+  }
+
+  if (opts.sub === 'balance') {
+    out();
+    out(`  Balance  ${bold(`$${printable.balanceUsd ?? '?'}`)}`);
+    if (printable.pendingUsd) out(`  Pending  $${printable.pendingUsd}`);
+    if (printable.limits) out(`  Limits   ${dim(JSON.stringify(printable.limits))}`);
+    out(`  Key      ${printable.key.masked} ${dim(`(${printable.key.source})`)}`);
+    out();
+    return EXIT_OK;
+  }
+
+  if (opts.sub === 'topup') {
+    const d = printable.deposit;
+    out();
+    if (printable.keyCreated) {
+      out(`  ${green('New x402 agent key')} ${printable.keyCreated.keyMasked}, stored in ${printable.keyCreated.storedAt}`);
+      out(`  ${dim('Keep that file private: it owns your x402 balance.')}`);
+      out();
+    }
+    out(`  ${bold('Send exactly:')}`);
+    out();
+    if (d.lnInvoice) {
+      if (d.amount) out(`    Amount   ${bold(String(d.amount))}`);
+      out(`    BOLT11   ${payload.deposit.lnInvoice}`);
+    } else {
+      out(`    Amount   ${bold(`${d.amount ?? '?'} ${d.token ?? ''}`.trim())}`);
+      if (d.chain) out(`    Chain    ${bold(String(d.chain))}`);
+      // Full address from the live response, never retyped.
+      out(`    Address  ${bold(payload.deposit.address)}`);
+      if (d.memo) out(`    Memo     ${bold(String(d.memo))}  ${red(`(required${d.memoType ? `, ${d.memoType}` : ''})`)}`);
+    }
+    if (d.expiresAt) out(`    Expires  ${d.expiresAt}`);
+    if (d.orderId) out(`    Order    ${d.orderId}`);
+    out();
+    out(dim(`  ${printable.note}`));
+    out(dim('  Then: rozo-checkout x402 balance'));
+    out();
+    return EXIT_OK;
+  }
+
+  // pay: summary to stderr, response body to stdout so it pipes cleanly.
+  const err = (s = '') => process.stderr.write(`${s}\n`);
+  if (printable.dryRun) {
+    const p = printable.plan;
+    err(`  Would pay ${bold(`${p.amountUsd} USDC`)} on ${p.networkLabel} to ${p.payTo} (budget ${p.budgetUsd}).`);
+    err(dim(`  idempotencyKey ${p.idempotencyKey}`));
+    return EXIT_OK;
+  }
+  if (printable.paid) {
+    const p = printable.payment;
+    err(`  ${green('Paid')} ${p.amountUsd} USDC on ${p.networkLabel} → HTTP ${printable.status}`);
+    if (p.settlement?.transaction) err(dim(`  tx ${p.settlement.transaction}`));
+    err(dim(`  idempotencyKey ${p.idempotencyKey}`));
+  } else {
+    err(dim(`  HTTP ${printable.status}, no payment needed.`));
+  }
+  if (printable.note) err(yellow(`  ${printable.note}`));
+  const body = payload.body;
+  process.stdout.write(typeof body === 'string' ? body : JSON.stringify(body, null, 2));
+  process.stdout.write('\n');
+  return payload.success ? EXIT_OK : EXIT_ERROR;
+}
+
+// ---------------------------------------------------------------------------
 
 async function main() {
+  if (isX402Argv(process.argv.slice(2))) {
+    let x402opts;
+    try {
+      x402opts = parseX402Args(process.argv.slice(2));
+    } catch (err) {
+      const payload = formatFailure(err);
+      if (process.argv.includes('--json')) printJson(payload);
+      else {
+        printError(payload);
+        out(dim('\n  rozo-checkout x402 --help for usage.'));
+      }
+      return EXIT_USAGE;
+    }
+    return cmdX402(x402opts);
+  }
   let opts;
   try {
     opts = parseCliArgs(process.argv.slice(2));
