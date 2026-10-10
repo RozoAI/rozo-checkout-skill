@@ -568,7 +568,7 @@ Coverage, kept separate on purpose:
 
 | Leg | What works |
 |---|---|
-| Topup (funding the balance) | USDT on Solana, BNB Chain, Ethereum, Polygon; USDC on Solana, BNB Chain, Ethereum, Polygon, Base, Stellar. USDC and USDT only; any other coin gets `X402_TOPUP_SOURCE_UNSUPPORTED`. Native coins and sats pay OpenRouter through `pay` (ROZO Checkout) instead |
+| Topup (funding the balance) | USDT on Solana, BNB Chain, Ethereum, Polygon, Arbitrum; USDC on Solana, BNB Chain, Ethereum, Polygon, Arbitrum, Base, Stellar. USDC and USDT only; any other coin gets `X402_TOPUP_SOURCE_UNSUPPORTED`. Native coins and sats pay OpenRouter through `pay` (ROZO Checkout) instead |
 | Payment (what the seller receives) | USDC on Base (`eip155:8453`), x402 scheme `exact` only. No native coins, no USDT on this leg. Solana payment leg is coming later: an endpoint that only offers Solana USDC returns `X402_UNSUPPORTED` |
 
 How `x402 pay` works, and what it guarantees:

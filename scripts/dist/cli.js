@@ -58225,7 +58225,7 @@ USAGE
 
 TOPUP COINS (--with)
   usdt-solana usdc-solana usdt-bnb usdc-bnb usdt-ethereum usdc-ethereum
-  usdt-polygon usdc-polygon usdc-base usdc-stellar
+  usdt-polygon usdc-polygon usdt-arbitrum usdc-arbitrum usdc-base usdc-stellar
   x402 top ups accept USDC and USDT only. Holding a native coin or sats?
   Use them to top up OpenRouter with ROZO Checkout (rozo-checkout pay).
 
@@ -58564,18 +58564,26 @@ var TOPUP_PRESETS = {
   "usdc-ethereum": { chain: "1", token: "USDC" },
   "usdt-polygon": { chain: "137", token: "USDT" },
   "usdc-polygon": { chain: "137", token: "USDC" },
+  "usdt-arbitrum": { chain: "42161", token: "USDT" },
+  "usdc-arbitrum": { chain: "42161", token: "USDC" },
   "usdc-base": { chain: "8453", token: "USDC" },
-  "usdc-stellar": { chain: "1500", token: "USDC" },
-  "btc-lightning": { chain: "lightning", token: "BTC" },
-  "eth-ethereum": { chain: "1", token: "ETH", native: true },
-  "eth-base": { chain: "8453", token: "ETH", native: true },
-  "eth-arbitrum": { chain: "42161", token: "ETH", native: true },
-  "bnb-bnb": { chain: "56", token: "BNB", native: true },
-  "sol-solana": { chain: "900", token: "SOL", native: true }
+  "usdc-stellar": { chain: "1500", token: "USDC" }
 };
+var NON_TOPUP_PRESETS = /* @__PURE__ */ new Set([
+  "btc-lightning",
+  "eth-ethereum",
+  "eth-base",
+  "eth-arbitrum",
+  "bnb-bnb",
+  "sol-solana"
+]);
+var TOPUP_STABLE_ONLY = "x402 top ups accept USDC and USDT only. Holding a native coin or sats? Use them to top up OpenRouter with: rozo-checkout pay <openrouter-payment-link> --with btc-lightning (sats), or https://checkout.rozo.ai (native coins).";
 var TOPUP_MIN_USD = 5;
 function resolveTopupPreset(value) {
   const key = String(value ?? "").trim().toLowerCase();
+  if (NON_TOPUP_PRESETS.has(key) || /^(eth|bnb|sol|pol|matic|xlm|btc|sats)-/.test(key)) {
+    throw new SkillError("X402_TOPUP_SOURCE_UNSUPPORTED", TOPUP_STABLE_ONLY, { preset: key });
+  }
   const hit = TOPUP_PRESETS[key];
   if (!hit) {
     throw new SkillError(
@@ -58754,7 +58762,6 @@ async function runTopup({ amountUsd, coin }, { fetchImpl, blacklist } = {}) {
     ...created ? { keyCreated: created } : {},
     key: { masked: maskKey(found.key), source: found.source },
     coin: preset.preset,
-    native: Boolean(preset.native),
     requestedUsd: String(amountUsd).trim(),
     deposit,
     note: "Send exactly once, from your own wallet. Your x402 balance is credited after the deposit confirms."
