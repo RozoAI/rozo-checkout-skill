@@ -161,3 +161,12 @@ test('contactEmailFromArgs and maskEmail', () => {
   assert.throws(() => contactEmailFromArgs({ email: true }), (e) => e.code === 'INVALID_EMAIL');
   assert.equal(maskEmail('alice@example.com'), 'a***@example.com');
 });
+
+test('bulk hint: one plain line, no emoji or dash, points at the docs page', async () => {
+  const { BULK_HINT_TEXT, BULK_DOCS_URL } = await import('../scripts/src/lib/support.mjs');
+  assert.equal(BULK_DOCS_URL, 'https://docs.rozo.ai/products/checkout/bulk-and-agents');
+  assert.ok(BULK_HINT_TEXT.endsWith(BULK_DOCS_URL));
+  assert.ok(!BULK_HINT_TEXT.includes('\n'));
+  assert.ok(!/[–—]/.test(BULK_HINT_TEXT));
+  assert.ok(!/\p{Extended_Pictographic}/u.test(BULK_HINT_TEXT));
+});

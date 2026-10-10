@@ -9982,6 +9982,8 @@ var SUPPORT = Object.freeze({
   discord: "https://discord.gg/EfWejgTbuU"
 });
 var SUPPORT_TEXT = `Need help? Email ${SUPPORT.email}, or reach ROZO on X ${SUPPORT.x} or Discord ${SUPPORT.discord}.`;
+var BULK_DOCS_URL = "https://docs.rozo.ai/products/checkout/bulk-and-agents";
+var BULK_HINT_TEXT = `Buying regularly or for others? ${BULK_DOCS_URL}`;
 
 // scripts/src/lib/output.mjs
 var PUBLIC_SUPPORT_URLS = /* @__PURE__ */ new Set([SUPPORT.x, SUPPORT.discord]);

@@ -21,6 +21,13 @@ export const SUPPORT_TEXT =
   `Need help? Email ${SUPPORT.email}, or reach ROZO on X ${SUPPORT.x} ` +
   `or Discord ${SUPPORT.discord}.`;
 
+/**
+ * One-line pointer shown under a settled receipt (human output only, never in
+ * --json). Repeat buyers and agents paying for others are the audience.
+ */
+export const BULK_DOCS_URL = 'https://docs.rozo.ai/products/checkout/bulk-and-agents';
+export const BULK_HINT_TEXT = `Buying regularly or for others? ${BULK_DOCS_URL}`;
+
 export const CONTACT_EMAIL_MAX_LENGTH = 254;
 
 // Deliberately simple: one @, non-empty local part, a dotted domain, no

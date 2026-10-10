@@ -41,7 +41,7 @@ import { extractLinkId, isRozoPaymentId } from './lib/ids.mjs';
 import { formatDeadline } from './lib/expiry.mjs';
 import { planSignability } from './lib/key-source.mjs';
 import { applyDotenv } from './lib/dotenv.mjs';
-import { SUPPORT_TEXT, maskEmail } from './lib/support.mjs';
+import { SUPPORT_TEXT, BULK_HINT_TEXT, maskEmail } from './lib/support.mjs';
 
 import { run as runQuote } from './quote.mjs';
 import { run as runCreateOrder } from './create-order.mjs';
@@ -96,6 +96,11 @@ function printError(payload) {
 /** How to reach ROZO. Shown at order creation and whenever an order is not clean. */
 function printSupport() {
   out(`  ${dim(SUPPORT_TEXT)}`);
+}
+
+/** One-line pointer to the bulk/agent docs, shown only under a settled receipt. */
+function printBulkHint() {
+  out(`  ${dim(BULK_HINT_TEXT)}`);
 }
 
 /** Money-detected results must never be shown as an ordinary failure. */
@@ -356,6 +361,7 @@ async function cmdReceipt(opts) {
   out();
   out(`  Next: ${r.nextAction.type === 'contact_support' ? red(r.nextAction.message) : r.nextAction.message}`);
   if (payload.support) printSupport();
+  if (r.paymentOutcome === 'settled') printBulkHint();
   out();
   return exitCode;
 }
@@ -778,6 +784,7 @@ async function cmdPay(opts) {
   }
   printMoneyWarning(watched.payload);
   if (watched.payload.state !== 'settled') printSupport();
+  else printBulkHint();
   out();
   return watched.exitCode;
 }
