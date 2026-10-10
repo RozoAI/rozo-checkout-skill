@@ -154,18 +154,66 @@ function extractLinkId(urlOrId) {
   );
 }
 
-// scripts/src/lib/api.mjs
+// scripts/src/lib/version.mjs
 import { createRequire } from "node:module";
+var PKG_VERSION = (() => {
+  const requireFrom = createRequire(import.meta.url);
+  for (const candidate of ["../../package.json", "../../../package.json"]) {
+    try {
+      const pkg = requireFrom(candidate);
+      if (pkg?.name === "@rozoai/checkout" && pkg.version) return pkg.version;
+    } catch {
+    }
+  }
+  return "0.0.0";
+})();
 
 // scripts/src/lib/http.mjs
 var DEFAULT_TIMEOUT_MS = 2e4;
-var USER_AGENT = "rozo-checkout-skill/1.0";
-async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+var USER_AGENT = `rozo-checkout-skill/${PKG_VERSION}`;
+var MAX_RETRIES = 3;
+var MAX_TOTAL_WAIT_MS = 12e4;
+var FALLBACK_BACKOFF_MS = [2e3, 4e3, 8e3];
+var defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function parseRetryAfter(value, now = Date.now()) {
+  if (value === null || value === void 0) return null;
+  const s = String(value).trim();
+  if (!s) return null;
+  if (/^\d+(\.\d+)?$/.test(s)) return Math.round(Number(s) * 1e3);
+  const at = Date.parse(s);
+  if (!Number.isFinite(at)) return null;
+  return Math.max(0, at - now);
+}
+function bodyRetryAfterMs(json) {
+  const raw = json?.retryAfterSeconds ?? json?.error?.retryAfterSeconds;
+  if (raw === null || raw === void 0 || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 1e3) : null;
+}
+function rateLimitInfo(res) {
+  const pick = (name) => res.headers?.get?.(name) ?? null;
+  const info = {
+    limit: pick("x-ratelimit-limit"),
+    remaining: pick("x-ratelimit-remaining"),
+    tier: pick("x-ratelimit-tier"),
+    scope: pick("x-ratelimit-scope")
+  };
+  const present = Object.fromEntries(Object.entries(info).filter(([, v]) => v !== null));
+  return Object.keys(present).length ? present : null;
+}
+function parseBody(text) {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+async function fetchOnce(method, url, body, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let res;
   try {
-    res = await fetch(url, {
+    const res = await fetch(url, {
       method,
       headers: {
         accept: "application/json",
@@ -175,6 +223,8 @@ async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS } = {
       body: body !== void 0 ? JSON.stringify(body) : void 0,
       signal: controller.signal
     });
+    const text = await res.text();
+    return { res, text };
   } catch (err) {
     throw new SkillError(
       err?.name === "AbortError" ? "HTTP_TIMEOUT" : "HTTP_UNREACHABLE",
@@ -184,31 +234,54 @@ async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS } = {
   } finally {
     clearTimeout(timer);
   }
-  const text = await res.text();
-  let json = null;
-  if (text) {
-    try {
-      json = JSON.parse(text);
-    } catch {
-      json = null;
+}
+async function request(method, url, {
+  body,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  sleep = defaultSleep,
+  now = Date.now,
+  maxTotalWaitMs = MAX_TOTAL_WAIT_MS
+} = {}) {
+  let waitedMs = 0;
+  let retries = 0;
+  for (; ; ) {
+    const { res, text } = await fetchOnce(method, url, body, timeoutMs);
+    const json = parseBody(text);
+    if (res.ok) {
+      if (json === null) {
+        throw new SkillError("HTTP_BAD_JSON", "Endpoint returned a non-JSON body.", {
+          url: redactUrl(url),
+          snippet: redact(text).slice(0, 400)
+        });
+      }
+      return json;
     }
-  }
-  if (!res.ok) {
+    const headerWaitMs = parseRetryAfter(res.headers?.get?.("retry-after"), now());
+    const hintMs = headerWaitMs ?? bodyRetryAfterMs(json);
+    const retryable = res.status === 429 || res.status === 503 && hintMs !== null;
+    if (retryable && retries < MAX_RETRIES) {
+      const waitMs = hintMs ?? FALLBACK_BACKOFF_MS[retries];
+      if (waitedMs + waitMs <= Math.min(maxTotalWaitMs, MAX_TOTAL_WAIT_MS)) {
+        retries += 1;
+        waitedMs += waitMs;
+        await sleep(waitMs);
+        continue;
+      }
+    }
     const code = json?.code || json?.error?.code || (typeof json?.error === "string" && /^[A-Z][A-Z0-9_]+$/.test(json.error) ? json.error : null) || `HTTP_${res.status}`;
     const message = json?.message || (typeof json?.error === "string" ? json.error : json?.error?.message) || `HTTP ${res.status}`;
+    const rateLimit = rateLimitInfo(res);
     throw new SkillError(code, redact(String(message)), {
       httpStatus: res.status,
       url: redactUrl(url),
-      body: json ?? redact(text).slice(0, 800)
+      body: json ?? redact(text).slice(0, 800),
+      ...retryable ? {
+        retries,
+        retryAfterSeconds: hintMs === null ? null : Math.ceil(hintMs / 1e3)
+      } : {},
+      ...rateLimit ? { rateLimit } : {}
     });
   }
-  if (json === null) {
-    throw new SkillError("HTTP_BAD_JSON", "Endpoint returned a non-JSON body.", {
-      url: redactUrl(url),
-      snippet: redact(text).slice(0, 400)
-    });
-  }
-  return json;
 }
 function redactUrl(url) {
   try {
@@ -223,17 +296,6 @@ function postJson(url, body, opts) {
 }
 
 // scripts/src/lib/api.mjs
-var PKG_VERSION = (() => {
-  const requireFrom = createRequire(import.meta.url);
-  for (const candidate of ["../../package.json", "../../../package.json"]) {
-    try {
-      const pkg = requireFrom(candidate);
-      if (pkg?.name === "@rozoai/checkout" && pkg.version) return pkg.version;
-    } catch {
-    }
-  }
-  return "0.0.0";
-})();
 var MPP_BASE = process.env.ROZO_CHECKOUT_MPP_BASE || "https://apiserver.mpprouter.dev/v1/services/rozo-agent-api";
 var CLIENT_LABEL = `rozo-checkout-cli/${PKG_VERSION}`;
 var ATTRIBUTION_CLIENT = `rozo-checkout-skill/${PKG_VERSION}`;
@@ -302,6 +364,8 @@ var MARGINS_MS = {
 };
 var BOLT11_MIN_VALIDITY_MS = 10 * MINUTE;
 var DEFAULT_MARGIN_MS = 10 * MINUTE;
+var DEFAULT_WATCH_MS = 10 * MINUTE;
+var LIGHTNING_WATCH_CAP_MS = 60 * MINUTE;
 function parseDeadline(value) {
   if (value === null || value === void 0 || value === "") return null;
   if (typeof value === "number" && Number.isFinite(value)) {

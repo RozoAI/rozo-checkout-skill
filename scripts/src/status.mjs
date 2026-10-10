@@ -6,6 +6,9 @@
  *   node scripts/dist/status.js --link-id pl_01...
  *   node scripts/dist/status.js --rozo-payment-id <uuid> --watch --timeout 600
  *
+ * Without --timeout, --watch polls 600s, or for a Lightning order as long as
+ * the invoice stays payable (capped at 60 minutes).
+ *
  * Polls both views — the router's fulfillment view (invoice-status) and the
  * pay-in/payout view (payments/<id>) — and maps them onto one taxonomy:
  *
@@ -23,7 +26,7 @@ import { invoiceStatus, getPayment } from './lib/api.mjs';
 import { chainName, formatAmount } from './lib/amounts.mjs';
 import { classifyStatus, checkPayable } from './lib/guards.mjs';
 import { SUPPORT } from './lib/support.mjs';
-import { formatRemaining, checkExpiry } from './lib/expiry.mjs';
+import { formatRemaining, checkExpiry, lightningWatchMs, DEFAULT_WATCH_MS } from './lib/expiry.mjs';
 import { findByLinkId, readState } from './lib/state.mjs';
 import { providerFromPayment, earliestExpiry, intentBitrefillExpiry } from './lib/bitrefill.mjs';
 import { SCHEMA_VERSION, paymentOutcomeFor, nextActionFor } from './lib/receipt.mjs';
@@ -302,6 +305,22 @@ export function statusGuidance(result) {
   return result.terminal ? 'Done.' : 'Still in flight. Poll again in ~10s.';
 }
 
+/**
+ * How long --watch polls. An explicit --timeout <seconds> always wins. Without
+ * one, a Lightning order is watched for as long as its invoice stays payable
+ * (capped at 60 minutes); everything else keeps the fixed 600s default.
+ */
+export function watchTimeoutMs(timeoutArg, result, now = Date.now()) {
+  if (timeoutArg !== undefined && timeoutArg !== null && timeoutArg !== true) {
+    const n = Number(timeoutArg);
+    if (Number.isFinite(n)) return Math.max(0, n * 1000);
+  }
+  if (result?.payin?.chain === chainName('lightning')) {
+    return lightningWatchMs(result?.expiry?.expiresAt, { now, fallbackMs: DEFAULT_WATCH_MS });
+  }
+  return DEFAULT_WATCH_MS;
+}
+
 async function main(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = args['rozo-payment-id'] || (isRozoPaymentId(args._[0]) ? args._[0] : null);
@@ -318,10 +337,10 @@ async function main(argv) {
   }
 
   const watch = Boolean(args.watch);
-  const timeoutMs = Math.max(0, Number(args.timeout ?? 600) * 1000);
-  const deadline = Date.now() + timeoutMs;
+  const started = Date.now();
 
   let result = await snapshot({ rozoPaymentId, linkId, provider });
+  const deadline = started + watchTimeoutMs(args.timeout, result, started);
   const history = [{ at: new Date().toISOString(), state: result.state }];
 
   while (watch && !result.terminal && !result.escalate && !result.unknown && Date.now() < deadline) {

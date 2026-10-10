@@ -430,6 +430,10 @@ flag. A larger invoice is paid via Mode A, which needs no key and has no limit.
 node scripts/dist/status.js --rozo-payment-id <uuid> --watch --timeout 600
 ```
 
+Without `--timeout`, `--watch` polls for 600 s, or for a Lightning order as
+long as the invoice can still be paid (at most 60 minutes). An explicit
+`--timeout` always wins.
+
 Always pass `--rozo-payment-id` when you have it. A link-only query cannot
 reach the authoritative pay-in view (the router does not resolve the id from a
 link alone), so the money-detected rule cannot be enforced; the script says so

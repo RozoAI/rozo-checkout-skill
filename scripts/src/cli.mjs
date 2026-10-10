@@ -38,7 +38,7 @@ import {
 import { readPrefs, savePrefs } from './lib/prefs.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
 import { extractLinkId, isRozoPaymentId } from './lib/ids.mjs';
-import { formatDeadline } from './lib/expiry.mjs';
+import { formatDeadline, minutesRemaining, settlementWatchSeconds } from './lib/expiry.mjs';
 import { planSignability } from './lib/key-source.mjs';
 import { applyDotenv } from './lib/dotenv.mjs';
 import { SUPPORT_TEXT, BULK_HINT_TEXT, maskEmail } from './lib/support.mjs';
@@ -295,7 +295,10 @@ async function cmdQuote(opts) {
 }
 
 async function cmdStatus(opts) {
-  const argv = [...targetToArgs(opts.target), '--timeout', String(opts.timeout ?? 600)];
+  const argv = [...targetToArgs(opts.target)];
+  // Without --timeout, status picks the window (600s, or a Lightning invoice's
+  // remaining validity) once it knows what kind of order this is.
+  if (opts.timeout !== undefined) argv.push('--timeout', String(opts.timeout));
   if (opts.provider) argv.push('--provider', opts.provider);
   if (opts.watch) argv.push('--watch');
   if (!opts.json) out(dim('  Checking payment status… (no money moves)'));
@@ -764,7 +767,7 @@ async function cmdPay(opts) {
     rozoPaymentId,
     '--watch',
     '--timeout',
-    String(opts.timeout),
+    String(settlementWatchSeconds(opts, deposit)),
   ]);
   if (opts.json) {
     printJson({
@@ -797,6 +800,10 @@ function printDeposit(deposit, opts) {
   if (deposit.lnInvoice) {
     out(`    Amount   ${bold(`${deposit.amount} ${isSatsUnit(deposit.amountUnit) ? 'sats' : deposit.tokenSymbol}`)}`);
     out(`    BOLT11   ${deposit.lnInvoice}`);
+    const validMin = minutesRemaining(deposit.expiresAt);
+    if (validMin !== null) {
+      out(`    Valid    ${bold(validMin < 1 ? 'under 1 more minute' : `${validMin} more minutes`)}`);
+    }
   } else {
     out(`    Amount   ${bold(`${deposit.amount} ${deposit.tokenSymbol}`)}`);
     out(`    Chain    ${bold(deposit.chain)}`);

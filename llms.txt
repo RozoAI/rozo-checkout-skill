@@ -86,7 +86,8 @@ override; larger invoices go through the keyless path.
 
 Other flags: --yes (skip the interactive confirm; required when stdin is not a
 TTY), --dry-run, --json (exactly one JSON object on stdout), --no-watch,
---timeout <s>. Exit codes: 0 success, 1 refused/failed (read error.code),
+--timeout <s> (default 900; Lightning: the invoice's remaining validity, max 60
+min). Exit codes: 0 success, 1 refused/failed (read error.code),
 2 usage, 3 submitted but unconfirmed.
 
 `pay` withholds the full deposit address until you confirm, then prints it as a
@@ -176,7 +177,9 @@ private key (EVM and Solana only); every other path is keyless.
 
 409 = link already used · 410 = link expired · UNSUPPORTED_SOURCE = the response's
 "supported" object lists valid (chainId, tokenSymbol) pairs (Lightning is supported
-but omitted from that list) · RATE_LIMITED = per-IP creation cap, retry later ·
+but omitted from that list) · RATE_LIMITED = per-IP creation cap, retry later (the CLI itself retries a 429 up
+to 3 times within 2 minutes of total waiting, per Retry-After; a longer wait
+fails at once with error.details.retryAfterSeconds and rateLimit) ·
 INVALID_EMAIL = the optional email is malformed; fix it or omit it.
 
 ## Support

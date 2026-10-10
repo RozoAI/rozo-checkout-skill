@@ -42097,7 +42097,9 @@ function parseCliArgs(argv) {
       json,
       provider: flags.provider,
       watch: flags.watch === true,
-      timeout: flags.timeout === void 0 ? 600 : Number(flags.timeout)
+      // Left undefined when absent so status can size the window itself:
+      // 600s, or a Lightning invoice's remaining validity (max 60 min).
+      timeout: flags.timeout === void 0 ? void 0 : Number(flags.timeout)
     };
   }
   const bitrefillFlags = ["bitrefill-invoice", "to", "amount", "expires-at"].filter(
@@ -42180,6 +42182,7 @@ function parseCliArgs(argv) {
     dryRun: flags["dry-run"] === true,
     watch: flags["no-watch"] !== true,
     timeout,
+    timeoutExplicit: flags.timeout !== void 0,
     rpc: flags.rpc,
     payer: flags.payer,
     fresh: flags.fresh === true,
@@ -42227,7 +42230,8 @@ OPTIONS
   --dry-run       with --send, show what would be signed and sign nothing
   --json, -j      machine-readable output
   --no-watch      stop after showing the deposit instructions
-  --timeout <s>   how long to poll for settlement (default 900)
+  --timeout <s>   how long to poll for settlement (default 900; for Lightning,
+                  the invoice's remaining validity, at most 60 minutes)
   --bitrefill-invoice <id>  pay a Bitrefill invoice created with "USDC on Base"
                   instead of a Coinbase link. Needs --to <0x\u2026 address Bitrefill
                   shows>, --amount <exact USDC amount> and --expires-at <ISO>
@@ -42914,6 +42918,25 @@ var MARGINS_MS = {
 };
 var BOLT11_MIN_VALIDITY_MS = 10 * MINUTE;
 var DEFAULT_MARGIN_MS = 10 * MINUTE;
+var DEFAULT_WATCH_MS = 10 * MINUTE;
+var LIGHTNING_WATCH_CAP_MS = 60 * MINUTE;
+function lightningWatchMs(expiresAt, { now = Date.now(), fallbackMs = DEFAULT_WATCH_MS } = {}) {
+  const at = parseDeadline(expiresAt);
+  if (at === null) return fallbackMs;
+  const remaining = at - now;
+  if (!(remaining > 0)) return fallbackMs;
+  return Math.min(remaining, LIGHTNING_WATCH_CAP_MS);
+}
+function settlementWatchSeconds(opts, deposit, now = Date.now()) {
+  const fallbackMs = Number(opts.timeout ?? 900) * 1e3;
+  if (opts.timeoutExplicit || !deposit?.lnInvoice) return Math.round(fallbackMs / 1e3);
+  return Math.ceil(lightningWatchMs(deposit.expiresAt, { now, fallbackMs }) / 1e3);
+}
+function minutesRemaining(expiresAt, now = Date.now()) {
+  const at = parseDeadline(expiresAt);
+  if (at === null) return null;
+  return Math.max(0, Math.floor((at - now) / MINUTE));
+}
 function formatRemaining(ms) {
   if (!Number.isFinite(ms)) return "unknown";
   if (ms <= 0) return "expired";
@@ -54617,18 +54640,66 @@ function displayPath(p) {
   return s.startsWith(home + path6.sep) ? `~${s.slice(home.length)}` : s;
 }
 
-// scripts/src/lib/api.mjs
+// scripts/src/lib/version.mjs
 import { createRequire } from "node:module";
+var PKG_VERSION = (() => {
+  const requireFrom = createRequire(import.meta.url);
+  for (const candidate of ["../../package.json", "../../../package.json"]) {
+    try {
+      const pkg = requireFrom(candidate);
+      if (pkg?.name === "@rozoai/checkout" && pkg.version) return pkg.version;
+    } catch {
+    }
+  }
+  return "0.0.0";
+})();
 
 // scripts/src/lib/http.mjs
 var DEFAULT_TIMEOUT_MS = 2e4;
-var USER_AGENT = "rozo-checkout-skill/1.0";
-async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+var USER_AGENT = `rozo-checkout-skill/${PKG_VERSION}`;
+var MAX_RETRIES = 3;
+var MAX_TOTAL_WAIT_MS = 12e4;
+var FALLBACK_BACKOFF_MS = [2e3, 4e3, 8e3];
+var defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function parseRetryAfter(value, now = Date.now()) {
+  if (value === null || value === void 0) return null;
+  const s = String(value).trim();
+  if (!s) return null;
+  if (/^\d+(\.\d+)?$/.test(s)) return Math.round(Number(s) * 1e3);
+  const at = Date.parse(s);
+  if (!Number.isFinite(at)) return null;
+  return Math.max(0, at - now);
+}
+function bodyRetryAfterMs(json) {
+  const raw = json?.retryAfterSeconds ?? json?.error?.retryAfterSeconds;
+  if (raw === null || raw === void 0 || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 1e3) : null;
+}
+function rateLimitInfo(res) {
+  const pick = (name) => res.headers?.get?.(name) ?? null;
+  const info = {
+    limit: pick("x-ratelimit-limit"),
+    remaining: pick("x-ratelimit-remaining"),
+    tier: pick("x-ratelimit-tier"),
+    scope: pick("x-ratelimit-scope")
+  };
+  const present = Object.fromEntries(Object.entries(info).filter(([, v]) => v !== null));
+  return Object.keys(present).length ? present : null;
+}
+function parseBody(text) {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+async function fetchOnce(method, url, body, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let res;
   try {
-    res = await fetch(url, {
+    const res = await fetch(url, {
       method,
       headers: {
         accept: "application/json",
@@ -54638,6 +54709,8 @@ async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS } = {
       body: body !== void 0 ? JSON.stringify(body) : void 0,
       signal: controller.signal
     });
+    const text = await res.text();
+    return { res, text };
   } catch (err) {
     throw new SkillError(
       err?.name === "AbortError" ? "HTTP_TIMEOUT" : "HTTP_UNREACHABLE",
@@ -54647,31 +54720,54 @@ async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS } = {
   } finally {
     clearTimeout(timer);
   }
-  const text = await res.text();
-  let json = null;
-  if (text) {
-    try {
-      json = JSON.parse(text);
-    } catch {
-      json = null;
+}
+async function request(method, url, {
+  body,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  sleep: sleep2 = defaultSleep,
+  now = Date.now,
+  maxTotalWaitMs = MAX_TOTAL_WAIT_MS
+} = {}) {
+  let waitedMs = 0;
+  let retries = 0;
+  for (; ; ) {
+    const { res, text } = await fetchOnce(method, url, body, timeoutMs);
+    const json = parseBody(text);
+    if (res.ok) {
+      if (json === null) {
+        throw new SkillError("HTTP_BAD_JSON", "Endpoint returned a non-JSON body.", {
+          url: redactUrl(url),
+          snippet: redact(text).slice(0, 400)
+        });
+      }
+      return json;
     }
-  }
-  if (!res.ok) {
+    const headerWaitMs = parseRetryAfter(res.headers?.get?.("retry-after"), now());
+    const hintMs = headerWaitMs ?? bodyRetryAfterMs(json);
+    const retryable = res.status === 429 || res.status === 503 && hintMs !== null;
+    if (retryable && retries < MAX_RETRIES) {
+      const waitMs = hintMs ?? FALLBACK_BACKOFF_MS[retries];
+      if (waitedMs + waitMs <= Math.min(maxTotalWaitMs, MAX_TOTAL_WAIT_MS)) {
+        retries += 1;
+        waitedMs += waitMs;
+        await sleep2(waitMs);
+        continue;
+      }
+    }
     const code = json?.code || json?.error?.code || (typeof json?.error === "string" && /^[A-Z][A-Z0-9_]+$/.test(json.error) ? json.error : null) || `HTTP_${res.status}`;
     const message = json?.message || (typeof json?.error === "string" ? json.error : json?.error?.message) || `HTTP ${res.status}`;
+    const rateLimit = rateLimitInfo(res);
     throw new SkillError(code, redact(String(message)), {
       httpStatus: res.status,
       url: redactUrl(url),
-      body: json ?? redact(text).slice(0, 800)
+      body: json ?? redact(text).slice(0, 800),
+      ...retryable ? {
+        retries,
+        retryAfterSeconds: hintMs === null ? null : Math.ceil(hintMs / 1e3)
+      } : {},
+      ...rateLimit ? { rateLimit } : {}
     });
   }
-  if (json === null) {
-    throw new SkillError("HTTP_BAD_JSON", "Endpoint returned a non-JSON body.", {
-      url: redactUrl(url),
-      snippet: redact(text).slice(0, 400)
-    });
-  }
-  return json;
 }
 function redactUrl(url) {
   try {
@@ -54727,17 +54823,6 @@ function attributionIdentity(env = process.env) {
 }
 
 // scripts/src/lib/api.mjs
-var PKG_VERSION = (() => {
-  const requireFrom = createRequire(import.meta.url);
-  for (const candidate of ["../../package.json", "../../../package.json"]) {
-    try {
-      const pkg = requireFrom(candidate);
-      if (pkg?.name === "@rozoai/checkout" && pkg.version) return pkg.version;
-    } catch {
-    }
-  }
-  return "0.0.0";
-})();
 var MPP_BASE = process.env.ROZO_CHECKOUT_MPP_BASE || "https://apiserver.mpprouter.dev/v1/services/rozo-agent-api";
 var CLIENT_LABEL = `rozo-checkout-cli/${PKG_VERSION}`;
 var ATTRIBUTION_CLIENT = `rozo-checkout-skill/${PKG_VERSION}`;
@@ -54757,6 +54842,7 @@ async function quoteInvoice({ url, linkId }) {
   const body = url ? { url } : { payment_id: linkId };
   return postJson(`${MPP_BASE}/quote-invoice`, body);
 }
+var QUOTE_RECEIPT_RETRY_BUDGET_MS = 2e4;
 async function createInvoice({ url, linkId, source, quoteReceipt, utmSource, email }) {
   const body = {
     ...url ? { url } : { payment_id: linkId },
@@ -54768,7 +54854,11 @@ async function createInvoice({ url, linkId, source, quoteReceipt, utmSource, ema
     // sent empty, when the user gave none.
     ...email ? { email } : {}
   };
-  return postJson(`${MPP_BASE}/create-invoice`, body);
+  return postJson(
+    `${MPP_BASE}/create-invoice`,
+    body,
+    quoteReceipt ? { maxTotalWaitMs: QUOTE_RECEIPT_RETRY_BUDGET_MS } : void 0
+  );
 }
 async function createBitrefillInvoice({ invoice, source, utmSource, email }) {
   const body = {
@@ -56453,6 +56543,16 @@ function statusGuidance(result) {
   if (result.state === "expired_unfunded") return EXPIRED_UNFUNDED_GUIDANCE;
   return result.terminal ? "Done." : "Still in flight. Poll again in ~10s.";
 }
+function watchTimeoutMs(timeoutArg, result, now = Date.now()) {
+  if (timeoutArg !== void 0 && timeoutArg !== null && timeoutArg !== true) {
+    const n = Number(timeoutArg);
+    if (Number.isFinite(n)) return Math.max(0, n * 1e3);
+  }
+  if (result?.payin?.chain === chainName("lightning")) {
+    return lightningWatchMs(result?.expiry?.expiresAt, { now, fallbackMs: DEFAULT_WATCH_MS });
+  }
+  return DEFAULT_WATCH_MS;
+}
 async function main4(argv) {
   const args = parseArgs(argv);
   const rozoPaymentId = args["rozo-payment-id"] || (isRozoPaymentId(args._[0]) ? args._[0] : null);
@@ -56468,9 +56568,9 @@ async function main4(argv) {
     usage("Required: --rozo-payment-id <uuid> and/or --link-id <pl_* | paymentSession_*>");
   }
   const watch = Boolean(args.watch);
-  const timeoutMs = Math.max(0, Number(args.timeout ?? 600) * 1e3);
-  const deadline = Date.now() + timeoutMs;
+  const started = Date.now();
   let result = await snapshot({ rozoPaymentId, linkId, provider });
+  const deadline = started + watchTimeoutMs(args.timeout, result, started);
   const history = [{ at: (/* @__PURE__ */ new Date()).toISOString(), state: result.state }];
   while (watch && !result.terminal && !result.escalate && !result.unknown && Date.now() < deadline) {
     await sleep(POLL_INTERVAL_MS);
@@ -58284,7 +58384,8 @@ async function cmdQuote(opts) {
   return exitCode;
 }
 async function cmdStatus(opts) {
-  const argv = [...targetToArgs(opts.target), "--timeout", String(opts.timeout ?? 600)];
+  const argv = [...targetToArgs(opts.target)];
+  if (opts.timeout !== void 0) argv.push("--timeout", String(opts.timeout));
   if (opts.provider) argv.push("--provider", opts.provider);
   if (opts.watch) argv.push("--watch");
   if (!opts.json) out(dim("  Checking payment status\u2026 (no money moves)"));
@@ -58656,7 +58757,7 @@ async function cmdPay(opts) {
     rozoPaymentId,
     "--watch",
     "--timeout",
-    String(opts.timeout)
+    String(settlementWatchSeconds(opts, deposit))
   ]);
   if (opts.json) {
     printJson({
@@ -58687,6 +58788,10 @@ function printDeposit(deposit, opts) {
   if (deposit.lnInvoice) {
     out(`    Amount   ${bold(`${deposit.amount} ${isSatsUnit(deposit.amountUnit) ? "sats" : deposit.tokenSymbol}`)}`);
     out(`    BOLT11   ${deposit.lnInvoice}`);
+    const validMin = minutesRemaining(deposit.expiresAt);
+    if (validMin !== null) {
+      out(`    Valid    ${bold(validMin < 1 ? "under 1 more minute" : `${validMin} more minutes`)}`);
+    }
   } else {
     out(`    Amount   ${bold(`${deposit.amount} ${deposit.tokenSymbol}`)}`);
     out(`    Chain    ${bold(deposit.chain)}`);

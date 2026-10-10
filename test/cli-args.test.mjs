@@ -103,6 +103,7 @@ test('pay: minimal invocation', () => {
   assert.equal(r.json, false);
   assert.equal(r.watch, true);
   assert.equal(r.timeout, 900);
+  assert.equal(r.timeoutExplicit, false);
 });
 
 test('pay: flags', () => {
@@ -125,6 +126,7 @@ test('pay: flags', () => {
   assert.equal(r.json, true);
   assert.equal(r.watch, false);
   assert.equal(r.timeout, 120);
+  assert.equal(r.timeoutExplicit, true);
   assert.equal(r.rpc, 'https://rpc.example.com');
   assert.deepEqual(r.source, { chainId: '8453', tokenSymbol: 'USDC' });
 });
@@ -275,7 +277,10 @@ test('quote and status', () => {
   const s = parseCliArgs(['status', '11111111-2222-4333-8444-555555555555', '--watch']);
   assert.equal(s.command, 'status');
   assert.equal(s.watch, true);
-  assert.equal(s.timeout, 600);
+  // Undefined so status sizes the window (600s, or a Lightning invoice's validity).
+  assert.equal(s.timeout, undefined);
+  const t = parseCliArgs(['status', '11111111-2222-4333-8444-555555555555', '--watch', '--timeout', '30']);
+  assert.equal(t.timeout, 30);
   assert.throws(() => parseCliArgs(['quote']), (e) => e.code === 'MISSING_TARGET');
   assert.throws(() => parseCliArgs(['status']), (e) => e.code === 'MISSING_TARGET');
 });

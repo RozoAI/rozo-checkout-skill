@@ -32,6 +32,49 @@ export const BOLT11_MIN_VALIDITY_MS = 10 * MINUTE;
 
 export const DEFAULT_MARGIN_MS = 10 * MINUTE;
 
+/** Default status --watch window when no --timeout is given (non-Lightning). */
+export const DEFAULT_WATCH_MS = 10 * MINUTE;
+
+/** Upper bound on the Lightning default watch window. */
+export const LIGHTNING_WATCH_CAP_MS = 60 * MINUTE;
+
+/**
+ * Default watch window for a Lightning order: as long as the BOLT11 can still
+ * be paid, capped at LIGHTNING_WATCH_CAP_MS. Watching a fixed 10 minutes on an
+ * invoice that is valid for 40 gave up while the payer could still pay. An
+ * unknown or already expired invoice falls back to `fallbackMs`.
+ *
+ * @param {*} expiresAt   invoice deadline (ISO string or epoch ms)
+ * @param {object} [opts]
+ * @param {number} [opts.now]
+ * @param {number} [opts.fallbackMs]
+ */
+export function lightningWatchMs(expiresAt, { now = Date.now(), fallbackMs = DEFAULT_WATCH_MS } = {}) {
+  const at = parseDeadline(expiresAt);
+  if (at === null) return fallbackMs;
+  const remaining = at - now;
+  if (!(remaining > 0)) return fallbackMs;
+  return Math.min(remaining, LIGHTNING_WATCH_CAP_MS);
+}
+
+/**
+ * Seconds to watch for settlement after pay. An explicit --timeout wins. A
+ * Lightning order is otherwise watched for as long as its invoice can still be
+ * paid (at most 60 minutes); other coins keep the --timeout default.
+ */
+export function settlementWatchSeconds(opts, deposit, now = Date.now()) {
+  const fallbackMs = Number(opts.timeout ?? 900) * 1000;
+  if (opts.timeoutExplicit || !deposit?.lnInvoice) return Math.round(fallbackMs / 1000);
+  return Math.ceil(lightningWatchMs(deposit.expiresAt, { now, fallbackMs }) / 1000);
+}
+
+/** Whole minutes of validity left on a deadline, or null when unknown. 0 once expired. */
+export function minutesRemaining(expiresAt, now = Date.now()) {
+  const at = parseDeadline(expiresAt);
+  if (at === null) return null;
+  return Math.max(0, Math.floor((at - now) / MINUTE));
+}
+
 /**
  * Human duration for a remaining window: "47m", "1h 12m", "45s".
  *
