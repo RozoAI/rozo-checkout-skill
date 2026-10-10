@@ -241,9 +241,18 @@ test('extractSignature tolerates field-name drift and encodes a raw payload', ()
   assert.equal(x402.extractSignature({}), null);
 });
 
-test('topup presets: native coins are topup only, unknown coin refused', () => {
-  assert.deepEqual(x402.resolveTopupPreset('sol-solana'), { preset: 'sol-solana', chain: '900', token: 'SOL', native: true });
+test('topup presets: USDC/USDT only, native coins and Lightning refused with a checkout pointer', () => {
   assert.equal(x402.resolveTopupPreset('USDT-Solana').token, 'USDT');
+  assert.deepEqual(x402.resolveTopupPreset('usdt-arbitrum'), { preset: 'usdt-arbitrum', chain: '42161', token: 'USDT' });
+  assert.deepEqual(x402.resolveTopupPreset('usdc-arbitrum'), { preset: 'usdc-arbitrum', chain: '42161', token: 'USDC' });
+  for (const p of Object.values(x402.TOPUP_PRESETS)) assert.ok(['USDC', 'USDT'].includes(p.token));
+  for (const coin of ['btc-lightning', 'eth-ethereum', 'eth-base', 'eth-arbitrum', 'bnb-bnb', 'sol-solana', 'POL-polygon']) {
+    assert.throws(
+      () => x402.resolveTopupPreset(coin),
+      (e) => e.code === 'X402_TOPUP_SOURCE_UNSUPPORTED' && /USDC and USDT only/.test(e.message) && /rozo-checkout pay/.test(e.message),
+      coin,
+    );
+  }
   assert.throws(() => x402.resolveTopupPreset('doge-dogecoin'), (e) => e.code === 'BAD_PRESET');
 });
 
@@ -486,10 +495,16 @@ test('topup: creates a key once (0600 file), then sends {amount, token, chain} w
   assert.equal(topupCall.headers.authorization, 'Bearer ak_new_9876543210fedcba');
 
   // Second topup reuses the stored key; no second /keys call.
-  await flows.runTopup({ amountUsd: '5', coin: 'sol-solana' });
+  await flows.runTopup({ amountUsd: '5', coin: 'usdc-arbitrum' });
   assert.equal(state.calls.filter((c) => c.key === 'POST /v1/x402/keys').length, 1);
   const second = JSON.parse(state.calls.filter((c) => c.key === 'POST /v1/x402/topup')[1].body);
-  assert.deepEqual(second, { amount: '5', token: 'SOL', chain: '900', source: { chainId: '900', tokenSymbol: 'SOL' } });
+  assert.deepEqual(second, { amount: '5', token: 'USDC', chain: '42161', source: { chainId: '42161', tokenSymbol: 'USDC' } });
+
+  // A native coin or sats is refused locally: no request reaches the router.
+  const before = state.calls.length;
+  await assert.rejects(flows.runTopup({ amountUsd: '5', coin: 'sol-solana' }), (e) => e.code === 'X402_TOPUP_SOURCE_UNSUPPORTED');
+  await assert.rejects(flows.runTopup({ amountUsd: '5', coin: 'btc-lightning' }), (e) => e.code === 'X402_TOPUP_SOURCE_UNSUPPORTED');
+  assert.equal(state.calls.length, before);
   fs.rmSync(keyPath(), { force: true });
 });
 

@@ -255,7 +255,6 @@ export async function runTopup({ amountUsd, coin }, { fetchImpl, blacklist } = {
     ...(created ? { keyCreated: created } : {}),
     key: { masked: maskKey(found.key), source: found.source },
     coin: preset.preset,
-    native: Boolean(preset.native),
     requestedUsd: String(amountUsd).trim(),
     deposit,
     note: 'Send exactly once, from your own wallet. Your x402 balance is credited after the deposit confirms.',

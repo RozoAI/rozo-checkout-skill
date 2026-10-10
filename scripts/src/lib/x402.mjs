@@ -8,7 +8,8 @@
  *     Solana payment leg is coming later)
  *   - choosing one option inside the caller's budget
  *   - decoding the PAYMENT-RESPONSE settlement header
- *   - the topup coin presets (stablecoins plus the native-coin beta set)
+ *   - the topup coin presets (USDC and USDT only; native coins and Lightning
+ *     are refused locally and pointed at ROZO Checkout)
  *
  * The payer never signs anything locally. Rozo holds the balance and returns
  * the PAYMENT-SIGNATURE value; this module only decides what to ask for.
@@ -285,9 +286,11 @@ export function decodeSettlement(headerValue) {
 }
 
 /**
- * Topup coin presets. Superset of the checkout sources: the stablecoins the
- * bridge takes today plus the native-coin beta set. Native coins are a topup
- * leg only; x402 payment itself is always USDC.
+ * Topup coin presets: USDC and USDT only, the stablecoin set the router
+ * accepts on /v1/x402/topup (rozo-mpprouter STABLE_SOURCES). The router
+ * refuses Lightning and native coins with X402_TOPUP_SOURCE_UNSUPPORTED;
+ * those coins are for paying OpenRouter through ROZO Checkout, not for the
+ * x402 balance. x402 payment itself is always USDC.
  */
 export const TOPUP_PRESETS = {
   'usdt-solana': { chain: '900', token: 'USDT' },
@@ -298,20 +301,37 @@ export const TOPUP_PRESETS = {
   'usdc-ethereum': { chain: '1', token: 'USDC' },
   'usdt-polygon': { chain: '137', token: 'USDT' },
   'usdc-polygon': { chain: '137', token: 'USDC' },
+  'usdt-arbitrum': { chain: '42161', token: 'USDT' },
+  'usdc-arbitrum': { chain: '42161', token: 'USDC' },
   'usdc-base': { chain: '8453', token: 'USDC' },
   'usdc-stellar': { chain: '1500', token: 'USDC' },
-  'btc-lightning': { chain: 'lightning', token: 'BTC' },
-  'eth-ethereum': { chain: '1', token: 'ETH', native: true },
-  'eth-base': { chain: '8453', token: 'ETH', native: true },
-  'eth-arbitrum': { chain: '42161', token: 'ETH', native: true },
-  'bnb-bnb': { chain: '56', token: 'BNB', native: true },
-  'sol-solana': { chain: '900', token: 'SOL', native: true },
 };
+
+/**
+ * Coins that are valid for ROZO Checkout but never for an x402 top up. Named
+ * here so the CLI can refuse them with a pointer instead of a generic
+ * "unknown coin", and without sending a request the router would refuse.
+ */
+export const NON_TOPUP_PRESETS = new Set([
+  'btc-lightning',
+  'eth-ethereum',
+  'eth-base',
+  'eth-arbitrum',
+  'bnb-bnb',
+  'sol-solana',
+]);
+
+export const TOPUP_STABLE_ONLY =
+  'x402 top ups accept USDC and USDT only. Holding a native coin or sats? Use them to top up OpenRouter with: ' +
+  'rozo-checkout pay <openrouter-payment-link> --with btc-lightning (sats), or https://checkout.rozo.ai (native coins).';
 
 export const TOPUP_MIN_USD = 5;
 
 export function resolveTopupPreset(value) {
   const key = String(value ?? '').trim().toLowerCase();
+  if (NON_TOPUP_PRESETS.has(key) || /^(eth|bnb|sol|pol|matic|xlm|btc|sats)-/.test(key)) {
+    throw new SkillError('X402_TOPUP_SOURCE_UNSUPPORTED', TOPUP_STABLE_ONLY, { preset: key });
+  }
   const hit = TOPUP_PRESETS[key];
   if (!hit) {
     throw new SkillError(
