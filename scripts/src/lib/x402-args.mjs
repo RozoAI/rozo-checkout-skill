@@ -3,7 +3,8 @@
  *
  *   x402 topup <usd> --with <coin>
  *   x402 pay <url> [--method POST] [--body '{…}'] [--header 'Name: value']…
- *                  [--max-usd 1.00] [--prefer base|solana] [--idempotency-key <uuid>] [--dry-run]
+ *                  [--max-usd 1.00] [--idempotency-key <uuid>] [--dry-run]
+ *   (--prefer base|solana is still parsed but not advertised: only Base is payable today)
  *   x402 balance
  *
  * Separate from parseCliArgs because --header repeats and the flag set does
@@ -36,11 +37,11 @@ PAY OPTIONS
   --body <s>              request body, sent as is
   --header 'Name: value'  extra request header; repeat for more
   --max-usd <n>           most this one call may cost (default 1.00)
-  --prefer base|solana    which payment network to use when both are offered
   --idempotency-key <id>  reuse after an interrupted run so you are not charged twice
   --dry-run               read the 402 and show what would be paid; sign nothing
 
-Payment leg: USDC on Base or USDC on Solana only (x402 scheme "exact").
+Payment leg: USDC on Base only (eip155:8453, x402 scheme "exact").
+Solana payment leg is coming later.
 Your request goes straight from this machine to the endpoint; Rozo only sees
 the 402 payment requirements it is asked to sign.`;
 

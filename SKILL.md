@@ -16,7 +16,7 @@ description: >
   Bitrefill invoices only (not Stripe). Also pays any x402 API (HTTP 402,
   PAYMENT-REQUIRED) from a prepaid Rozo balance: triggers on "x402", "402
   Payment Required", "pay this x402 endpoint"; the payment leg is USDC on
-  Base or Solana only.
+  Base only (Solana payment leg is coming later).
 metadata:
   version: 1.2.0
 
@@ -548,7 +548,7 @@ reconciliation with this wording:
 
 Then stop and hand off. Do not run any send script again.
 
-## x402: pay any x402 API (beta)
+## x402: pay any x402 API
 
 An x402 endpoint answers `402 Payment Required` with a list of payment
 requirements (`accepts`). This skill pays it from a **prepaid Rozo balance**,
@@ -569,7 +569,7 @@ Coverage, kept separate on purpose:
 | Leg | What works |
 |---|---|
 | Topup (funding the balance) | Everything `pay` takes today (USDT/USDC on Solana, BNB Chain, Ethereum, Polygon; USDC on Base, Stellar; BTC Lightning) plus native ETH (Ethereum, Base, Arbitrum), BNB and SOL in beta |
-| Payment (what the seller receives) | USDC on Base (`eip155:8453`) and USDC on Solana mainnet, x402 scheme `exact` only. No native coins, no USDT on this leg |
+| Payment (what the seller receives) | USDC on Base (`eip155:8453`), x402 scheme `exact` only. No native coins, no USDT on this leg. Solana payment leg is coming later: an endpoint that only offers Solana USDC returns `X402_UNSUPPORTED` |
 
 How `x402 pay` works, and what it guarantees:
 
@@ -577,7 +577,7 @@ How `x402 pay` works, and what it guarantees:
    never sees the request body, your headers, or the API keys you send to that
    service; it only sees the one `accepts` entry it is asked to sign.
 2. On a 402 it parses the challenge (x402 v2 `PAYMENT-REQUIRED` header, or a
-   v1 JSON body), keeps only exact USDC on Base/Solana, refuses anything above
+   v1 JSON body), keeps only exact USDC on Base, refuses anything above
    `--max-usd` (default 1.00) and any `payTo` on the compromised-wallet list.
 3. It generates one `idempotencyKey` (UUID) and calls `POST /v1/x402/sign`.
    Transient failures are retried with the **same** key, so a timeout after
@@ -596,12 +596,12 @@ Agent rules:
   overrides the file.
 - Rozo enforces per-key limits (per payment and per day). Set `--max-usd` to
   the most the user agreed to pay for this one call.
-- `X402_PAYER_DISABLED` ("x402 payer not enabled yet") means Rozo has not
-  switched the payer on. Nothing was charged; tell the user and stop.
+- `X402_PAYER_DISABLED` ("x402 payer not enabled") means the payer is off for
+  this key right now. Nothing was charged; tell the user and stop.
 - `X402_PAYMENT_REJECTED` or a non-2xx after paying: do not retry with a new
   key. Run `x402 balance` and report the `idempotencyKey`.
-- `X402_UNSUPPORTED`: the endpoint wants something other than USDC on Base or
-  Solana. Say so; do not try to bridge per call.
+- `X402_UNSUPPORTED`: the endpoint wants something other than USDC on Base
+  (Solana payment leg is coming later). Say so; do not try to bridge per call.
 - Withdrawing a balance back to a wallet is not self-serve yet: email
   hi@rozo.ai with the masked key and the amount.
 

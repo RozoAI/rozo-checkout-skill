@@ -3,8 +3,9 @@
  *
  * What lives here:
  *   - parsing a 402 challenge (x402 v2 PAYMENT-REQUIRED header, x402 v1 JSON body)
- *   - deciding which `accepts` entries this payer can settle (first version:
- *     scheme "exact", USDC on Base or USDC on Solana mainnet, nothing else)
+ *   - deciding which `accepts` entries this payer can settle (scheme "exact",
+ *     USDC on Base only; Solana USDC is recognized but not paid yet, the
+ *     Solana payment leg is coming later)
  *   - choosing one option inside the caller's budget
  *   - decoding the PAYMENT-RESPONSE settlement header
  *   - the topup coin presets (stablecoins plus the native-coin beta set)
@@ -24,6 +25,14 @@ export const USDC_ASSET = {
   [NETWORK_SOLANA]: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
 };
 export const USDC_DECIMALS = 6;
+
+/**
+ * Networks the payer actually signs for today. Solana stays in USDC_ASSET so a
+ * Solana option is still parsed and reported, but it is classified as
+ * unsupported until the Solana payment leg ships.
+ */
+export const PAYABLE_NETWORKS = new Set([NETWORK_BASE]);
+export const SOLANA_COMING_LATER = 'Solana payment leg is coming later';
 
 /** x402 v1 used short network names; map the two we support to CAIP-2. */
 const V1_NETWORK_ALIASES = {
@@ -153,7 +162,11 @@ export function classifyRequirement(req) {
   }
   const usdc = USDC_ASSET[network];
   if (!usdc) {
-    return { supported: false, reason: `network ${req.network} (only Base and Solana USDC)`, network };
+    return { supported: false, reason: `network ${req.network} (only Base USDC)`, network };
+  }
+  if (!PAYABLE_NETWORKS.has(network)) {
+    const reason = network === NETWORK_SOLANA ? `USDC on Solana (${SOLANA_COMING_LATER})` : `network ${req.network} (only Base USDC)`;
+    return { supported: false, reason, network };
   }
   const assetOk =
     network === NETWORK_BASE
@@ -184,19 +197,22 @@ export function classifyRequirement(req) {
 
 /**
  * Pick the cheapest supported option within the budget.
- * `prefer` ("base" | "solana") breaks ties and wins when both fit.
+ * `prefer` ("base" | "solana") breaks ties and wins when both fit. Only Base
+ * is payable today, so the solana branch is inert until that leg ships.
  *
  * Throws:
- *   X402_UNSUPPORTED     nothing in `accepts` is exact USDC on Base or Solana
+ *   X402_UNSUPPORTED     nothing in `accepts` is exact USDC on Base
  *   X402_OVER_BUDGET     something is payable, but every option exceeds the budget
  */
 export function selectRequirement(challenge, { budgetAtomic, prefer } = {}) {
   const classified = challenge.accepts.map(classifyRequirement);
   const supported = classified.filter((c) => c.supported).map((c) => c.option);
   if (supported.length === 0) {
+    const solanaOffered = classified.some((c) => c.network === NETWORK_SOLANA);
     throw new SkillError(
       'X402_UNSUPPORTED',
-      'This endpoint does not accept a payment Rozo can sign. Rozo pays with USDC on Base or USDC on Solana (scheme exact) only.',
+      'This endpoint does not accept a payment Rozo can sign. Rozo pays with USDC on Base (eip155:8453, scheme exact) only.' +
+        (solanaOffered ? ` It offers USDC on Solana; the ${SOLANA_COMING_LATER}.` : ''),
       { offered: classified.map((c) => c.reason ?? 'supported') },
     );
   }

@@ -10,7 +10,7 @@
  *   GET  /v1/x402/balance                                        -> { balanceUsd, limits, ... }
  *
  *   Authorization: Bearer <agent key> on topup, sign and balance.
- *   503 from any of them means the payer switch is off: "x402 payer not enabled yet".
+ *   503 from any of them means the payer is off for this key: "x402 payer not enabled".
  *
  * Boundary that matters for safety: the paid request (URL, body, the agent's
  * own API keys for that service) goes from THIS machine straight to the
@@ -49,7 +49,7 @@ export const X402_BASE =
   process.env.ROZO_CHECKOUT_X402_BASE || 'https://apiserver.mpprouter.dev/v1/x402';
 
 export const DISABLED_MESSAGE =
-  'x402 payer not enabled yet. Rozo has not switched on x402 payments; nothing was charged. Try again later.';
+  'x402 payer not enabled for this key right now; nothing was charged. Try again later, or email hi@rozo.ai with the masked key.';
 
 /** /sign retries after the first attempt, all with the same idempotencyKey. */
 export const SIGN_RETRIES = 2;
