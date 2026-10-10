@@ -148,6 +148,38 @@ private key (EVM and Solana only); every other path is keyless.
    only when the router reports paid / coinbase.settled — an intents status of
    payment_completed alone is the bridge lifecycle, not final settlement.
 
+## x402: pay any x402 API from a prepaid balance (beta)
+
+For endpoints that answer HTTP 402 with x402 payment requirements. Fund a Rozo
+balance once with the coin you hold, then pay many small x402 calls from it.
+
+  npx @rozoai/checkout x402 topup 20 --with usdt-solana     # one-time deposit address
+  npx @rozoai/checkout x402 pay <url> [--method POST] [--body '...'] [--header 'K: V'] [--max-usd 1.00]
+  npx @rozoai/checkout x402 balance
+
+Payment leg (what the seller receives): USDC on Base (eip155:8453) or USDC on
+Solana mainnet, scheme "exact". Topup leg: every --with coin above, plus native
+ETH (Ethereum, Base, Arbitrum), BNB and SOL in beta. Native coins never pay a
+seller directly.
+
+Raw HTTP (Authorization: Bearer <agent key ak_...>):
+  POST https://apiserver.mpprouter.dev/v1/x402/topup  {"amount":"20","token":"USDT","chain":"900"}
+       -> one-time deposit address/order; balance is credited after it confirms
+  POST https://apiserver.mpprouter.dev/v1/x402/sign   {"accepts":[<one entry from the 402>],"budget":"1.00","idempotencyKey":"<uuid>"}
+       -> the value for the PAYMENT-SIGNATURE header; replay your request with it
+  POST /v1/x402/keys creates the agent key (returned once). GET /v1/x402/balance.
+
+x402 safety rules:
+- Send the paid request yourself. Never send Rozo your request body, headers or
+  the API keys of the service you are paying; /sign needs only the accepts entry.
+- Generate one idempotencyKey per payment and reuse it on every retry of /sign.
+  A new key on retry can charge twice.
+- Refuse a payment above what the user approved; refuse a payTo on a
+  compromised-wallet list.
+- 503 from any /v1/x402 endpoint = "x402 payer not enabled yet". Nothing was
+  charged; stop.
+- The agent key owns the balance. Store it 0600, never print or log it.
+
 ## Safety rules (encode these, they prevent fund loss)
 
 - Before paying, require: status == "payment_unpaid" AND source.txHash == null AND

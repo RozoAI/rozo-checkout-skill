@@ -13,7 +13,10 @@ description: >
   Also pays a Bitrefill invoice created with "USDC on Base": triggers on
   "pay bitrefill", "bitrefill invoice", or an invoice id plus a Base USDC
   address and amount from Bitrefill. Supports Coinbase payment links and
-  Bitrefill invoices only (not Stripe).
+  Bitrefill invoices only (not Stripe). Also pays any x402 API (HTTP 402,
+  PAYMENT-REQUIRED) from a prepaid Rozo balance: triggers on "x402", "402
+  Payment Required", "pay this x402 endpoint"; the payment leg is USDC on
+  Base or Solana only.
 metadata:
   version: 1.2.0
 
@@ -25,6 +28,8 @@ metadata:
       - intentapiv4.rozo.ai       # bridge order status (payment-api)
       - intentapi.rozo.ai         # wallet balance / payment-option assistance
       - "per-chain public RPCs"   # Mode B only: broadcast the signed transfer
+      - "apiserver.mpprouter.dev/v1/x402/*"  # x402 payer: keys, topup, sign, balance
+      - "the x402 URL the caller passes"     # x402 pay: the paid request goes there directly
     environment_variables:
       read_only:
         - ROZO_CHECKOUT_EVM_KEY          # Mode B (--send) only
@@ -37,14 +42,19 @@ metadata:
         - ROZO_CHECKOUT_INTENTS_BASE
         - ROZO_CHECKOUT_INTENT_API
         - ROZO_CHECKOUT_UTM_SOURCE       # optional channel label for reporting
+        - ROZO_CHECKOUT_X402_KEY         # x402 agent key (else ~/.rozo-checkout/x402-key)
+        - ROZO_CHECKOUT_X402_BASE        # x402 endpoint override (testing)
     filesystem:
       - "~/.rozo-checkout/  (state + prefs + optional .env; created by this tool)"
+      - "~/.rozo-checkout/x402-key  (x402 agent key, mode 0600, written once by x402 topup)"
       - ".env in the working directory or a --env-file path (ROZO_CHECKOUT_* keys only)"
       - "Mode B key files, read-only: ~/.config/solana/id.json, a --keyfile path, or the ROZO_CHECKOUT_EVM_KEYSTORE path"
       - ".git metadata read-only (index, and gitdir/commondir resolution for worktrees), to refuse git-tracked key files"
     spending:
       - "Mode B (--send) signs and broadcasts one ERC-20/SPL transfer, capped at $1,100,"
       - "only after create-order --confirm recorded a digest-bound confirmation."
+      - "x402 pay asks Rozo to sign one USDC payment from the caller's prepaid balance,"
+      - "capped by --max-usd (default $1) locally and by per-key limits at Rozo."
     subprocess: none
   default_mode_needs_no_credentials: true
 ---
@@ -537,6 +547,69 @@ reconciliation with this wording:
 > `{payin.txHash}` · state: `{state}`
 
 Then stop and hand off. Do not run any send script again.
+
+## x402: pay any x402 API (beta)
+
+An x402 endpoint answers `402 Payment Required` with a list of payment
+requirements (`accepts`). This skill pays it from a **prepaid Rozo balance**,
+so the agent can fund once with whatever coin it holds and then pay many small
+x402 calls without a wallet of its own.
+
+```bash
+# 1. Fund the balance once, with any supported coin (prints a one-time deposit address)
+npx @rozoai/checkout x402 topup 20 --with usdt-solana
+# 2. Call a paid endpoint: reads the 402, Rozo signs, the request is replayed with PAYMENT-SIGNATURE
+npx @rozoai/checkout x402 pay https://api.example.com/v1/search --method POST --body '{"q":"..."}'
+# 3. Check what is left
+npx @rozoai/checkout x402 balance
+```
+
+Coverage, kept separate on purpose:
+
+| Leg | What works |
+|---|---|
+| Topup (funding the balance) | Everything `pay` takes today (USDT/USDC on Solana, BNB Chain, Ethereum, Polygon; USDC on Base, Stellar; BTC Lightning) plus native ETH (Ethereum, Base, Arbitrum), BNB and SOL in beta |
+| Payment (what the seller receives) | USDC on Base (`eip155:8453`) and USDC on Solana mainnet, x402 scheme `exact` only. No native coins, no USDT on this leg |
+
+How `x402 pay` works, and what it guarantees:
+
+1. It sends your request from **this machine** straight to the endpoint. Rozo
+   never sees the request body, your headers, or the API keys you send to that
+   service; it only sees the one `accepts` entry it is asked to sign.
+2. On a 402 it parses the challenge (x402 v2 `PAYMENT-REQUIRED` header, or a
+   v1 JSON body), keeps only exact USDC on Base/Solana, refuses anything above
+   `--max-usd` (default 1.00) and any `payTo` on the compromised-wallet list.
+3. It generates one `idempotencyKey` (UUID) and calls `POST /v1/x402/sign`.
+   Transient failures are retried with the **same** key, so a timeout after
+   Rozo already debited the balance returns the same signature instead of
+   charging twice. The key is printed; pass it back with `--idempotency-key`
+   if a run is interrupted.
+4. It replays the original request with `PAYMENT-SIGNATURE` (v1: `X-PAYMENT`)
+   and prints the response body on stdout; the payment summary and the
+   settlement tx go to stderr (or all of it in `--json`).
+
+Agent rules:
+
+- First run `x402 topup` creates an agent key (`ak_…`), stores it in
+  `~/.rozo-checkout/x402-key` (mode 0600) and never prints it in full. That key
+  owns the balance; do not paste it anywhere. `ROZO_CHECKOUT_X402_KEY`
+  overrides the file.
+- Rozo enforces per-key limits (per payment and per day). Set `--max-usd` to
+  the most the user agreed to pay for this one call.
+- `X402_PAYER_DISABLED` ("x402 payer not enabled yet") means Rozo has not
+  switched the payer on. Nothing was charged; tell the user and stop.
+- `X402_PAYMENT_REJECTED` or a non-2xx after paying: do not retry with a new
+  key. Run `x402 balance` and report the `idempotencyKey`.
+- `X402_UNSUPPORTED`: the endpoint wants something other than USDC on Base or
+  Solana. Say so; do not try to bridge per call.
+- Withdrawing a balance back to a wallet is not self-serve yet: email
+  hi@rozo.ai with the masked key and the amount.
+
+Raw HTTP, for agents without a shell (Bearer = the agent key):
+`POST https://apiserver.mpprouter.dev/v1/x402/topup {amount, token, chain}` and
+`POST https://apiserver.mpprouter.dev/v1/x402/sign {accepts, budget, idempotencyKey}`
+→ the `PAYMENT-SIGNATURE` value. Keys: `POST /v1/x402/keys`; balance:
+`GET /v1/x402/balance`.
 
 ## Getting help
 

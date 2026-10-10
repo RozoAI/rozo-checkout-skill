@@ -59,6 +59,8 @@ export function redact(text) {
 
   // Bearer / token / key parameters anywhere else in the message.
   s = s.replace(/\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 <redacted>');
+  // x402 agent keys (ak_…) own a prepaid balance; never echo one.
+  s = s.replace(/\bak_[A-Za-z0-9_-]{8,}/g, 'ak_<redacted>');
   s = s.replace(
     /\b(api[-_]?key|apikey|access[-_]?token|auth[-_]?token|secret|token|password|passwd|pwd)\b(\s*[:=]\s*)("?)[A-Za-z0-9._~+/=-]{6,}\3/gi,
     '$1$2<redacted>',
