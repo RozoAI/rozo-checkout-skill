@@ -58225,8 +58225,9 @@ USAGE
 
 TOPUP COINS (--with)
   usdt-solana usdc-solana usdt-bnb usdc-bnb usdt-ethereum usdc-ethereum
-  usdt-polygon usdc-polygon usdc-base usdc-stellar btc-lightning
-  native (beta): eth-ethereum eth-base eth-arbitrum bnb-bnb sol-solana
+  usdt-polygon usdc-polygon usdc-base usdc-stellar
+  x402 top ups accept USDC and USDT only. Holding a native coin or sats?
+  Use them to top up OpenRouter with ROZO Checkout (rozo-checkout pay).
 
 PAY OPTIONS
   --method <m>            HTTP method (default GET)

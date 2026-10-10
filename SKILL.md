@@ -568,7 +568,7 @@ Coverage, kept separate on purpose:
 
 | Leg | What works |
 |---|---|
-| Topup (funding the balance) | Everything `pay` takes today (USDT/USDC on Solana, BNB Chain, Ethereum, Polygon; USDC on Base, Stellar; BTC Lightning) plus native ETH (Ethereum, Base, Arbitrum), BNB and SOL in beta |
+| Topup (funding the balance) | USDT on Solana, BNB Chain, Ethereum, Polygon; USDC on Solana, BNB Chain, Ethereum, Polygon, Base, Stellar. USDC and USDT only; any other coin gets `X402_TOPUP_SOURCE_UNSUPPORTED`. Native coins and sats pay OpenRouter through `pay` (ROZO Checkout) instead |
 | Payment (what the seller receives) | USDC on Base (`eip155:8453`), x402 scheme `exact` only. No native coins, no USDT on this leg. Solana payment leg is coming later: an endpoint that only offers Solana USDC returns `X402_UNSUPPORTED` |
 
 How `x402 pay` works, and what it guarantees:
@@ -635,7 +635,7 @@ The balance is debited only by the ledger commit inside `/sign`, after signing; 
 | `/topup` | 400 | `X402_TOPUP_AMOUNT_OUT_OF_RANGE` | A top up must be between $5 and $500. | No | Pick an amount in range. |
 | `/topup` | 400 | `X402_TOPUP_SOURCE_REQUIRED` | `chain` and `token` are missing. The response lists accepted chains. | No | Say which coin you pay with. |
 | `/topup` | 400 | `X402_UNSUPPORTED_CHAIN` | Unknown chain. | No | Use a CAIP-2 id or a name such as `solana`, `base`, `ethereum`, `bsc`, `polygon`, `arbitrum`, `stellar`. |
-| `/topup` | 400 | `X402_TOPUP_SOURCE_UNSUPPORTED` | That coin is not accepted for top ups. The server currently refuses native coins and Lightning here. May carry a `supported` list. | No | Top up with USDC or USDT. |
+| `/topup` | 400 | `X402_TOPUP_SOURCE_UNSUPPORTED` | That coin is not accepted for top ups. May carry a `supported` list. | No | Use USDC or USDT. |
 | `/topup` | 502 | `INTENTS_API_FAILED` | The top up order could not be created. | No, no address was shown | Retry later. |
 | `/topup` | 503 | `X402_TOPUP_MISCONFIGURED`, `X402_TOPUP_NOT_REGISTERED` | The order was not usable, so the deposit address was withheld. | No, no address was shown | Retry later; email hi@rozo.ai if it repeats. |
 | `/topup` | 503 | `X402_PAYER_SHADOW`, `X402_TOPUP_NOT_CONFIGURED`, `X402_SIGNER_NOT_CONFIGURED` | Top ups are closed right now. | No | Stop. |
