@@ -222,7 +222,13 @@ async function fetchOnce(method, url, body, timeoutMs) {
     clearTimeout(timer);
   }
 }
-async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS, sleep: sleep2 = defaultSleep, now = Date.now } = {}) {
+async function request(method, url, {
+  body,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  sleep: sleep2 = defaultSleep,
+  now = Date.now,
+  maxTotalWaitMs = MAX_TOTAL_WAIT_MS
+} = {}) {
   let waitedMs = 0;
   let retries = 0;
   for (; ; ) {
@@ -242,7 +248,7 @@ async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS, slee
     const retryable = res.status === 429 || res.status === 503 && hintMs !== null;
     if (retryable && retries < MAX_RETRIES) {
       const waitMs = hintMs ?? FALLBACK_BACKOFF_MS[retries];
-      if (waitedMs + waitMs <= MAX_TOTAL_WAIT_MS) {
+      if (waitedMs + waitMs <= Math.min(maxTotalWaitMs, MAX_TOTAL_WAIT_MS)) {
         retries += 1;
         waitedMs += waitMs;
         await sleep2(waitMs);

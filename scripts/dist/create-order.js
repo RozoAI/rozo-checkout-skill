@@ -281,7 +281,13 @@ async function fetchOnce(method, url, body, timeoutMs) {
     clearTimeout(timer);
   }
 }
-async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS, sleep = defaultSleep, now = Date.now } = {}) {
+async function request(method, url, {
+  body,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  sleep = defaultSleep,
+  now = Date.now,
+  maxTotalWaitMs = MAX_TOTAL_WAIT_MS
+} = {}) {
   let waitedMs = 0;
   let retries = 0;
   for (; ; ) {
@@ -301,7 +307,7 @@ async function request(method, url, { body, timeoutMs = DEFAULT_TIMEOUT_MS, slee
     const retryable = res.status === 429 || res.status === 503 && hintMs !== null;
     if (retryable && retries < MAX_RETRIES) {
       const waitMs = hintMs ?? FALLBACK_BACKOFF_MS[retries];
-      if (waitedMs + waitMs <= MAX_TOTAL_WAIT_MS) {
+      if (waitedMs + waitMs <= Math.min(maxTotalWaitMs, MAX_TOTAL_WAIT_MS)) {
         retries += 1;
         waitedMs += waitMs;
         await sleep(waitMs);
@@ -670,6 +676,7 @@ async function quoteInvoice({ url, linkId }) {
   const body = url ? { url } : { payment_id: linkId };
   return postJson(`${MPP_BASE}/quote-invoice`, body);
 }
+var QUOTE_RECEIPT_RETRY_BUDGET_MS = 2e4;
 async function createInvoice({ url, linkId, source, quoteReceipt, utmSource, email }) {
   const body = {
     ...url ? { url } : { payment_id: linkId },
@@ -681,7 +688,11 @@ async function createInvoice({ url, linkId, source, quoteReceipt, utmSource, ema
     // sent empty, when the user gave none.
     ...email ? { email } : {}
   };
-  return postJson(`${MPP_BASE}/create-invoice`, body);
+  return postJson(
+    `${MPP_BASE}/create-invoice`,
+    body,
+    quoteReceipt ? { maxTotalWaitMs: QUOTE_RECEIPT_RETRY_BUDGET_MS } : void 0
+  );
 }
 async function invoiceStatus({ linkId, rozoPaymentId }) {
   const qs = new URLSearchParams();

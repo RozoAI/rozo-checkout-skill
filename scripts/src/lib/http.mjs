@@ -8,7 +8,8 @@
  * backoff. The waits of one call never add up to more than MAX_TOTAL_WAIT_MS:
  * when the server asks for longer than the remaining budget we do not sleep a
  * truncated time (that would only earn another 429), we fail at once with the
- * server's value and any X-RateLimit-* headers in the error details.
+ * server's value and any X-RateLimit-* headers in the error details. A caller
+ * whose body goes stale (a quote receipt) passes a smaller `maxTotalWaitMs`.
  */
 
 import { SkillError, redact } from './output.mjs';
@@ -99,7 +100,13 @@ async function fetchOnce(method, url, body, timeoutMs) {
 async function request(
   method,
   url,
-  { body, timeoutMs = DEFAULT_TIMEOUT_MS, sleep = defaultSleep, now = Date.now } = {},
+  {
+    body,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    sleep = defaultSleep,
+    now = Date.now,
+    maxTotalWaitMs = MAX_TOTAL_WAIT_MS,
+  } = {},
 ) {
   let waitedMs = 0;
   let retries = 0;
@@ -122,7 +129,7 @@ async function request(
     const retryable = res.status === 429 || (res.status === 503 && hintMs !== null);
     if (retryable && retries < MAX_RETRIES) {
       const waitMs = hintMs ?? FALLBACK_BACKOFF_MS[retries];
-      if (waitedMs + waitMs <= MAX_TOTAL_WAIT_MS) {
+      if (waitedMs + waitMs <= Math.min(maxTotalWaitMs, MAX_TOTAL_WAIT_MS)) {
         retries += 1;
         waitedMs += waitMs;
         await sleep(waitMs);

@@ -75,6 +75,14 @@ export async function quoteInvoice({ url, linkId }) {
   return postJson(`${MPP_BASE}/quote-invoice`, body);
 }
 
+/**
+ * A 429 retry resends the same body, quoteReceipt included. The receipt lives
+ * 60 seconds, so rate-limit waits on a receipt-carrying create stay well
+ * inside that; a longer server wait fails as RATE_LIMITED instead of
+ * resubmitting an expired receipt.
+ */
+export const QUOTE_RECEIPT_RETRY_BUDGET_MS = 20_000;
+
 /** Step 4. Creates (or reuses) the Rozo intent for this Coinbase link. */
 export async function createInvoice({ url, linkId, source, quoteReceipt, utmSource, email }) {
   const body = {
@@ -87,7 +95,11 @@ export async function createInvoice({ url, linkId, source, quoteReceipt, utmSour
     // sent empty, when the user gave none.
     ...(email ? { email } : {}),
   };
-  return postJson(`${MPP_BASE}/create-invoice`, body);
+  return postJson(
+    `${MPP_BASE}/create-invoice`,
+    body,
+    quoteReceipt ? { maxTotalWaitMs: QUOTE_RECEIPT_RETRY_BUDGET_MS } : undefined,
+  );
 }
 
 /**

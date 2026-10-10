@@ -203,3 +203,31 @@ test('other statuses are unchanged: no retry, same error shape', async () => {
   }
   assert.deepEqual(waits, []);
 });
+
+test('maxTotalWaitMs narrows the budget (quote receipts go stale)', async () => {
+  const { waits, sleep } = recorder();
+  await withFetch([reply(429, { code: 'RATE_LIMITED' }, { 'retry-after': '30' })], async (calls) => {
+    await assert.rejects(
+      postJson('https://example.test/x', { quoteReceipt: 'r' }, { sleep, maxTotalWaitMs: 20_000 }),
+      (err) => err.code === 'RATE_LIMITED' && err.details.retries === 0 && err.details.retryAfterSeconds === 30,
+    );
+    assert.equal(calls.length, 1);
+  });
+  assert.deepEqual(waits, []);
+});
+
+// A retry here would really sleep 90s; the 5s test timeout makes that a failure.
+test('createInvoice with a quote receipt never waits past the receipt budget', { timeout: 5_000 }, async () => {
+  const { QUOTE_RECEIPT_RETRY_BUDGET_MS, createInvoice } = await import('../scripts/src/lib/api.mjs');
+  process.env.ROZO_CHECKOUT_ANON_ID = 'off';
+  assert.ok(QUOTE_RECEIPT_RETRY_BUDGET_MS < 60_000, 'must stay inside the 60s receipt TTL');
+  // Retry-After 90 fits the global 120s budget but not the receipt budget:
+  // exactly one request, then RATE_LIMITED, no stale resubmission.
+  await withFetch([reply(429, { code: 'RATE_LIMITED' }, { 'retry-after': '90' })], async (calls) => {
+    await assert.rejects(
+      createInvoice({ linkId: 'pl_test', source: { chainId: '900', tokenSymbol: 'USDT' }, quoteReceipt: 'r' }),
+      (err) => err.code === 'RATE_LIMITED' && err.details.retries === 0,
+    );
+    assert.equal(calls.length, 1);
+  });
+});
