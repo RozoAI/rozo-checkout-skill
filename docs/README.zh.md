@@ -29,11 +29,11 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 | BNB Chain | `usdt-bnb` `usdc-bnb` | `56` | 18 位小数 |
 | Polygon | `usdt-polygon` `usdc-polygon` | `137` | 6 位小数 |
 | Base | `usdc-base` | `8453` | 6 位小数 |
-| Solana | `usdt-solana` `usdc-solana` | `900` | SPL；不支持原生 SOL |
+| Solana | `usdt-solana` `usdc-solana` | `900` | SPL；原生 SOL 仅限网页版（见下） |
 | Stellar | `usdc-stellar` | `1500` | 必须带 `MEMO_TEXT` memo —— 会在充值信息块里给出 |
 | Bitcoin Lightning | `btc-lightning` | `lightning` | BOLT11；金额单位为聪 |
 
-原生 gas 币（SOL、BNB、ETH、MATIC）以及链上 BTC 均不接受。
+本 CLI 不接受原生币和链上 BTC。原生币可以在网页版 [checkout.rozo.ai](https://checkout.rozo.ai) 支付：Ethereum、Base 或 Arbitrum 上的 ETH，BNB Chain 上的 BNB，Solana 上的 SOL，以及 Polygon 上的 POL（Beta）。链上 BTC 任何渠道都不接受。
 
 ## 我需要什么钱包？
 

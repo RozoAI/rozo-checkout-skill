@@ -99,7 +99,10 @@ chainId "1" Ethereum (USDC, USDT) · "56" BNB Chain (USDC, USDT; 18-decimals) ·
 "137" Polygon (USDC, USDT) · "8453" Base (USDC) · "900" Solana (USDC, USDT) ·
 "1500" Stellar (USDC; deposit memo REQUIRED) · "lightning" (BTC; BOLT11 invoice,
 amounts in integer satoshis via source.amountUnit=="sats").
-Native SOL/ETH/BNB are NOT supported — stablecoins (or Lightning BTC) only.
+Native coins are NOT supported by the CLI or the MCP server: stablecoins (or Lightning
+BTC) only. A user who holds native ETH (Ethereum, Base, Arbitrum), BNB, SOL or POL
+(Beta) can pay on the web at https://checkout.rozo.ai; the raw HTTP rules for native
+coins are in https://checkout.rozo.ai/llms.txt.
 
 WALLET: one wallet on one of these chains is enough — not one per chain. Any
 wallet, or an exchange withdrawal, can fund the deposit address; nothing

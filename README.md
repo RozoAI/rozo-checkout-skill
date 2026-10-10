@@ -62,11 +62,11 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 | BNB Chain | `usdt-bnb` `usdc-bnb` | `56` | 18 decimals |
 | Polygon | `usdt-polygon` `usdc-polygon` | `137` | 6 decimals |
 | Base | `usdc-base` | `8453` | 6 decimals |
-| Solana | `usdt-solana` `usdc-solana` | `900` | SPL; native SOL not supported |
+| Solana | `usdt-solana` `usdc-solana` | `900` | SPL; native SOL on the web only (see below) |
 | Stellar | `usdc-stellar` | `1500` | `MEMO_TEXT` memo required — shown in the deposit block |
 | Bitcoin Lightning | `btc-lightning` | `lightning` | BOLT11; amounts in satoshis. Any wallet that can pay an invoice works, including Cashu/ecash wallets — the mint melts your ecash into the Lightning payment. |
 
-Native gas coins (SOL, BNB, ETH, MATIC) and on-chain BTC are not accepted.
+This CLI does not take native coins or on-chain BTC. Native coins can be paid on the web at [checkout.rozo.ai](https://checkout.rozo.ai) instead: ETH on Ethereum, Base or Arbitrum, BNB on BNB Chain, SOL on Solana, and POL on Polygon (Beta). On-chain BTC is not accepted anywhere.
 
 ## Which wallet do I need?
 

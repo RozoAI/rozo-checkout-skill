@@ -72,8 +72,11 @@ caller pay one with something else:
 | USDC | Base, Stellar |
 | BTC | Lightning (BOLT11) — any wallet that pays an invoice works, including Cashu/ecash wallets that melt to Lightning |
 
-Native SOL, native BNB, native ETH and on-chain BTC are **not** supported —
-always say "USDT **on** Solana", never "SOL".
+Native SOL, native BNB, native ETH, native POL and on-chain BTC are **not**
+supported by this skill: always say "USDT **on** Solana", never "SOL". If the
+user only holds a native coin (ETH on Ethereum, Base or Arbitrum, BNB on BNB
+Chain, SOL on Solana, or POL on Polygon in Beta), tell them the web checkout
+at https://checkout.rozo.ai accepts it; this skill cannot pay with it.
 
 How it works: the router quotes the Coinbase link, creates a one-time bridge
 order with a deposit address for the coin you chose, and once your deposit
