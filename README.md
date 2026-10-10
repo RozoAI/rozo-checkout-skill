@@ -388,6 +388,14 @@ keypair or an encrypted keystore, and supports EVM chains and Solana only —
 Stellar and Lightning are Mode A only.
 </details>
 
+## Bulk and automated use
+
+Buying credits regularly, reselling them, or building an agent that tops up
+OpenRouter for its users? The [Bulk Purchases and Agents](https://docs.rozo.ai/products/checkout/bulk-and-agents)
+guide covers the CLI, the MCP server and the raw HTTP flow side by side, plus
+fees, rate limits, idempotency, error codes and what each final status means.
+The batch script below is the CLI half of it.
+
 ## Paying many invoices (batch / resellers)
 
 Each OpenRouter top-up is its own Coinbase link, so paying many is a loop: one

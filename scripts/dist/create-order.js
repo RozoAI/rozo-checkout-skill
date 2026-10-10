@@ -13,6 +13,8 @@ var SUPPORT = Object.freeze({
   discord: "https://discord.gg/EfWejgTbuU"
 });
 var SUPPORT_TEXT = `Need help? Email ${SUPPORT.email}, or reach ROZO on X ${SUPPORT.x} or Discord ${SUPPORT.discord}.`;
+var BULK_DOCS_URL = "https://docs.rozo.ai/products/checkout/bulk-and-agents";
+var BULK_HINT_TEXT = `Buying regularly or for others? ${BULK_DOCS_URL}`;
 var CONTACT_EMAIL_MAX_LENGTH = 254;
 var EMAIL_RE = /^[a-z0-9][^\s@]*@[^\s@.]+(\.[^\s@.]+)+$/;
 function normalizeContactEmail(raw) {
