@@ -251,10 +251,12 @@ async function main(argv) {
   }
 
   const expiresAt = payment?.expiresAt ?? snap.expiry?.expiresAt ?? null;
-  // What the payer must beat: for a native coin the price lock, which ends
-  // long before the order itself.
-  const payBy = native ? quoteExpiresAt : expiresAt;
-  const msRemaining = payBy ? Date.parse(payBy) - Date.now() : NaN;
+  // What the payer must beat is the effective deadline finalWindow already
+  // computed: the earliest of the order, the Coinbase link and, for a native
+  // coin, the price lock. The lock is still reported on its own below.
+  const msRemaining = Number.isFinite(finalWindow.effectiveDeadlineMs)
+    ? finalWindow.effectiveDeadlineMs - Date.now()
+    : NaN;
   const expiresIn = Number.isFinite(msRemaining) ? formatRemaining(msRemaining) : null;
   const paymentLink = payment?.paymentLink ?? localPaymentLink(id);
   const bolt11 = source.lnInvoice ?? payment?.lnInvoice ?? null;

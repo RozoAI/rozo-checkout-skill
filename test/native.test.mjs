@@ -812,3 +812,17 @@ test('help text lists every native and Arbitrum preset, and never calls POL beta
   assert.match(HELP, /\$2,000/);
   assert.match(HELP, /On-chain BTC and Tron/);
 });
+
+test('resume: the payment countdown is the earliest deadline, not the price lock alone', async () => {
+  const { run: runResume } = await import('../scripts/src/resume.mjs');
+  const payment = nativePayment({ quoteExpiresAt: inMin(60) });
+  const status = { ok: true, pl_id: LINK_ID, coinbase: { protocolVersion: 'v1', usageCount: 0, maxUsage: 1, preApprovalExpiry: inMin(20), settled: false } };
+  await withHttp([['/invoice-status', () => json(status)], [`/payments/${ID}`, () => json(payment)]], async () => {
+    const { payload, exitCode } = await capture(() => runResume([ID, '--confirm']));
+    assert.equal(exitCode, 0, JSON.stringify(payload));
+    const mins = Number(String(payload.expiry.expiresIn).replace('m', ''));
+    assert.ok(mins <= 20, `countdown ${payload.expiry.expiresIn} must not exceed the Coinbase link`);
+    assert.equal(payload.deposit.expiresIn, payload.expiry.expiresIn);
+    assert.equal(payload.expiry.quoteExpiresAt, new Date(payment.quoteExpiresAt).toISOString());
+  });
+});

@@ -57410,8 +57410,7 @@ async function main6(argv) {
     }
   }
   const expiresAt = payment?.expiresAt ?? snap.expiry?.expiresAt ?? null;
-  const payBy = native ? quoteExpiresAt : expiresAt;
-  const msRemaining = payBy ? Date.parse(payBy) - Date.now() : NaN;
+  const msRemaining = Number.isFinite(finalWindow.effectiveDeadlineMs) ? finalWindow.effectiveDeadlineMs - Date.now() : NaN;
   const expiresIn = Number.isFinite(msRemaining) ? formatRemaining(msRemaining) : null;
   const paymentLink = payment?.paymentLink ?? localPaymentLink(id);
   const bolt11 = source.lnInvoice ?? payment?.lnInvoice ?? null;
