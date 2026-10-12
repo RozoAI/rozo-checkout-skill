@@ -41842,7 +41842,15 @@ function nativeOfferFor({ chainId, tokenSymbol, supportedSources, nativeMinUsd, 
     };
   }
   const usd = Number(callerPaysUsd);
-  if (Number.isFinite(usd) && usd > 0) {
+  if (!Number.isFinite(usd) || usd <= 0) {
+    return {
+      ok: false,
+      code: "NATIVE_AMOUNT_UNKNOWN",
+      reason: `The quote carries no USD amount, so ${label} cannot be checked against the native limits. Pay with USDC or USDT instead.`,
+      minUsd
+    };
+  }
+  {
     if (usd > NATIVE_MAX_USD) {
       return {
         ok: false,

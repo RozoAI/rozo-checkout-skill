@@ -336,7 +336,17 @@ export function nativeOfferFor({ chainId, tokenSymbol, supportedSources, nativeM
     };
   }
   const usd = Number(callerPaysUsd);
-  if (Number.isFinite(usd) && usd > 0) {
+  // Without a USD amount the $2,000 cap and the minimum cannot be checked, so
+  // refuse the native coin rather than let the order through unchecked.
+  if (!Number.isFinite(usd) || usd <= 0) {
+    return {
+      ok: false,
+      code: 'NATIVE_AMOUNT_UNKNOWN',
+      reason: `The quote carries no USD amount, so ${label} cannot be checked against the native limits. Pay with USDC or USDT instead.`,
+      minUsd,
+    };
+  }
+  {
     if (usd > NATIVE_MAX_USD) {
       return {
         ok: false,

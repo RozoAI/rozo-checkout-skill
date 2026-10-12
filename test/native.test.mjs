@@ -176,8 +176,9 @@ test('native USD bounds: $2,000 cap, $1 minimum for native ETH on Ethereum, quot
   assert.equal(nativeMinUsdFor('900', 'SOL', { 900: { SOL: 1 } }), 1);
   assert.equal(nativeMinUsdFor('1', 'ETH', null), 1);
   assert.equal(nativeMinUsdFor('8453', 'ETH', null), null);
-  // An unknown amount defers to the backend instead of guessing.
-  assert.equal(offer('1', 'ETH', null).ok, true);
+  // An unknown amount cannot be checked against the bounds, so it is refused.
+  assert.equal(offer('1', 'ETH', null).code, 'NATIVE_AMOUNT_UNKNOWN');
+  assert.equal(offer('8453', 'ETH', 'abc').code, 'NATIVE_AMOUNT_UNKNOWN');
 });
 
 // ---------------------------------------------------------------------------
