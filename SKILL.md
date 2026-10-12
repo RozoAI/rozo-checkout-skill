@@ -2,8 +2,9 @@
 name: rozo-checkout
 description: >
   Use when an agent needs to pay OpenRouter (or any Coinbase invoice) with the
-  crypto it already holds: USDT/USDC on Solana, BNB Chain, Ethereum or Polygon,
-  USDC on Base or Stellar, or BTC over Lightning, with no Coinbase account. A
+  crypto it already holds: USDT/USDC on Solana, BNB Chain, Ethereum, Polygon or
+  Arbitrum, USDC on Base or Stellar, BTC over Lightning, or a native coin (ETH
+  on Ethereum, Base or Arbitrum, BNB, SOL, POL), with no Coinbase account. A
   bridge creates a one-time deposit order for that coin, then a funder wallet
   settles the Coinbase invoice. Triggers on a
   payments.coinbase.com/payment-links/pl_* (or
@@ -51,7 +52,7 @@ metadata:
       - "Mode B key files, read-only: ~/.config/solana/id.json, a --keyfile path, or the ROZO_CHECKOUT_EVM_KEYSTORE path"
       - ".git metadata read-only (index, and gitdir/commondir resolution for worktrees), to refuse git-tracked key files"
     spending:
-      - "Mode B (--send) signs and broadcasts one ERC-20/SPL transfer, capped at $1,100,"
+      - "Mode B (--send) signs and broadcasts one ERC-20/SPL or native coin transfer, capped at $1,100,"
       - "only after create-order --confirm recorded a digest-bound confirmation."
       - "x402 pay asks Rozo to sign one USDC payment from the caller's prepaid balance,"
       - "capped by --max-usd (default $1) locally and by per-key limits at Rozo."
@@ -68,15 +69,29 @@ caller pay one with something else:
 
 | You hold | Chain |
 |---|---|
-| USDT or USDC | Solana, BNB Chain, Ethereum, Polygon |
+| USDT or USDC | Solana, BNB Chain, Ethereum, Polygon, Arbitrum |
 | USDC | Base, Stellar |
 | BTC | Lightning (BOLT11) — any wallet that pays an invoice works, including Cashu/ecash wallets that melt to Lightning |
+| ETH (native) | Ethereum, Base, Arbitrum |
+| BNB, SOL, POL (native) | BNB Chain, Solana, Polygon |
 
-Native SOL, native BNB, native ETH, native POL and on-chain BTC are **not**
-supported by this skill: always say "USDT **on** Solana", never "SOL". If the
-user only holds a native coin (ETH on Ethereum, Base or Arbitrum, BNB on BNB
-Chain, SOL on Solana, or POL on Polygon in Beta), tell them the web checkout
-at https://checkout.rozo.ai accepts it; this skill cannot pay with it.
+Say exactly which one: "USDT **on** Solana" and "SOL" (the native coin) are
+different orders. On-chain BTC and Tron are **not** supported.
+
+**Native coins have extra rules.** Offer one only when the quote lists it for
+this invoice (`quote.js` reports `nativeOffered`; `create-order.js` refuses
+anything else with `NATIVE_NOT_OFFERED` before creating an order). Native
+orders are limited to $2,000 per invoice (`NATIVE_AMOUNT_TOO_HIGH`), and native
+ETH on Ethereum needs at least $1 (`NATIVE_AMOUNT_TOO_LOW`). A native order is
+**exact-out**, like Lightning: `deposit.amount` is the exact coin amount to
+send, and its price is locked only until `deposit.quoteExpiresAt` (about an
+hour; the order itself stays open longer, but a payment after the lock is
+valued at the arrival price and can fall short). Tell the user the deadline is
+the price lock, that the coin amount includes an FX spread on top of the
+service fee, that their wallet needs a little more of the same coin for gas,
+and that from an exchange the amount that arrives must be the full amount.
+Never send, and never tell anyone to send, after the lock. Native coins are not
+available for Bitrefill invoices (`NATIVE_NOT_AVAILABLE`).
 
 How it works: the router quotes the Coinbase link, creates a one-time bridge
 order with a deposit address for the coin you chose, and once your deposit
@@ -335,7 +350,9 @@ already existed for this link keeps whatever email it was created with, so
 read this field from the first run; `rozo-checkout pay` does that for you.)
 
 Chain ids: `1` Ethereum · `56` BNB Chain · `137` Polygon · `8453` Base ·
-`900` Solana · `1500` Stellar · `lightning` Bitcoin Lightning.
+`42161` Arbitrum · `900` Solana · `1500` Stellar · `lightning` Bitcoin Lightning.
+Native coins use the same ids with `--token ETH` (1, 8453, 42161), `BNB` (56),
+`POL` (137) or `SOL` (900); decimals are 18 for ETH, BNB and POL and 9 for SOL.
 
 Creating an order moves no money and costs nothing if left unfunded. In one
 run it creates the order, verifies it against the quote, fetches the
@@ -419,10 +436,10 @@ be named with `--keyfile`. A raw key in the environment still works for
 unattended automation:
 
 ```bash
-# EVM (Ethereum, BNB Chain, Polygon, Base)
+# EVM (Ethereum, BNB Chain, Polygon, Base, Arbitrum; tokens and native ETH/BNB/POL)
 ROZO_CHECKOUT_EVM_KEY=... node scripts/dist/send-evm.js --rozo-payment-id <uuid> --send
 
-# Solana
+# Solana (USDC/USDT and native SOL)
 ROZO_CHECKOUT_SOL_KEY=... node scripts/dist/send-sol.js --rozo-payment-id <uuid> --send
 
 # --dry-run shows exactly what would be signed and signs nothing (no --send needed)
@@ -434,6 +451,12 @@ payability as the last step before broadcast, verifies the RPC really is on the
 intended chain, verifies the token's on-chain decimals, signs before
 broadcasting so the transaction hash is known in advance, and records the send
 locally **before** broadcasting so the same order can never be paid twice.
+A native coin is sent as a plain transfer of the exact amount (EVM: `value`
+with no calldata; Solana: a System Program transfer to a plain wallet). The
+balance check covers the amount plus the network fee in the same coin, and the
+price lock is re-checked as the last gate: past it the send stops with
+`QUOTE_EXPIRED`. The lock the user confirmed binds even if the backend later
+reports a later one.
 One limit: a single payment may not exceed **$1,100**. There is no override
 flag. A larger invoice is paid via Mode A, which needs no key and has no limit.
 
@@ -703,6 +726,11 @@ of any `status` result that is not a clean answer.
 | `CREATE_DRIFT` | the created order disagrees with the quote (merchant, amount or link) | do not fund it; let it expire unfunded and report the drift |
 | `NO_DISCOUNT_VIOLATION` | the server reported a discount, or `callerPays ≠ invoice` | stop; this flow must charge the full invoice |
 | `EXPIRY_MARGIN` / `EXPIRED` | not enough time left to fund, bridge and settle | start over with a fresh link |
+| `QUOTE_EXPIRED` / `QUOTE_EXPIRY_MARGIN` | a native coin order's price lock has ended, or is inside the safety margin | do not send; the unfunded order costs nothing. Once it has expired, run pay again for a fresh price, or pay with a stablecoin |
+| `NATIVE_NOT_OFFERED` | the quote does not list that native coin for this invoice | nothing was created; offer a stablecoin or a native coin from `nativeOffered` |
+| `NATIVE_AMOUNT_TOO_HIGH` / `NATIVE_AMOUNT_TOO_LOW` | the invoice is outside the native bounds ($2,000 max; native ETH on Ethereum $1 min) | nothing was created; pay with another coin |
+| `NATIVE_TOKEN_ADDRESS_UNEXPECTED` | a native order names a token contract or mint | do not sign; report it |
+| `DEPOSIT_ACCOUNT_NOT_WALLET` / `DEPOSIT_BELOW_RENT` | (native SOL) the deposit address is not a plain wallet, or a new one would stay below rent | do not sign; pay by hand only after checking with the operator |
 | `BOLT11_TOO_SHORT` | the Lightning invoice has under 10 minutes left | see "Lightning invoice too short" below |
 | `BLACKLIST_HIT` | the deposit address or the sender is on the compromised-address list | send nothing; report it to the operator immediately |
 | `BLACKLIST_UNAVAILABLE` | the vendored list is missing, malformed or its digest does not match | the skill fails closed by design; do not work around it |
@@ -710,7 +738,7 @@ of any `status` result that is not a clean answer.
 | `DEPOSIT_CHANGED` | the live deposit details differ from what was confirmed | abort; re-run `create-order.js` and re-confirm |
 | `BROADCAST_AMBIGUOUS` | the RPC errored but a transaction may be in flight | do **not** resend; check the sender on an explorer, then poll |
 | `RPC_CHAIN_MISMATCH` | the RPC is not on the chain the order settles on | fix `ROZO_CHECKOUT_RPC_<chainId>`; never sign against it |
-| `INSUFFICIENT_GAS` | the sending wallet cannot pay the network fee (ETH, BNB, POL or SOL; on Base this includes the L1 data fee). `error.details` has network, fee coin, balance, required and shortfall | nothing was signed and the order is untouched; add the fee coin to that wallet and re-run, or pay with another coin |
+| `INSUFFICIENT_GAS` | the sending wallet cannot pay the network fee (ETH, BNB, POL or SOL; on Base this includes the L1 data fee). For a native coin payment, `required` is the payment plus the fee. `error.details` has network, fee coin, balance, required and shortfall | nothing was signed and the order is untouched; add the fee coin to that wallet and re-run, or pay with another coin |
 | `GAS_CHECK_UNAVAILABLE` | the fee or balance could not be read from the RPC | **not** evidence of a shortfall; retry, pass `--rpc <url>`, or pay by hand (Mode A) |
 | `DECIMALS_MISMATCH` | the token's on-chain decimals disagree with expectations | do not sign — the amount could be off by orders of magnitude |
 | `CAP_PER_TX` | above the $1,100 per-payment limit for automated sending | no override exists; have the user pay from their own wallet (Mode A), which has no limit |

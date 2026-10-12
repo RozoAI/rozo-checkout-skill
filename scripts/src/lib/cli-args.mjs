@@ -6,7 +6,7 @@
  * money to the wrong network.
  */
 
-import { SUPPORTED_SOURCES, isSupportedSource, chainName } from './amounts.mjs';
+import { SUPPORTED_SOURCES, isSupportedSource, isNativeSource, chainName } from './amounts.mjs';
 import { normalizeUtmSource } from './utm.mjs';
 import { normalizeContactEmail } from './support.mjs';
 import { isRozoPaymentId } from './ids.mjs';
@@ -28,6 +28,9 @@ export const CHAIN_ALIASES = {
   polygon: '137',
   matic: '137',
   base: '8453',
+  arbitrum: '42161',
+  arb: '42161',
+  arbitrumone: '42161',
   solana: '900',
   sol: '900',
   stellar: '1500',
@@ -38,48 +41,101 @@ export const CHAIN_ALIASES = {
   btc: 'lightning',
 };
 
+/** Chain key used when a preset name is printed back to the user. */
+const PRESET_CHAIN = {
+  '900': 'solana',
+  '56': 'bnb',
+  '1': 'ethereum',
+  '137': 'polygon',
+  '8453': 'base',
+  '42161': 'arbitrum',
+  '1500': 'stellar',
+  lightning: 'lightning',
+};
+
 /**
- * The interactive picker's menu, grouped by coin. Pure data: the TTY layer in
- * cli.mjs renders it and reads a number, but the number -> source mapping
- * lives here so it can be tested without a terminal.
+ * Whole-word shortcuts for a native coin that lives on exactly one chain.
+ * "eth" is deliberately absent: ETH is on Ethereum, Base and Arbitrum, and
+ * picking one of those for the user would be a guess.
  */
-export const PICKER_OPTIONS = [
-  { token: 'USDT', chain: 'Solana', chainId: '900' },
-  { token: 'USDT', chain: 'BNB Chain', chainId: '56' },
-  { token: 'USDT', chain: 'Ethereum', chainId: '1' },
-  { token: 'USDT', chain: 'Polygon', chainId: '137' },
-  { token: 'USDC', chain: 'Solana', chainId: '900' },
-  { token: 'USDC', chain: 'BNB Chain', chainId: '56' },
-  { token: 'USDC', chain: 'Ethereum', chainId: '1' },
-  { token: 'USDC', chain: 'Polygon', chainId: '137' },
-  { token: 'USDC', chain: 'Base', chainId: '8453' },
-  { token: 'USDC', chain: 'Stellar', chainId: '1500' },
-  { token: 'BTC', chain: 'Lightning', chainId: 'lightning' },
-].map((o, i) => ({
-  number: i + 1,
+export const PRESET_SHORTCUTS = Object.freeze({
+  bnb: 'bnb-bnb',
+  sol: 'sol-solana',
+  pol: 'pol-polygon',
+});
+
+/**
+ * The interactive picker's menu, grouped. Pure data: the TTY layer in cli.mjs
+ * renders it and reads a number, but the number -> source mapping lives here
+ * so it can be tested without a terminal.
+ *
+ * Native coins are listed last and, at the picker, only when the router's
+ * quote offers them for this invoice (pickerOptionsFor). Numbers are assigned
+ * after that filter, so they are always contiguous.
+ */
+const PICKER_ROWS = [
+  { group: 'USDT', token: 'USDT', chain: 'Solana', chainId: '900' },
+  { group: 'USDT', token: 'USDT', chain: 'BNB Chain', chainId: '56' },
+  { group: 'USDT', token: 'USDT', chain: 'Ethereum', chainId: '1' },
+  { group: 'USDT', token: 'USDT', chain: 'Polygon', chainId: '137' },
+  { group: 'USDT', token: 'USDT', chain: 'Arbitrum', chainId: '42161' },
+  { group: 'USDC', token: 'USDC', chain: 'Solana', chainId: '900' },
+  { group: 'USDC', token: 'USDC', chain: 'BNB Chain', chainId: '56' },
+  { group: 'USDC', token: 'USDC', chain: 'Ethereum', chainId: '1' },
+  { group: 'USDC', token: 'USDC', chain: 'Polygon', chainId: '137' },
+  { group: 'USDC', token: 'USDC', chain: 'Base', chainId: '8453' },
+  { group: 'USDC', token: 'USDC', chain: 'Arbitrum', chainId: '42161' },
+  { group: 'USDC', token: 'USDC', chain: 'Stellar', chainId: '1500' },
+  { group: 'BTC', token: 'BTC', chain: 'Lightning', chainId: 'lightning' },
+  { group: 'Native coins', token: 'ETH', chain: 'Base', chainId: '8453' },
+  { group: 'Native coins', token: 'ETH', chain: 'Ethereum', chainId: '1' },
+  { group: 'Native coins', token: 'ETH', chain: 'Arbitrum', chainId: '42161' },
+  { group: 'Native coins', token: 'BNB', chain: 'BNB Chain', chainId: '56' },
+  { group: 'Native coins', token: 'SOL', chain: 'Solana', chainId: '900' },
+  { group: 'Native coins', token: 'POL', chain: 'Polygon', chainId: '137' },
+].map((o) => ({
   ...o,
   tokenSymbol: o.token,
+  native: isNativeSource(o.chainId, o.token),
+  // What a row says after its number. Native rows name the coin, since the
+  // group heading does not.
+  label: isNativeSource(o.chainId, o.token) ? `${o.token} on ${o.chain}` : o.chain,
   // The flag a user could have typed instead, echoed back so they learn it.
-  preset: `${o.token.toLowerCase()}-${
-    { '900': 'solana', '56': 'bnb', '1': 'ethereum', '137': 'polygon', '8453': 'base', '1500': 'stellar', lightning: 'lightning' }[
-      o.chainId
-    ]
-  }`,
+  preset: `${o.token.toLowerCase()}-${PRESET_CHAIN[o.chainId]}`,
 }));
+
+function numbered(rows) {
+  return rows.map((o, i) => ({ number: i + 1, ...o }));
+}
+
+/** Every supported combination, numbered, native coins included. */
+export const PICKER_OPTIONS = numbered(PICKER_ROWS);
+
+/**
+ * The menu for one invoice. Stablecoin and Lightning rows always show; a
+ * native row shows only when `isOffered(chainId, tokenSymbol)` says the
+ * router offers it for this invoice. Without a predicate no native row shows:
+ * a native coin is never offered on assumption.
+ */
+export function pickerOptionsFor(isOffered = null) {
+  return numbered(
+    PICKER_ROWS.filter((o) => !o.native || (typeof isOffered === 'function' && isOffered(o.chainId, o.tokenSymbol))),
+  );
+}
 
 /**
  * Resolve what the user typed at the picker. Accepts the menu number, or the
  * preset name itself for anyone who already knows it. Pure and total.
  */
-export function resolvePickerChoice(input) {
+export function resolvePickerChoice(input, options = PICKER_OPTIONS) {
   const raw = String(input ?? '').trim();
   if (!raw) throw new CliError('BAD_CHOICE', 'Nothing entered. Type the number of a coin.');
   if (/^\d+$/.test(raw)) {
-    const option = PICKER_OPTIONS.find((o) => o.number === Number(raw));
+    const option = options.find((o) => o.number === Number(raw));
     if (!option) {
       throw new CliError(
         'BAD_CHOICE',
-        `${raw} is not on the list. Choose 1-${PICKER_OPTIONS.length}.`,
+        `${raw} is not on the list. Choose 1-${options.length}.`,
       );
     }
     return { chainId: option.chainId, tokenSymbol: option.tokenSymbol, preset: option.preset };
@@ -104,7 +160,7 @@ export class CliError extends Error {
 export function listPresets() {
   const out = [];
   for (const s of SUPPORTED_SOURCES) {
-    const chain = Object.entries(CHAIN_ALIASES).find(([, id]) => id === s.chainId)?.[0];
+    const chain = PRESET_CHAIN[s.chainId];
     for (const token of s.tokens) out.push(`${token.toLowerCase()}-${chain}`);
   }
   return out;
@@ -116,9 +172,16 @@ export function listPresets() {
  * guesses.
  */
 export function resolvePreset(preset) {
-  const raw = String(preset ?? '').trim().toLowerCase();
+  let raw = String(preset ?? '').trim().toLowerCase();
   if (!raw) {
     throw new CliError('MISSING_PRESET', 'A coin is required, e.g. --with usdt-solana');
+  }
+  if (PRESET_SHORTCUTS[raw]) raw = PRESET_SHORTCUTS[raw];
+  if (raw === 'eth') {
+    throw new CliError(
+      'BAD_PRESET',
+      'ETH is on more than one chain. Use eth-ethereum, eth-base or eth-arbitrum.',
+    );
   }
   const idx = raw.indexOf('-');
   if (idx <= 0 || idx === raw.length - 1) {
@@ -441,7 +504,8 @@ export function parseCliArgs(argv) {
 }
 
 export const HELP = `rozo-checkout — pay a Coinbase Payment Link or a Bitrefill invoice
-(USDC on Base) with BTC Lightning, or USDT/USDC on Solana, BNB Chain, Ethereum, Polygon, Base or Stellar.
+(USDC on Base) with BTC Lightning, USDT/USDC on Solana, BNB Chain, Ethereum, Polygon,
+Arbitrum, Base or Stellar, or a native coin: ETH (Ethereum, Base, Arbitrum), BNB, SOL, POL.
 
 USAGE
   npx @rozoai/checkout pay <coinbase-link>              (pick a coin from a list)
@@ -456,8 +520,20 @@ USAGE
 COINS (--with)
   usdt-solana   usdc-solana   usdt-bnb      usdc-bnb
   usdt-ethereum usdc-ethereum usdt-polygon  usdc-polygon
-  usdc-base     usdc-stellar  btc-lightning
+  usdt-arbitrum usdc-arbitrum usdc-base     usdc-stellar
+  btc-lightning
+  native coins: eth-ethereum  eth-base  eth-arbitrum  bnb-bnb (or bnb)
+                sol-solana (or sol)  pol-polygon (or pol)
   or give them raw:  --chain 900 --token USDT
+
+NATIVE COINS
+  Offered only when the invoice's quote lists the coin, and only for invoices
+  up to $2,000 (native ETH on Ethereum: $1 minimum). The order is exact-out:
+  send exactly the coin amount shown. Its price is locked only until the time
+  shown (about an hour); after that do not send, start a new order. The coin
+  amount includes an FX spread on top of the service fee, and your wallet also
+  needs a little of the same coin for the network fee. On-chain BTC and Tron
+  are not supported.
 
 By default, pay just prints an address for you to pay from any wallet:
 no private key, no environment variable, no configuration.
@@ -466,10 +542,12 @@ OPTIONS
   --with <coin>   which coin to pay with. Omit it on a terminal and you get a
                   numbered list to choose from; scripts and agents must pass it.
   --send          optional. Sign from a hot wallet instead of paying yourself.
-                  The only option that needs a key. On Solana it uses your
-                  existing ~/.config/solana/id.json; on EVM an encrypted JSON
-                  keystore. A single payment may not exceed $1,100; there is
-                  no override.
+                  The only option that needs a key. EVM and Solana coins only,
+                  native ETH, BNB, POL and SOL included (sent as a plain
+                  transfer of the exact amount, never after the price lock).
+                  On Solana it uses your existing ~/.config/solana/id.json; on
+                  EVM an encrypted JSON keystore. A single payment may not
+                  exceed $1,100; there is no override.
   --keyfile <p>   with --send: the key to sign with. A solana-keygen keypair
                   file, or an encrypted V3 keystore for EVM (passphrase is
                   prompted, never passed as a flag).

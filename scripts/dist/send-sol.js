@@ -23089,7 +23089,7 @@ var require_index_cjs = __commonJS({
       return value._bn !== void 0;
     }
     var uniquePublicKeyCounter = 1;
-    var PublicKey3 = class _PublicKey2 extends Struct {
+    var PublicKey4 = class _PublicKey2 extends Struct {
       /**
        * Create a new PublicKey object
        * @param value ed25519 public key as buffer or base-58 encoded string
@@ -23251,9 +23251,9 @@ var require_index_cjs = __commonJS({
         return isOnCurve(pubkey.toBytes());
       }
     };
-    _PublicKey = PublicKey3;
-    PublicKey3.default = new _PublicKey("11111111111111111111111111111111");
-    SOLANA_SCHEMA.set(PublicKey3, {
+    _PublicKey = PublicKey4;
+    PublicKey4.default = new _PublicKey("11111111111111111111111111111111");
+    SOLANA_SCHEMA.set(PublicKey4, {
       kind: "struct",
       fields: [["_bn", "u256"]]
     });
@@ -23285,7 +23285,7 @@ var require_index_cjs = __commonJS({
        * The public key for this account
        */
       get publicKey() {
-        return new PublicKey3(this._publicKey);
+        return new PublicKey4(this._publicKey);
       }
       /**
        * The **unencrypted** secret key for this account. The first 32 bytes
@@ -23296,7 +23296,7 @@ var require_index_cjs = __commonJS({
         return buffer.Buffer.concat([this._secretKey, this._publicKey], 64);
       }
     };
-    var BPF_LOADER_DEPRECATED_PROGRAM_ID = new PublicKey3("BPFLoader1111111111111111111111111111111111");
+    var BPF_LOADER_DEPRECATED_PROGRAM_ID = new PublicKey4("BPFLoader1111111111111111111111111111111111");
     var PACKET_DATA_SIZE = 1280 - 40 - 8;
     var VERSION_PREFIX_MASK = 127;
     var SIGNATURE_LENGTH_IN_BYTES = 64;
@@ -23527,7 +23527,7 @@ var require_index_cjs = __commonJS({
           const [payerAddress] = writableSigners[0];
           assert(payerAddress === this.payer.toBase58(), "Expected first writable signer key to be the fee payer");
         }
-        const staticAccountKeys = [...writableSigners.map(([address]) => new PublicKey3(address)), ...readonlySigners.map(([address]) => new PublicKey3(address)), ...writableNonSigners.map(([address]) => new PublicKey3(address)), ...readonlyNonSigners.map(([address]) => new PublicKey3(address))];
+        const staticAccountKeys = [...writableSigners.map(([address]) => new PublicKey4(address)), ...readonlySigners.map(([address]) => new PublicKey4(address)), ...writableNonSigners.map(([address]) => new PublicKey4(address)), ...readonlyNonSigners.map(([address]) => new PublicKey4(address))];
         return [header, staticAccountKeys];
       }
       extractTableLookup(lookupTable) {
@@ -23551,7 +23551,7 @@ var require_index_cjs = __commonJS({
         const drainedKeys = new Array();
         for (const [address, keyMeta] of this.keyMetaMap.entries()) {
           if (keyMetaFilter(keyMeta)) {
-            const key = new PublicKey3(address);
+            const key = new PublicKey4(address);
             const lookupTableIndex = lookupTableEntries.findIndex((entry) => entry.equals(key));
             if (lookupTableIndex >= 0) {
               assert(lookupTableIndex < 256, "Max lookup table index exceeded");
@@ -23586,7 +23586,7 @@ var require_index_cjs = __commonJS({
         this.instructions = void 0;
         this.indexToProgramIds = /* @__PURE__ */ new Map();
         this.header = args.header;
-        this.accountKeys = args.accountKeys.map((account) => new PublicKey3(account));
+        this.accountKeys = args.accountKeys.map((account) => new PublicKey4(account));
         this.recentBlockhash = args.recentBlockhash;
         this.instructions = args.instructions;
         this.instructions.forEach((ix) => this.indexToProgramIds.set(ix.programIdIndex, this.accountKeys[ix.programIdIndex]));
@@ -23712,7 +23712,7 @@ var require_index_cjs = __commonJS({
         let accountKeys = [];
         for (let i = 0; i < accountCount; i++) {
           const account = guardedSplice(byteArray, 0, PUBLIC_KEY_LENGTH);
-          accountKeys.push(new PublicKey3(buffer.Buffer.from(account)));
+          accountKeys.push(new PublicKey4(buffer.Buffer.from(account)));
         }
         const recentBlockhash = guardedSplice(byteArray, 0, PUBLIC_KEY_LENGTH);
         const instructionCount = decodeLength(byteArray);
@@ -23936,7 +23936,7 @@ var require_index_cjs = __commonJS({
         const staticAccountKeys = [];
         const staticAccountKeysLength = decodeLength(byteArray);
         for (let i = 0; i < staticAccountKeysLength; i++) {
-          staticAccountKeys.push(new PublicKey3(guardedSplice(byteArray, 0, PUBLIC_KEY_LENGTH)));
+          staticAccountKeys.push(new PublicKey4(guardedSplice(byteArray, 0, PUBLIC_KEY_LENGTH)));
         }
         const recentBlockhash = bs58__default.default.encode(guardedSplice(byteArray, 0, PUBLIC_KEY_LENGTH));
         const instructionCount = decodeLength(byteArray);
@@ -23956,7 +23956,7 @@ var require_index_cjs = __commonJS({
         const addressTableLookupsCount = decodeLength(byteArray);
         const addressTableLookups = [];
         for (let i = 0; i < addressTableLookupsCount; i++) {
-          const accountKey = new PublicKey3(guardedSplice(byteArray, 0, PUBLIC_KEY_LENGTH));
+          const accountKey = new PublicKey4(guardedSplice(byteArray, 0, PUBLIC_KEY_LENGTH));
           const writableIndexesLength = decodeLength(byteArray);
           const writableIndexes = guardedSplice(byteArray, 0, writableIndexesLength);
           const readonlyIndexesLength = decodeLength(byteArray);
@@ -24005,7 +24005,7 @@ var require_index_cjs = __commonJS({
       return TransactionStatus2;
     })({});
     var DEFAULT_SIGNATURE = buffer.Buffer.alloc(SIGNATURE_LENGTH_IN_BYTES).fill(0);
-    var TransactionInstruction3 = class {
+    var TransactionInstruction4 = class {
       constructor(opts) {
         this.keys = void 0;
         this.programId = void 0;
@@ -24035,7 +24035,7 @@ var require_index_cjs = __commonJS({
         };
       }
     };
-    var Transaction2 = class _Transaction {
+    var Transaction3 = class _Transaction {
       /**
        * The first (payer) Transaction signature
        *
@@ -24137,7 +24137,7 @@ var require_index_cjs = __commonJS({
           } else if ("data" in item && "programId" in item && "keys" in item) {
             this.instructions.push(item);
           } else {
-            this.instructions.push(new TransactionInstruction3(item));
+            this.instructions.push(new TransactionInstruction4(item));
           }
         });
         return this;
@@ -24196,7 +24196,7 @@ var require_index_cjs = __commonJS({
         });
         programIds.forEach((programId) => {
           accountMetas.push({
-            pubkey: new PublicKey3(programId),
+            pubkey: new PublicKey4(programId),
             isSigner: false,
             isWritable: false
           });
@@ -24630,7 +24630,7 @@ Missing signature for public key${sigErrors.missing.length === 1 ? "" : "(s)"} [
               isWritable: message.isAccountWritable(account)
             };
           });
-          transaction.instructions.push(new TransactionInstruction3({
+          transaction.instructions.push(new TransactionInstruction4({
             keys,
             programId: message.accountKeys[instruction.programIdIndex],
             data: bs58__default.default.decode(instruction.data)
@@ -24698,7 +24698,7 @@ Missing signature for public key${sigErrors.missing.length === 1 ? "" : "(s)"} [
           if (programId === void 0) {
             throw new Error(`Failed to find program id for program id index ${compiledIx.programIdIndex}`);
           }
-          instructions.push(new TransactionInstruction3({
+          instructions.push(new TransactionInstruction4({
             programId,
             data: toBuffer(compiledIx.data),
             keys
@@ -24789,15 +24789,15 @@ Missing signature for public key${sigErrors.missing.length === 1 ? "" : "(s)"} [
     var DEFAULT_TICKS_PER_SLOT = 64;
     var NUM_SLOTS_PER_SECOND = NUM_TICKS_PER_SECOND / DEFAULT_TICKS_PER_SLOT;
     var MS_PER_SLOT = 1e3 / NUM_SLOTS_PER_SECOND;
-    var SYSVAR_CLOCK_PUBKEY = new PublicKey3("SysvarC1ock11111111111111111111111111111111");
-    var SYSVAR_EPOCH_SCHEDULE_PUBKEY = new PublicKey3("SysvarEpochSchedu1e111111111111111111111111");
-    var SYSVAR_INSTRUCTIONS_PUBKEY = new PublicKey3("Sysvar1nstructions1111111111111111111111111");
-    var SYSVAR_RECENT_BLOCKHASHES_PUBKEY = new PublicKey3("SysvarRecentB1ockHashes11111111111111111111");
-    var SYSVAR_RENT_PUBKEY = new PublicKey3("SysvarRent111111111111111111111111111111111");
-    var SYSVAR_REWARDS_PUBKEY = new PublicKey3("SysvarRewards111111111111111111111111111111");
-    var SYSVAR_SLOT_HASHES_PUBKEY = new PublicKey3("SysvarS1otHashes111111111111111111111111111");
-    var SYSVAR_SLOT_HISTORY_PUBKEY = new PublicKey3("SysvarS1otHistory11111111111111111111111111");
-    var SYSVAR_STAKE_HISTORY_PUBKEY = new PublicKey3("SysvarStakeHistory1111111111111111111111111");
+    var SYSVAR_CLOCK_PUBKEY = new PublicKey4("SysvarC1ock11111111111111111111111111111111");
+    var SYSVAR_EPOCH_SCHEDULE_PUBKEY = new PublicKey4("SysvarEpochSchedu1e111111111111111111111111");
+    var SYSVAR_INSTRUCTIONS_PUBKEY = new PublicKey4("Sysvar1nstructions1111111111111111111111111");
+    var SYSVAR_RECENT_BLOCKHASHES_PUBKEY = new PublicKey4("SysvarRecentB1ockHashes11111111111111111111");
+    var SYSVAR_RENT_PUBKEY = new PublicKey4("SysvarRent111111111111111111111111111111111");
+    var SYSVAR_REWARDS_PUBKEY = new PublicKey4("SysvarRewards111111111111111111111111111111");
+    var SYSVAR_SLOT_HASHES_PUBKEY = new PublicKey4("SysvarS1otHashes111111111111111111111111111");
+    var SYSVAR_SLOT_HISTORY_PUBKEY = new PublicKey4("SysvarS1otHistory11111111111111111111111111");
+    var SYSVAR_STAKE_HISTORY_PUBKEY = new PublicKey4("SysvarStakeHistory1111111111111111111111111");
     var SendTransactionError = class extends Error {
       constructor({
         action,
@@ -24988,8 +24988,8 @@ Message: ${transactionMessage}.
       static fromAccountData(buffer2) {
         const nonceAccount = NonceAccountLayout.decode(toBuffer(buffer2), 0);
         return new _NonceAccount({
-          authorizedPubkey: new PublicKey3(nonceAccount.authorizedPubkey),
-          nonce: new PublicKey3(nonceAccount.nonce).toString(),
+          authorizedPubkey: new PublicKey4(nonceAccount.authorizedPubkey),
+          nonce: new PublicKey4(nonceAccount.nonce).toString(),
           feeCalculator: nonceAccount.feeCalculator
         });
       }
@@ -25051,7 +25051,7 @@ Message: ${transactionMessage}.
           newAccountPubkey: instruction.keys[1].pubkey,
           lamports,
           space,
-          programId: new PublicKey3(programId)
+          programId: new PublicKey4(programId)
         };
       }
       /**
@@ -25086,7 +25086,7 @@ Message: ${transactionMessage}.
           toPubkey: instruction.keys[2].pubkey,
           lamports,
           seed,
-          programId: new PublicKey3(programId)
+          programId: new PublicKey4(programId)
         };
       }
       /**
@@ -25117,10 +25117,10 @@ Message: ${transactionMessage}.
         } = decodeData$1(SYSTEM_INSTRUCTION_LAYOUTS.AllocateWithSeed, instruction.data);
         return {
           accountPubkey: instruction.keys[0].pubkey,
-          basePubkey: new PublicKey3(base),
+          basePubkey: new PublicKey4(base),
           seed,
           space,
-          programId: new PublicKey3(programId)
+          programId: new PublicKey4(programId)
         };
       }
       /**
@@ -25134,7 +25134,7 @@ Message: ${transactionMessage}.
         } = decodeData$1(SYSTEM_INSTRUCTION_LAYOUTS.Assign, instruction.data);
         return {
           accountPubkey: instruction.keys[0].pubkey,
-          programId: new PublicKey3(programId)
+          programId: new PublicKey4(programId)
         };
       }
       /**
@@ -25150,9 +25150,9 @@ Message: ${transactionMessage}.
         } = decodeData$1(SYSTEM_INSTRUCTION_LAYOUTS.AssignWithSeed, instruction.data);
         return {
           accountPubkey: instruction.keys[0].pubkey,
-          basePubkey: new PublicKey3(base),
+          basePubkey: new PublicKey4(base),
           seed,
-          programId: new PublicKey3(programId)
+          programId: new PublicKey4(programId)
         };
       }
       /**
@@ -25171,11 +25171,11 @@ Message: ${transactionMessage}.
         return {
           fromPubkey: instruction.keys[0].pubkey,
           newAccountPubkey: instruction.keys[1].pubkey,
-          basePubkey: new PublicKey3(base),
+          basePubkey: new PublicKey4(base),
           seed,
           lamports,
           space,
-          programId: new PublicKey3(programId)
+          programId: new PublicKey4(programId)
         };
       }
       /**
@@ -25189,7 +25189,7 @@ Message: ${transactionMessage}.
         } = decodeData$1(SYSTEM_INSTRUCTION_LAYOUTS.InitializeNonceAccount, instruction.data);
         return {
           noncePubkey: instruction.keys[0].pubkey,
-          authorizedPubkey: new PublicKey3(authorized2)
+          authorizedPubkey: new PublicKey4(authorized2)
         };
       }
       /**
@@ -25232,14 +25232,14 @@ Message: ${transactionMessage}.
         return {
           noncePubkey: instruction.keys[0].pubkey,
           authorizedPubkey: instruction.keys[1].pubkey,
-          newAuthorizedPubkey: new PublicKey3(authorized2)
+          newAuthorizedPubkey: new PublicKey4(authorized2)
         };
       }
       /**
        * @internal
        */
       static checkProgramId(programId) {
-        if (!programId.equals(SystemProgram.programId)) {
+        if (!programId.equals(SystemProgram2.programId)) {
           throw new Error("invalid instruction; programId is not SystemProgram");
         }
       }
@@ -25306,7 +25306,7 @@ Message: ${transactionMessage}.
         layout: BufferLayout__namespace.struct([BufferLayout__namespace.u32("instruction")])
       }
     });
-    var SystemProgram = class _SystemProgram {
+    var SystemProgram2 = class _SystemProgram {
       /**
        * @internal
        */
@@ -25325,7 +25325,7 @@ Message: ${transactionMessage}.
           space: params.space,
           programId: toBuffer(params.programId.toBuffer())
         });
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           keys: [{
             pubkey: params.fromPubkey,
             isSigner: true,
@@ -25380,7 +25380,7 @@ Message: ${transactionMessage}.
             isWritable: true
           }];
         }
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           keys,
           programId: this.programId,
           data
@@ -25419,7 +25419,7 @@ Message: ${transactionMessage}.
             isWritable: true
           }];
         }
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           keys,
           programId: this.programId,
           data
@@ -25454,7 +25454,7 @@ Message: ${transactionMessage}.
             isWritable: false
           });
         }
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           keys,
           programId: this.programId,
           data
@@ -25464,7 +25464,7 @@ Message: ${transactionMessage}.
        * Generate a transaction that creates a new Nonce account
        */
       static createNonceAccount(params) {
-        const transaction = new Transaction2();
+        const transaction = new Transaction3();
         if ("basePubkey" in params && "seed" in params) {
           transaction.add(_SystemProgram.createAccountWithSeed({
             fromPubkey: params.fromPubkey,
@@ -25516,7 +25516,7 @@ Message: ${transactionMessage}.
           programId: this.programId,
           data
         };
-        return new TransactionInstruction3(instructionData);
+        return new TransactionInstruction4(instructionData);
       }
       /**
        * Generate an instruction to advance the nonce in a Nonce account
@@ -25541,7 +25541,7 @@ Message: ${transactionMessage}.
           programId: this.programId,
           data
         };
-        return new TransactionInstruction3(instructionData);
+        return new TransactionInstruction4(instructionData);
       }
       /**
        * Generate a transaction instruction that withdraws lamports from a Nonce account
@@ -25551,7 +25551,7 @@ Message: ${transactionMessage}.
         const data = encodeData(type, {
           lamports: params.lamports
         });
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           keys: [{
             pubkey: params.noncePubkey,
             isSigner: false,
@@ -25586,7 +25586,7 @@ Message: ${transactionMessage}.
         const data = encodeData(type, {
           authorized: toBuffer(params.newAuthorizedPubkey.toBuffer())
         });
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           keys: [{
             pubkey: params.noncePubkey,
             isSigner: false,
@@ -25634,14 +25634,14 @@ Message: ${transactionMessage}.
             isWritable: true
           }];
         }
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           keys,
           programId: this.programId,
           data
         });
       }
     };
-    SystemProgram.programId = new PublicKey3("11111111111111111111111111111111");
+    SystemProgram2.programId = new PublicKey4("11111111111111111111111111111111");
     var CHUNK_SIZE = PACKET_DATA_SIZE - 300;
     var Loader = class _Loader {
       /**
@@ -25684,29 +25684,29 @@ Message: ${transactionMessage}.
               return false;
             }
             if (programInfo.data.length !== data.length) {
-              transaction = transaction || new Transaction2();
-              transaction.add(SystemProgram.allocate({
+              transaction = transaction || new Transaction3();
+              transaction.add(SystemProgram2.allocate({
                 accountPubkey: program.publicKey,
                 space: data.length
               }));
             }
             if (!programInfo.owner.equals(programId)) {
-              transaction = transaction || new Transaction2();
-              transaction.add(SystemProgram.assign({
+              transaction = transaction || new Transaction3();
+              transaction.add(SystemProgram2.assign({
                 accountPubkey: program.publicKey,
                 programId
               }));
             }
             if (programInfo.lamports < balanceNeeded) {
-              transaction = transaction || new Transaction2();
-              transaction.add(SystemProgram.transfer({
+              transaction = transaction || new Transaction3();
+              transaction.add(SystemProgram2.transfer({
                 fromPubkey: payer.publicKey,
                 toPubkey: program.publicKey,
                 lamports: balanceNeeded - programInfo.lamports
               }));
             }
           } else {
-            transaction = new Transaction2().add(SystemProgram.createAccount({
+            transaction = new Transaction3().add(SystemProgram2.createAccount({
               fromPubkey: payer.publicKey,
               newAccountPubkey: program.publicKey,
               lamports: balanceNeeded > 0 ? balanceNeeded : 1,
@@ -25736,7 +25736,7 @@ Message: ${transactionMessage}.
             bytesLength: 0,
             bytesLengthPadding: 0
           }, data2);
-          const transaction = new Transaction2().add({
+          const transaction = new Transaction3().add({
             keys: [{
               pubkey: program.publicKey,
               isSigner: true,
@@ -25763,7 +25763,7 @@ Message: ${transactionMessage}.
             instruction: 1
             // Finalize instruction
           }, data2);
-          const transaction = new Transaction2().add({
+          const transaction = new Transaction3().add({
             keys: [{
               pubkey: program.publicKey,
               isSigner: true,
@@ -25808,7 +25808,7 @@ Message: ${transactionMessage}.
       }
     };
     Loader.chunkSize = CHUNK_SIZE;
-    var BPF_LOADER_PROGRAM_ID = new PublicKey3("BPFLoader2111111111111111111111111111111111");
+    var BPF_LOADER_PROGRAM_ID = new PublicKey4("BPFLoader2111111111111111111111111111111111");
     var BpfLoader = class {
       /**
        * Minimum number of signatures required to load a program not including
@@ -26604,8 +26604,8 @@ Message: ${transactionMessage}.
           deactivationSlot: meta.deactivationSlot,
           lastExtendedSlot: meta.lastExtendedSlot,
           lastExtendedSlotStartIndex: meta.lastExtendedStartIndex,
-          authority: meta.authority.length !== 0 ? new PublicKey3(meta.authority[0]) : void 0,
-          addresses: addresses.map((address) => new PublicKey3(address))
+          authority: meta.authority.length !== 0 ? new PublicKey4(meta.authority[0]) : void 0,
+          addresses: addresses.map((address) => new PublicKey4(address))
         };
       }
     };
@@ -26647,7 +26647,7 @@ Message: ${transactionMessage}.
       );
       return `${protocol}//${hostish}${websocketPort}${rest}`;
     }
-    var PublicKeyFromString = superstruct.coerce(superstruct.instance(PublicKey3), superstruct.string(), (value) => new PublicKey3(value));
+    var PublicKeyFromString = superstruct.coerce(superstruct.instance(PublicKey4), superstruct.string(), (value) => new PublicKey4(value));
     var RawAccountDataResult = superstruct.tuple([superstruct.string(), superstruct.literal("base64")]);
     var BufferFromRawAccountData = superstruct.coerce(superstruct.instance(buffer.Buffer), RawAccountDataResult, (value) => buffer.Buffer.from(value[0], "base64"));
     var BLOCKHASH_CACHE_TIMEOUT_MS = 30 * 1e3;
@@ -26732,7 +26732,7 @@ Message: ${transactionMessage}.
       if (version3 === 0) {
         return new MessageV0({
           header: response.header,
-          staticAccountKeys: response.accountKeys.map((accountKey) => new PublicKey3(accountKey)),
+          staticAccountKeys: response.accountKeys.map((accountKey) => new PublicKey4(accountKey)),
           recentBlockhash: response.recentBlockhash,
           compiledInstructions: response.instructions.map((ix) => ({
             programIdIndex: ix.programIdIndex,
@@ -28922,7 +28922,7 @@ Message: ${transactionMessage}.
           }) => {
             return {
               meta,
-              transaction: Transaction2.populate(transaction.message, transaction.signatures)
+              transaction: Transaction3.populate(transaction.message, transaction.signatures)
             };
           })
         };
@@ -28997,7 +28997,7 @@ Message: ${transactionMessage}.
         const signatures = result.transaction.signatures;
         return {
           ...result,
-          transaction: Transaction2.populate(message, signatures)
+          transaction: Transaction3.populate(message, signatures)
         };
       }
       /**
@@ -29284,15 +29284,15 @@ Message: ${transactionMessage}.
           return res2.result;
         }
         let transaction;
-        if (transactionOrMessage instanceof Transaction2) {
+        if (transactionOrMessage instanceof Transaction3) {
           let originalTx = transactionOrMessage;
-          transaction = new Transaction2();
+          transaction = new Transaction3();
           transaction.feePayer = originalTx.feePayer;
           transaction.instructions = transactionOrMessage.instructions;
           transaction.nonceInfo = originalTx.nonceInfo;
           transaction.signatures = originalTx.signatures;
         } else {
-          transaction = Transaction2.populate(transactionOrMessage);
+          transaction = Transaction3.populate(transactionOrMessage);
           transaction._message = transaction._json = void 0;
         }
         if (configOrSigners !== void 0 && !Array.isArray(configOrSigners)) {
@@ -30172,7 +30172,7 @@ Message: ${transactionMessage}.
        * @returns {PublicKey} PublicKey
        */
       get publicKey() {
-        return new PublicKey3(this._keypair.publicKey);
+        return new PublicKey4(this._keypair.publicKey);
       }
       /**
        * The raw secret key for this keypair
@@ -30250,7 +30250,7 @@ Message: ${transactionMessage}.
           lookupTable: instruction.keys[0].pubkey,
           authority: instruction.keys[1].pubkey,
           payer: instruction.keys.length > 2 ? instruction.keys[2].pubkey : void 0,
-          addresses: addresses.map((buffer2) => new PublicKey3(buffer2))
+          addresses: addresses.map((buffer2) => new PublicKey4(buffer2))
         };
       }
       static decodeCloseLookupTable(instruction) {
@@ -30302,7 +30302,7 @@ Message: ${transactionMessage}.
       constructor() {
       }
       static createLookupTable(params) {
-        const [lookupTableAddress, bumpSeed] = PublicKey3.findProgramAddressSync([params.authority.toBuffer(), codecsNumbers.getU64Encoder().encode(params.recentSlot)], this.programId);
+        const [lookupTableAddress, bumpSeed] = PublicKey4.findProgramAddressSync([params.authority.toBuffer(), codecsNumbers.getU64Encoder().encode(params.recentSlot)], this.programId);
         const type = LOOKUP_TABLE_INSTRUCTION_LAYOUTS.CreateLookupTable;
         const data = encodeData(type, {
           recentSlot: BigInt(params.recentSlot),
@@ -30321,11 +30321,11 @@ Message: ${transactionMessage}.
           isSigner: true,
           isWritable: true
         }, {
-          pubkey: SystemProgram.programId,
+          pubkey: SystemProgram2.programId,
           isSigner: false,
           isWritable: false
         }];
-        return [new TransactionInstruction3({
+        return [new TransactionInstruction4({
           programId: this.programId,
           keys,
           data
@@ -30343,7 +30343,7 @@ Message: ${transactionMessage}.
           isSigner: true,
           isWritable: false
         }];
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           programId: this.programId,
           keys,
           data
@@ -30369,12 +30369,12 @@ Message: ${transactionMessage}.
             isSigner: true,
             isWritable: true
           }, {
-            pubkey: SystemProgram.programId,
+            pubkey: SystemProgram2.programId,
             isSigner: false,
             isWritable: false
           });
         }
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           programId: this.programId,
           keys,
           data
@@ -30392,7 +30392,7 @@ Message: ${transactionMessage}.
           isSigner: true,
           isWritable: false
         }];
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           programId: this.programId,
           keys,
           data
@@ -30414,14 +30414,14 @@ Message: ${transactionMessage}.
           isSigner: false,
           isWritable: true
         }];
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           programId: this.programId,
           keys,
           data
         });
       }
     };
-    AddressLookupTableProgram.programId = new PublicKey3("AddressLookupTab1e1111111111111111111111111");
+    AddressLookupTableProgram.programId = new PublicKey4("AddressLookupTab1e1111111111111111111111111");
     var ComputeBudgetInstruction = class {
       /**
        * @internal
@@ -30539,7 +30539,7 @@ Message: ${transactionMessage}.
       static requestUnits(params) {
         const type = COMPUTE_BUDGET_INSTRUCTION_LAYOUTS.RequestUnits;
         const data = encodeData(type, params);
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           keys: [],
           programId: this.programId,
           data
@@ -30548,7 +30548,7 @@ Message: ${transactionMessage}.
       static requestHeapFrame(params) {
         const type = COMPUTE_BUDGET_INSTRUCTION_LAYOUTS.RequestHeapFrame;
         const data = encodeData(type, params);
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           keys: [],
           programId: this.programId,
           data
@@ -30557,7 +30557,7 @@ Message: ${transactionMessage}.
       static setComputeUnitLimit(params) {
         const type = COMPUTE_BUDGET_INSTRUCTION_LAYOUTS.SetComputeUnitLimit;
         const data = encodeData(type, params);
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           keys: [],
           programId: this.programId,
           data
@@ -30568,14 +30568,14 @@ Message: ${transactionMessage}.
         const data = encodeData(type, {
           microLamports: BigInt(params.microLamports)
         });
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           keys: [],
           programId: this.programId,
           data
         });
       }
     };
-    ComputeBudgetProgram.programId = new PublicKey3("ComputeBudget111111111111111111111111111111");
+    ComputeBudgetProgram.programId = new PublicKey4("ComputeBudget111111111111111111111111111111");
     var PRIVATE_KEY_BYTES$1 = 64;
     var PUBLIC_KEY_BYTES$1 = 32;
     var SIGNATURE_BYTES = 64;
@@ -30623,7 +30623,7 @@ Message: ${transactionMessage}.
         instructionData.fill(publicKey2, publicKeyOffset);
         instructionData.fill(signature2, signatureOffset);
         instructionData.fill(message, messageDataOffset);
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           keys: [],
           programId: _Ed25519Program.programId,
           data: instructionData
@@ -30655,7 +30655,7 @@ Message: ${transactionMessage}.
         }
       }
     };
-    Ed25519Program.programId = new PublicKey3("Ed25519SigVerify111111111111111111111111111");
+    Ed25519Program.programId = new PublicKey4("Ed25519SigVerify111111111111111111111111111");
     var ecdsaSign = (msgHash, privKey) => {
       const signature2 = secp256k1.secp256k1.sign(msgHash, privKey);
       return [signature2.toCompactRawBytes(), signature2.recovery];
@@ -30751,7 +30751,7 @@ Message: ${transactionMessage}.
           recoveryId
         }, instructionData);
         instructionData.fill(toBuffer(message), SECP256K1_INSTRUCTION_LAYOUT.span);
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           keys: [],
           programId: _Secp256k1Program.programId,
           data: instructionData
@@ -30789,9 +30789,9 @@ Message: ${transactionMessage}.
         }
       }
     };
-    Secp256k1Program.programId = new PublicKey3("KeccakSecp256k11111111111111111111111111111");
+    Secp256k1Program.programId = new PublicKey4("KeccakSecp256k11111111111111111111111111111");
     var _Lockup;
-    var STAKE_CONFIG_ID = new PublicKey3("StakeConfig11111111111111111111111111111111");
+    var STAKE_CONFIG_ID = new PublicKey4("StakeConfig11111111111111111111111111111111");
     var Authorized = class {
       /**
        * Create a new Authorized object
@@ -30822,7 +30822,7 @@ Message: ${transactionMessage}.
        */
     };
     _Lockup = Lockup;
-    Lockup.default = new _Lockup(0, 0, PublicKey3.default);
+    Lockup.default = new _Lockup(0, 0, PublicKey4.default);
     var StakeInstruction = class {
       /**
        * @internal
@@ -30860,8 +30860,8 @@ Message: ${transactionMessage}.
         } = decodeData$1(STAKE_INSTRUCTION_LAYOUTS.Initialize, instruction.data);
         return {
           stakePubkey: instruction.keys[0].pubkey,
-          authorized: new Authorized(new PublicKey3(authorized2.staker), new PublicKey3(authorized2.withdrawer)),
-          lockup: new Lockup(lockup2.unixTimestamp, lockup2.epoch, new PublicKey3(lockup2.custodian))
+          authorized: new Authorized(new PublicKey4(authorized2.staker), new PublicKey4(authorized2.withdrawer)),
+          lockup: new Lockup(lockup2.unixTimestamp, lockup2.epoch, new PublicKey4(lockup2.custodian))
         };
       }
       /**
@@ -30890,7 +30890,7 @@ Message: ${transactionMessage}.
         const o = {
           stakePubkey: instruction.keys[0].pubkey,
           authorizedPubkey: instruction.keys[2].pubkey,
-          newAuthorizedPubkey: new PublicKey3(newAuthorized),
+          newAuthorizedPubkey: new PublicKey4(newAuthorized),
           stakeAuthorizationType: {
             index: stakeAuthorizationType
           }
@@ -30916,8 +30916,8 @@ Message: ${transactionMessage}.
           stakePubkey: instruction.keys[0].pubkey,
           authorityBase: instruction.keys[1].pubkey,
           authoritySeed,
-          authorityOwner: new PublicKey3(authorityOwner),
-          newAuthorizedPubkey: new PublicKey3(newAuthorized),
+          authorityOwner: new PublicKey4(authorityOwner),
+          newAuthorizedPubkey: new PublicKey4(newAuthorized),
           stakeAuthorizationType: {
             index: stakeAuthorizationType
           }
@@ -31091,15 +31091,15 @@ Message: ${transactionMessage}.
           programId: this.programId,
           data
         };
-        return new TransactionInstruction3(instructionData);
+        return new TransactionInstruction4(instructionData);
       }
       /**
        * Generate a Transaction that creates a new Stake account at
        *   an address generated with `from`, a seed, and the Stake programId
        */
       static createAccountWithSeed(params) {
-        const transaction = new Transaction2();
-        transaction.add(SystemProgram.createAccountWithSeed({
+        const transaction = new Transaction3();
+        transaction.add(SystemProgram2.createAccountWithSeed({
           fromPubkey: params.fromPubkey,
           newAccountPubkey: params.stakePubkey,
           basePubkey: params.basePubkey,
@@ -31123,8 +31123,8 @@ Message: ${transactionMessage}.
        * Generate a Transaction that creates a new Stake account
        */
       static createAccount(params) {
-        const transaction = new Transaction2();
-        transaction.add(SystemProgram.createAccount({
+        const transaction = new Transaction3();
+        transaction.add(SystemProgram2.createAccount({
           fromPubkey: params.fromPubkey,
           newAccountPubkey: params.stakePubkey,
           lamports: params.lamports,
@@ -31155,7 +31155,7 @@ Message: ${transactionMessage}.
         } = params;
         const type = STAKE_INSTRUCTION_LAYOUTS.Delegate;
         const data = encodeData(type);
-        return new Transaction2().add({
+        return new Transaction3().add({
           keys: [{
             pubkey: stakePubkey,
             isSigner: false,
@@ -31222,7 +31222,7 @@ Message: ${transactionMessage}.
             isWritable: false
           });
         }
-        return new Transaction2().add({
+        return new Transaction3().add({
           keys,
           programId: this.programId,
           data
@@ -31269,7 +31269,7 @@ Message: ${transactionMessage}.
             isWritable: false
           });
         }
-        return new Transaction2().add({
+        return new Transaction3().add({
           keys,
           programId: this.programId,
           data
@@ -31289,7 +31289,7 @@ Message: ${transactionMessage}.
         const data = encodeData(type, {
           lamports
         });
-        return new TransactionInstruction3({
+        return new TransactionInstruction4({
           keys: [{
             pubkey: stakePubkey,
             isSigner: false,
@@ -31311,8 +31311,8 @@ Message: ${transactionMessage}.
        * Generate a Transaction that splits Stake tokens into another stake account
        */
       static split(params, rentExemptReserve) {
-        const transaction = new Transaction2();
-        transaction.add(SystemProgram.createAccount({
+        const transaction = new Transaction3();
+        transaction.add(SystemProgram2.createAccount({
           fromPubkey: params.authorizedPubkey,
           newAccountPubkey: params.splitStakePubkey,
           lamports: rentExemptReserve,
@@ -31334,8 +31334,8 @@ Message: ${transactionMessage}.
           seed,
           lamports
         } = params;
-        const transaction = new Transaction2();
-        transaction.add(SystemProgram.allocate({
+        const transaction = new Transaction3();
+        transaction.add(SystemProgram2.allocate({
           accountPubkey: splitStakePubkey,
           basePubkey,
           seed,
@@ -31343,7 +31343,7 @@ Message: ${transactionMessage}.
           programId: this.programId
         }));
         if (rentExemptReserve && rentExemptReserve > 0) {
-          transaction.add(SystemProgram.transfer({
+          transaction.add(SystemProgram2.transfer({
             fromPubkey: params.authorizedPubkey,
             toPubkey: splitStakePubkey,
             lamports: rentExemptReserve
@@ -31367,7 +31367,7 @@ Message: ${transactionMessage}.
         } = params;
         const type = STAKE_INSTRUCTION_LAYOUTS.Merge;
         const data = encodeData(type);
-        return new Transaction2().add({
+        return new Transaction3().add({
           keys: [{
             pubkey: stakePubkey,
             isSigner: false,
@@ -31436,7 +31436,7 @@ Message: ${transactionMessage}.
             isWritable: false
           });
         }
-        return new Transaction2().add({
+        return new Transaction3().add({
           keys,
           programId: this.programId,
           data
@@ -31452,7 +31452,7 @@ Message: ${transactionMessage}.
         } = params;
         const type = STAKE_INSTRUCTION_LAYOUTS.Deactivate;
         const data = encodeData(type);
-        return new Transaction2().add({
+        return new Transaction3().add({
           keys: [{
             pubkey: stakePubkey,
             isSigner: false,
@@ -31471,7 +31471,7 @@ Message: ${transactionMessage}.
         });
       }
     };
-    StakeProgram.programId = new PublicKey3("Stake11111111111111111111111111111111111111");
+    StakeProgram.programId = new PublicKey4("Stake11111111111111111111111111111111111111");
     StakeProgram.space = 200;
     var VoteInit = class {
       /** [0, 100] */
@@ -31523,7 +31523,7 @@ Message: ${transactionMessage}.
         return {
           votePubkey: instruction.keys[0].pubkey,
           nodePubkey: instruction.keys[3].pubkey,
-          voteInit: new VoteInit(new PublicKey3(voteInit2.nodePubkey), new PublicKey3(voteInit2.authorizedVoter), new PublicKey3(voteInit2.authorizedWithdrawer), voteInit2.commission)
+          voteInit: new VoteInit(new PublicKey4(voteInit2.nodePubkey), new PublicKey4(voteInit2.authorizedVoter), new PublicKey4(voteInit2.authorizedWithdrawer), voteInit2.commission)
         };
       }
       /**
@@ -31539,7 +31539,7 @@ Message: ${transactionMessage}.
         return {
           votePubkey: instruction.keys[0].pubkey,
           authorizedPubkey: instruction.keys[2].pubkey,
-          newAuthorizedPubkey: new PublicKey3(newAuthorized),
+          newAuthorizedPubkey: new PublicKey4(newAuthorized),
           voteAuthorizationType: {
             index: voteAuthorizationType
           }
@@ -31561,9 +31561,9 @@ Message: ${transactionMessage}.
         } = decodeData$1(VOTE_INSTRUCTION_LAYOUTS.AuthorizeWithSeed, instruction.data);
         return {
           currentAuthorityDerivedKeyBasePubkey: instruction.keys[2].pubkey,
-          currentAuthorityDerivedKeyOwnerPubkey: new PublicKey3(currentAuthorityDerivedKeyOwnerPubkey),
+          currentAuthorityDerivedKeyOwnerPubkey: new PublicKey4(currentAuthorityDerivedKeyOwnerPubkey),
           currentAuthorityDerivedKeySeed,
-          newAuthorizedPubkey: new PublicKey3(newAuthorized),
+          newAuthorizedPubkey: new PublicKey4(newAuthorized),
           voteAuthorizationType: {
             index: voteAuthorizationType
           },
@@ -31681,14 +31681,14 @@ Message: ${transactionMessage}.
           programId: this.programId,
           data
         };
-        return new TransactionInstruction3(instructionData);
+        return new TransactionInstruction4(instructionData);
       }
       /**
        * Generate a transaction that creates a new Vote account.
        */
       static createAccount(params) {
-        const transaction = new Transaction2();
-        transaction.add(SystemProgram.createAccount({
+        const transaction = new Transaction3();
+        transaction.add(SystemProgram2.createAccount({
           fromPubkey: params.fromPubkey,
           newAccountPubkey: params.votePubkey,
           lamports: params.lamports,
@@ -31729,7 +31729,7 @@ Message: ${transactionMessage}.
           isSigner: true,
           isWritable: false
         }];
-        return new Transaction2().add({
+        return new Transaction3().add({
           keys,
           programId: this.programId,
           data
@@ -31770,7 +31770,7 @@ Message: ${transactionMessage}.
           isSigner: true,
           isWritable: false
         }];
-        return new Transaction2().add({
+        return new Transaction3().add({
           keys,
           programId: this.programId,
           data
@@ -31803,7 +31803,7 @@ Message: ${transactionMessage}.
           isSigner: true,
           isWritable: false
         }];
-        return new Transaction2().add({
+        return new Transaction3().add({
           keys,
           programId: this.programId,
           data
@@ -31847,16 +31847,16 @@ Message: ${transactionMessage}.
           isSigner: true,
           isWritable: false
         }];
-        return new Transaction2().add({
+        return new Transaction3().add({
           keys,
           programId: this.programId,
           data
         });
       }
     };
-    VoteProgram.programId = new PublicKey3("Vote111111111111111111111111111111111111111");
+    VoteProgram.programId = new PublicKey4("Vote111111111111111111111111111111111111111");
     VoteProgram.space = 3762;
-    var VALIDATOR_INFO_KEY = new PublicKey3("Va1idator1nfo111111111111111111111111111111");
+    var VALIDATOR_INFO_KEY = new PublicKey4("Va1idator1nfo111111111111111111111111111111");
     var InfoString = superstruct.type({
       name: superstruct.string(),
       website: superstruct.optional(superstruct.string()),
@@ -31890,7 +31890,7 @@ Message: ${transactionMessage}.
         if (configKeyCount !== 2) return null;
         const configKeys = [];
         for (let i = 0; i < 2; i++) {
-          const publicKey2 = new PublicKey3(guardedSplice(byteArray, 0, PUBLIC_KEY_LENGTH));
+          const publicKey2 = new PublicKey4(guardedSplice(byteArray, 0, PUBLIC_KEY_LENGTH));
           const isSigner = guardedShift(byteArray) === 1;
           configKeys.push({
             publicKey: publicKey2,
@@ -31908,7 +31908,7 @@ Message: ${transactionMessage}.
         return null;
       }
     };
-    var VOTE_PROGRAM_ID = new PublicKey3("Vote111111111111111111111111111111111111111");
+    var VOTE_PROGRAM_ID = new PublicKey4("Vote111111111111111111111111111111111111111");
     var VoteAccountLayout = BufferLayout__namespace.struct([
       publicKey("nodePubkey"),
       publicKey("authorizedWithdrawer"),
@@ -31965,8 +31965,8 @@ Message: ${transactionMessage}.
           rootSlot = null;
         }
         return new _VoteAccount({
-          nodePubkey: new PublicKey3(va.nodePubkey),
-          authorizedWithdrawer: new PublicKey3(va.authorizedWithdrawer),
+          nodePubkey: new PublicKey4(va.nodePubkey),
+          authorizedWithdrawer: new PublicKey4(va.authorizedWithdrawer),
           commission: va.commission,
           votes: va.votes,
           rootSlot,
@@ -31983,7 +31983,7 @@ Message: ${transactionMessage}.
     }) {
       return {
         epoch,
-        authorizedVoter: new PublicKey3(authorizedVoter)
+        authorizedVoter: new PublicKey4(authorizedVoter)
       };
     }
     function parsePriorVoters({
@@ -31992,7 +31992,7 @@ Message: ${transactionMessage}.
       targetEpoch
     }) {
       return {
-        authorizedPubkey: new PublicKey3(authorizedPubkey),
+        authorizedPubkey: new PublicKey4(authorizedPubkey),
         epochOfLastAuthorizedSwitch,
         targetEpoch
       };
@@ -32094,7 +32094,7 @@ Message: ${transactionMessage}.
     exports.NonceAccount = NonceAccount;
     exports.PACKET_DATA_SIZE = PACKET_DATA_SIZE;
     exports.PUBLIC_KEY_LENGTH = PUBLIC_KEY_LENGTH;
-    exports.PublicKey = PublicKey3;
+    exports.PublicKey = PublicKey4;
     exports.SIGNATURE_LENGTH_IN_BYTES = SIGNATURE_LENGTH_IN_BYTES;
     exports.SOLANA_SCHEMA = SOLANA_SCHEMA;
     exports.STAKE_CONFIG_ID = STAKE_CONFIG_ID;
@@ -32118,12 +32118,12 @@ Message: ${transactionMessage}.
     exports.StakeProgram = StakeProgram;
     exports.Struct = Struct;
     exports.SystemInstruction = SystemInstruction;
-    exports.SystemProgram = SystemProgram;
-    exports.Transaction = Transaction2;
+    exports.SystemProgram = SystemProgram2;
+    exports.Transaction = Transaction3;
     exports.TransactionExpiredBlockheightExceededError = TransactionExpiredBlockheightExceededError;
     exports.TransactionExpiredNonceInvalidError = TransactionExpiredNonceInvalidError;
     exports.TransactionExpiredTimeoutError = TransactionExpiredTimeoutError;
-    exports.TransactionInstruction = TransactionInstruction3;
+    exports.TransactionInstruction = TransactionInstruction4;
     exports.TransactionMessage = TransactionMessage;
     exports.TransactionStatus = TransactionStatus;
     exports.VALIDATOR_INFO_KEY = VALIDATOR_INFO_KEY;
@@ -32291,6 +32291,7 @@ var CHAIN_NAMES = {
   56: "BNB Chain",
   137: "Polygon",
   8453: "Base",
+  42161: "Arbitrum",
   900: "Solana",
   1500: "Stellar",
   lightning: "Bitcoin Lightning"
@@ -32300,10 +32301,20 @@ var CHAIN_FAMILY = {
   56: "evm",
   137: "evm",
   8453: "evm",
+  42161: "evm",
   900: "solana",
   1500: "stellar",
   lightning: "lightning"
 };
+var NATIVE_COINS = Object.freeze({
+  "1:ETH": { chainId: "1", symbol: "ETH", decimals: 18 },
+  "8453:ETH": { chainId: "8453", symbol: "ETH", decimals: 18 },
+  "42161:ETH": { chainId: "42161", symbol: "ETH", decimals: 18 },
+  "56:BNB": { chainId: "56", symbol: "BNB", decimals: 18 },
+  "137:POL": { chainId: "137", symbol: "POL", decimals: 18 },
+  "900:SOL": { chainId: "900", symbol: "SOL", decimals: 9 }
+});
+var NATIVE_MIN_USD_FALLBACK = Object.freeze({ "1:ETH": 1 });
 var DECIMALS = {
   "1:USDC": 6,
   "1:USDT": 6,
@@ -32313,10 +32324,20 @@ var DECIMALS = {
   "137:USDC": 6,
   "137:USDT": 6,
   "8453:USDC": 6,
+  // Arbitrum One: native USDC and USDT0 are both 6-decimals.
+  "42161:USDC": 6,
+  "42161:USDT": 6,
   "900:USDC": 6,
   "900:USDT": 6,
   // Stellar classic assets carry 7 decimal places.
-  "1500:USDC": 7
+  "1500:USDC": 7,
+  // Native coins: wei (18) on every EVM chain, lamports (9) on Solana.
+  "1:ETH": 18,
+  "8453:ETH": 18,
+  "42161:ETH": 18,
+  "56:BNB": 18,
+  "137:POL": 18,
+  "900:SOL": 9
 };
 var AmountError = class extends Error {
   constructor(code, message) {
@@ -32406,6 +32427,20 @@ function chainName(chainId) {
 }
 function chainFamily(chainId) {
   return CHAIN_FAMILY[String(chainId)] || CHAIN_FAMILY[chainId] || null;
+}
+function isNativeSource(chainId, tokenSymbol) {
+  return Object.prototype.hasOwnProperty.call(NATIVE_COINS, decimalsKey(chainId, tokenSymbol));
+}
+var NATIVE_TOKEN_ADDRESSES = /* @__PURE__ */ new Set([
+  "",
+  "0x0000000000000000000000000000000000000000",
+  "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "native",
+  "11111111111111111111111111111111"
+]);
+function isNativeTokenAddress(tokenAddress) {
+  if (tokenAddress === null || tokenAddress === void 0) return true;
+  return NATIVE_TOKEN_ADDRESSES.has(String(tokenAddress).trim().toLowerCase());
 }
 
 // scripts/src/lib/keys.mjs
@@ -33311,6 +33346,7 @@ function claimSend(rozoPaymentId, intent, { skipCaps = false } = {}) {
         claimedAt: (/* @__PURE__ */ new Date()).toISOString(),
         chainId: intent.chainId,
         tokenSymbol: intent.tokenSymbol,
+        native: Boolean(intent.native),
         from: intent.from,
         to: intent.to,
         amountAtomic: intent.amountAtomic,
@@ -33595,6 +33631,7 @@ var MARGINS_MS = {
   56: 10 * MINUTE,
   137: 10 * MINUTE,
   8453: 10 * MINUTE,
+  42161: 10 * MINUTE,
   900: 5 * MINUTE,
   1500: 10 * MINUTE,
   lightning: 10 * MINUTE
@@ -33625,13 +33662,16 @@ function checkExpiry({
   chainId,
   intentExpiresAt,
   coinbaseExpiry,
-  bolt11ExpiresAt = void 0
+  bolt11ExpiresAt = void 0,
+  quoteExpiresAt = void 0
 }) {
   const marginMs = marginFor(chainId);
   const intentMs = parseDeadline(intentExpiresAt);
   const coinbaseMs = parseDeadline(coinbaseExpiry);
   const bolt11Ms = bolt11ExpiresAt === void 0 ? void 0 : parseDeadline(bolt11ExpiresAt);
-  const deadlines = { intentMs, coinbaseMs, bolt11Ms: bolt11Ms ?? null };
+  const native = quoteExpiresAt !== void 0;
+  const quoteMs = native ? parseDeadline(quoteExpiresAt) : null;
+  const deadlines = { intentMs, coinbaseMs, bolt11Ms: bolt11Ms ?? null, quoteMs };
   const base = {
     marginMs,
     effectiveDeadlineMs: null,
@@ -33655,7 +33695,16 @@ function checkExpiry({
       reason: "Coinbase preApprovalExpiry is missing or unparsable."
     };
   }
-  const effective = Math.min(intentMs, coinbaseMs);
+  if (native && quoteMs === null) {
+    return {
+      ...base,
+      ok: false,
+      code: "EXPIRY_UNPARSABLE",
+      reason: "This native coin order carries no price lock (quoteExpiresAt), so the coin amount cannot be trusted to be honoured. Refusing to treat it as payable."
+    };
+  }
+  const effective = native ? Math.min(intentMs, coinbaseMs, quoteMs) : Math.min(intentMs, coinbaseMs);
+  const lockBinds = native && quoteMs <= Math.min(intentMs, coinbaseMs);
   const msRemaining = effective - now;
   const msOfSlack = msRemaining - marginMs;
   const withDeadline = {
@@ -33668,16 +33717,16 @@ function checkExpiry({
     return {
       ...withDeadline,
       ok: false,
-      code: "EXPIRED",
-      reason: "The order or the Coinbase link has already expired."
+      code: lockBinds ? "QUOTE_EXPIRED" : "EXPIRED",
+      reason: lockBinds ? "The coin price for this order was locked until quoteExpiresAt, and that has passed. A payment now would be valued at the price when it arrives and may fall short. Do not send it; let the order expire unfunded and start a new one." : "The order or the Coinbase link has already expired."
     };
   }
   if (msOfSlack <= 0) {
     return {
       ...withDeadline,
       ok: false,
-      code: "EXPIRY_MARGIN",
-      reason: `Only ${Math.floor(msRemaining / 1e3)}s left before the earliest deadline; this chain needs a ${Math.floor(marginMs / 6e4)} min safety margin.`
+      code: lockBinds ? "QUOTE_EXPIRY_MARGIN" : "EXPIRY_MARGIN",
+      reason: `Only ${Math.floor(msRemaining / 1e3)}s left before the earliest deadline${lockBinds ? " (the coin price lock)" : ""}; this chain needs a ${Math.floor(marginMs / 6e4)} min safety margin.`
     };
   }
   if (bolt11ExpiresAt !== void 0) {
@@ -33700,6 +33749,12 @@ function checkExpiry({
     }
   }
   return { ...withDeadline, ok: true, code: null, reason: null };
+}
+function priceLockFor({ native, payment = null, others = [] }) {
+  if (!native) return void 0;
+  const candidates = [payment?.quoteExpiresAt, payment?.source?.quoteExpiresAt, ...others].map(parseDeadline).filter((ms) => ms !== null);
+  if (!candidates.length) return null;
+  return new Date(Math.min(...candidates)).toISOString();
 }
 
 // scripts/src/lib/blacklist.mjs
@@ -33886,6 +33941,14 @@ function assertBitrefillLive(state, payment) {
   if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
   return expiry;
 }
+function sendPriceLock(payment, state) {
+  const source = payment?.source || {};
+  return priceLockFor({
+    native: isNativeSource(source.chainId, source.tokenSymbol),
+    payment,
+    others: [state?.confirmation?.quoteExpiresAt, state?.quoteExpiresAt]
+  });
+}
 async function preflight({
   rozoPaymentId,
   expectFamily,
@@ -33974,14 +34037,19 @@ async function preflight({
   let statusNow = null;
   let expiry;
   if (state.provider === "bitrefill") {
+    if (isNativeSource(source.chainId, source.tokenSymbol)) {
+      throw new SkillError("NATIVE_NOT_AVAILABLE", "Native coins are not available for Bitrefill invoices.");
+    }
     expiry = assertBitrefillLive(state, payment);
   } else {
     statusNow = await invoiceStatus({ linkId: state.linkId });
+    const quoteExpiresAt = sendPriceLock(payment, state);
     expiry = checkExpiry({
       now: Date.now(),
       chainId: source.chainId,
       intentExpiresAt: payment?.expiresAt,
-      coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry
+      coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry,
+      ...quoteExpiresAt !== void 0 ? { quoteExpiresAt } : {}
     });
     if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
     const payable = checkPayable(statusNow, Date.now());
@@ -34002,11 +34070,22 @@ async function preflight({
     blacklist,
     amountAtomic: deposit.amountAtomic,
     deposit,
-    statusNow
+    statusNow,
+    quoteExpiresAt: sendPriceLock(payment, state)
   };
 }
-async function finalPayabilityCheck({ linkId, chainId, intentExpiresAt, state = null, rozoPaymentId = null }) {
+async function finalPayabilityCheck({
+  linkId,
+  chainId,
+  intentExpiresAt,
+  quoteExpiresAt = void 0,
+  state = null,
+  rozoPaymentId = null
+}) {
   if (state?.provider === "bitrefill") {
+    if (isNativeSource(state?.source?.chainId, state?.source?.tokenSymbol)) {
+      throw new SkillError("NATIVE_NOT_AVAILABLE", "Native coins are not available for Bitrefill invoices.");
+    }
     const id = rozoPaymentId ?? state.rozoPaymentId;
     const payment = await getPayment(id);
     const guard = reuseGuard({ payment, requested: state.source });
@@ -34023,7 +34102,9 @@ async function finalPayabilityCheck({ linkId, chainId, intentExpiresAt, state = 
     now: Date.now(),
     chainId,
     intentExpiresAt,
-    coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry
+    coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry,
+    // Native orders: the price lock, re-checked as the very last gate too.
+    ...quoteExpiresAt !== void 0 ? { quoteExpiresAt } : {}
   });
   if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
   return { statusNow, payable, expiry };
@@ -34073,7 +34154,8 @@ var EVM_FEE_COIN = Object.freeze({
   1: { symbol: "ETH", network: "Ethereum" },
   56: { symbol: "BNB", network: "BNB Chain" },
   137: { symbol: "POL", network: "Polygon" },
-  8453: { symbol: "ETH", network: "Base" }
+  8453: { symbol: "ETH", network: "Base" },
+  42161: { symbol: "ETH", network: "Arbitrum" }
 });
 function formatAtomic(atomic, decimals) {
   const neg = atomic < 0n;
@@ -34096,9 +34178,10 @@ function assessFee({ balance, required, decimals, symbol, network }) {
 }
 function insufficient(details, extra) {
   const need = details.required ? `about ${details.required} ${details.feeCoin}` : `some ${details.feeCoin}`;
+  const forWhat = details.payment ? `for the payment of ${details.payment} ${details.feeCoin} plus the network fee` : "for the network fee";
   return new SkillError(
     "INSUFFICIENT_GAS",
-    `This wallet holds ${details.balance} ${details.feeCoin} on ${details.network} but needs ${need} for the network fee${details.shortfall ? ` (short by ${details.shortfall} ${details.feeCoin})` : ""}. Nothing was signed. Add ${details.feeCoin} on ${details.network} to this wallet and re-run, or pay with a different coin.` + (extra ? ` ${extra}` : ""),
+    `This wallet holds ${details.balance} ${details.feeCoin} on ${details.network} but needs ${need} ${forWhat}${details.shortfall ? ` (short by ${details.shortfall} ${details.feeCoin})` : ""}. Nothing was signed. Add ${details.feeCoin} on ${details.network} to this wallet and re-run, or pay with a different coin.` + (extra ? ` ${extra}` : ""),
     details
   );
 }
@@ -34110,7 +34193,7 @@ function unavailable(network, err) {
   );
 }
 var LAMPORTS_DECIMALS = 9;
-async function solFeePrecheck({ connection, payer, message }) {
+async function solFeePrecheck({ connection, payer, message, value = 0n }) {
   const network = "Solana";
   let balance;
   let fee;
@@ -34131,32 +34214,148 @@ async function solFeePrecheck({ connection, payer, message }) {
     }
     throw unavailable(network, err);
   }
-  const remaining = balance - fee;
-  const required = remaining === 0n ? fee : fee + rentMin;
+  const remaining = balance - fee - value;
+  const required = remaining === 0n ? fee + value : fee + value + rentMin;
   const { ok, details } = assessFee({ balance, required, decimals: LAMPORTS_DECIMALS, symbol: "SOL", network });
-  const full = { ...details, fee: formatAtomic(fee, LAMPORTS_DECIMALS), rentExemptMinimum: formatAtomic(rentMin, LAMPORTS_DECIMALS) };
+  const full = {
+    ...details,
+    payment: value > 0n ? formatAtomic(value, LAMPORTS_DECIMALS) : null,
+    fee: formatAtomic(fee, LAMPORTS_DECIMALS),
+    rentExemptMinimum: formatAtomic(rentMin, LAMPORTS_DECIMALS)
+  };
   if (!ok) {
     throw insufficient(
       full,
-      balance >= fee ? "Solana also requires a wallet to keep a small minimum balance after paying the fee." : null
+      balance >= fee + value ? "Solana also requires a wallet to keep a small minimum balance after paying the fee." : null
     );
   }
   return full;
 }
 
+// scripts/src/lib/rpc.mjs
+var DEFAULT_RPC = Object.freeze({
+  // eth.llamarpc.com and polygon-rpc.com stopped answering (checked
+  // 2026-10-12: HTTP 525, and "API key disabled"); publicnode serves both.
+  1: "https://ethereum-rpc.publicnode.com",
+  56: "https://bsc-dataseed.binance.org",
+  137: "https://polygon-bor-rpc.publicnode.com",
+  8453: "https://mainnet.base.org",
+  42161: "https://arb1.arbitrum.io/rpc",
+  900: "https://api.mainnet-beta.solana.com"
+});
+function rpcFor(chainId, override, env = process.env) {
+  if (override && override !== true) return String(override);
+  const fromEnv = env?.[`ROZO_CHECKOUT_RPC_${chainId}`];
+  if (fromEnv) return fromEnv;
+  const fallback = DEFAULT_RPC[String(chainId)];
+  if (!fallback) {
+    throw new SkillError(
+      "NO_RPC",
+      `No RPC known for chain ${chainId}. Pass --rpc <url> or set ROZO_CHECKOUT_RPC_${chainId}.`
+    );
+  }
+  return fallback;
+}
+
+// scripts/src/lib/native-send.mjs
+var import_web3 = __toESM(require_index_cjs(), 1);
+var MEMO_PROGRAM_ID = new import_web3.PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+function assertNativeTokenAddress(tokenAddress) {
+  if (!isNativeTokenAddress(tokenAddress)) {
+    throw new SkillError(
+      "NATIVE_TOKEN_ADDRESS_UNEXPECTED",
+      "This native coin order names a token contract or mint, which a native payment never uses. Refusing to guess which asset to send."
+    );
+  }
+}
+function assertPositive(amountAtomic) {
+  if (typeof amountAtomic !== "bigint" || amountAtomic <= 0n) {
+    throw new SkillError("DEPOSIT_INCOMPLETE", "The order carries no positive native amount.");
+  }
+}
+async function prepareSolNativeSend({
+  connection,
+  payer,
+  recipientAddress,
+  amountAtomic,
+  memo = null,
+  tokenAddress
+}) {
+  assertNativeTokenAddress(tokenAddress);
+  assertPositive(amountAtomic);
+  let recipient;
+  try {
+    recipient = new import_web3.PublicKey(recipientAddress);
+  } catch {
+    throw new SkillError("BAD_DEPOSIT_ADDRESS", "The deposit address is not a valid Solana address.");
+  }
+  let info;
+  let rentMin;
+  let balance;
+  try {
+    info = await connection.getAccountInfo(recipient, "confirmed");
+    rentMin = BigInt(await connection.getMinimumBalanceForRentExemption(0));
+    balance = BigInt(await connection.getBalance(payer, "confirmed"));
+  } catch (err) {
+    throw new SkillError(
+      "RPC_READ_FAILED",
+      `Could not read the Solana accounts: ${redact(err?.message || "unknown error")}. Nothing was signed.`
+    );
+  }
+  if (info && (info.executable || !info.owner?.equals?.(import_web3.SystemProgram.programId))) {
+    throw new SkillError(
+      "DEPOSIT_ACCOUNT_NOT_WALLET",
+      "The deposit address is not a plain Solana wallet (it is a token account or a program). Refusing to send SOL to it."
+    );
+  }
+  if (!info && amountAtomic < rentMin) {
+    throw new SkillError(
+      "DEPOSIT_BELOW_RENT",
+      `The deposit address does not exist yet and ${formatAtomic(amountAtomic, 9)} SOL is below the ${formatAtomic(rentMin, 9)} SOL needed to open it. Pay this order another way.`
+    );
+  }
+  if (balance < amountAtomic) {
+    throw new SkillError(
+      "INSUFFICIENT_BALANCE",
+      `This wallet holds ${formatAtomic(balance, 9)} SOL; the order needs exactly ${formatAtomic(amountAtomic, 9)} SOL plus the network fee. Nothing was signed.`
+    );
+  }
+  const tx = new import_web3.Transaction();
+  tx.add(import_web3.SystemProgram.transfer({ fromPubkey: payer, toPubkey: recipient, lamports: amountAtomic }));
+  if (memo) {
+    tx.add(
+      new import_web3.TransactionInstruction({
+        keys: [],
+        programId: MEMO_PROGRAM_ID,
+        data: Buffer.from(String(memo), "utf8")
+      })
+    );
+  }
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+  tx.recentBlockhash = blockhash;
+  tx.feePayer = payer;
+  const networkFee = await solFeePrecheck({
+    connection,
+    payer,
+    message: tx.compileMessage(),
+    value: amountAtomic
+  });
+  return { tx, recipient, blockhash, lastValidBlockHeight, networkFee, recipientExists: Boolean(info) };
+}
+
 // scripts/src/send-sol.mjs
-var import_web32 = __toESM(require_index_cjs(), 1);
+var import_web33 = __toESM(require_index_cjs(), 1);
 
 // scripts/src/spl-lite.mjs
-var import_web3 = __toESM(require_index_cjs(), 1);
-var TOKEN_PROGRAM_ID = new import_web3.PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-var ASSOCIATED_TOKEN_PROGRAM_ID = new import_web3.PublicKey(
+var import_web32 = __toESM(require_index_cjs(), 1);
+var TOKEN_PROGRAM_ID = new import_web32.PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+var ASSOCIATED_TOKEN_PROGRAM_ID = new import_web32.PublicKey(
   "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
 );
 var TOKEN_ACCOUNT_LEN = 165;
 var MINT_LEN = 82;
 async function getAssociatedTokenAddress(mint, owner) {
-  const [address] = import_web3.PublicKey.findProgramAddressSync(
+  const [address] = import_web32.PublicKey.findProgramAddressSync(
     [owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()],
     ASSOCIATED_TOKEN_PROGRAM_ID
   );
@@ -34177,8 +34376,8 @@ async function getAccount(connection, address) {
   const data = await fetchOwnedAccount(connection, address, TOKEN_ACCOUNT_LEN, "Token account");
   return {
     address,
-    mint: new import_web3.PublicKey(data.subarray(0, 32)),
-    owner: new import_web3.PublicKey(data.subarray(32, 64)),
+    mint: new import_web32.PublicKey(data.subarray(0, 32)),
+    owner: new import_web32.PublicKey(data.subarray(32, 64)),
     amount: data.readBigUInt64LE(64)
   };
 }
@@ -34195,7 +34394,7 @@ function createTransferCheckedInstruction(source, mint, destination, owner, amou
   data.writeUInt8(12, 0);
   data.writeBigUInt64LE(BigInt(amount), 1);
   data.writeUInt8(decimals, 9);
-  return new import_web3.TransactionInstruction({
+  return new import_web32.TransactionInstruction({
     programId: TOKEN_PROGRAM_ID,
     keys: [
       { pubkey: source, isSigner: false, isWritable: true },
@@ -34208,7 +34407,6 @@ function createTransferCheckedInstruction(source, mint, destination, owner, amou
 }
 
 // scripts/src/send-sol.mjs
-var MEMO_PROGRAM_ID = new import_web32.PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 var MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 var B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 async function main(argv) {
@@ -34223,19 +34421,19 @@ async function main(argv) {
   });
   const loaded = await loadKeySource(plan, { family: "solana", askPassphrase: promptPassphrase });
   const secret = loaded.secretKey;
-  const keypair = secret.length === 64 ? import_web32.Keypair.fromSecretKey(secret) : import_web32.Keypair.fromSeed(secret);
+  const keypair = secret.length === 64 ? import_web33.Keypair.fromSecretKey(secret) : import_web33.Keypair.fromSeed(secret);
   const sender = keypair.publicKey.toBase58();
   const keySource = loaded.label;
   const dryRun = Boolean(args["dry-run"]);
-  const { source, state, expiry, amountAtomic, payment } = await preflight({
+  const { source, state, expiry, amountAtomic, payment, quoteExpiresAt } = await preflight({
     rozoPaymentId,
     expectFamily: "solana",
     senderAddress: sender,
     send: Boolean(args.send),
     dryRun
   });
-  const rpcUrl = args.rpc && args.rpc !== true && String(args.rpc) || process.env.ROZO_CHECKOUT_RPC_900 || "https://api.mainnet-beta.solana.com";
-  const connection = new import_web32.Connection(rpcUrl, "confirmed");
+  const rpcUrl = rpcFor("900", args.rpc);
+  const connection = new import_web33.Connection(rpcUrl, "confirmed");
   let genesis;
   try {
     genesis = await connection.getGenesisHash();
@@ -34248,94 +34446,111 @@ async function main(argv) {
       "The configured Solana RPC is not mainnet-beta. Refusing to sign."
     );
   }
-  let mint;
-  try {
-    mint = new import_web32.PublicKey(source.tokenAddress);
-  } catch {
-    throw new SkillError("NO_TOKEN_ADDRESS", "The order did not carry a usable SPL mint address.");
-  }
-  let recipient;
-  try {
-    recipient = new import_web32.PublicKey(source.receiverAddress);
-  } catch {
-    throw new SkillError("BAD_DEPOSIT_ADDRESS", "The deposit address is not a valid Solana address.");
-  }
-  const mintInfo = await getMint(connection, mint);
-  const expectedDecimals = decimalsFor(source.chainId, source.tokenSymbol);
-  if (mintInfo.decimals !== expectedDecimals) {
-    throw new SkillError(
-      "DECIMALS_MISMATCH",
-      `Mint reports ${mintInfo.decimals} decimals, expected ${expectedDecimals} for ${source.tokenSymbol} on Solana. Refusing to sign.`
-    );
-  }
-  const fromAta = await getAssociatedTokenAddress(mint, keypair.publicKey);
-  let fromAccount;
-  try {
-    fromAccount = await getAccount(connection, fromAta);
-  } catch {
-    throw new SkillError(
-      "NO_TOKEN_ACCOUNT",
-      `The sender has no ${source.tokenSymbol} token account on Solana.`
-    );
-  }
-  if (fromAccount.amount < amountAtomic) {
-    throw new SkillError(
-      "INSUFFICIENT_BALANCE",
-      `Sender holds ${fromAccount.amount} atomic units; ${amountAtomic} are required.`
-    );
-  }
-  let toAta;
+  const native = isNativeSource(source.chainId, source.tokenSymbol);
+  let tx;
+  let blockhash;
+  let lastValidBlockHeight;
+  let networkFee;
   let toIsTokenAccount = false;
-  try {
-    const acc = await getAccount(connection, recipient);
-    if (acc.mint.toBase58() !== mint.toBase58()) {
+  if (native) {
+    const prepared = await prepareSolNativeSend({
+      connection,
+      payer: keypair.publicKey,
+      recipientAddress: source.receiverAddress,
+      amountAtomic,
+      memo: source.receiverMemo ?? null,
+      tokenAddress: source.tokenAddress
+    });
+    ({ tx, blockhash, lastValidBlockHeight, networkFee } = prepared);
+  } else {
+    let mint;
+    try {
+      mint = new import_web33.PublicKey(source.tokenAddress);
+    } catch {
+      throw new SkillError("NO_TOKEN_ADDRESS", "The order did not carry a usable SPL mint address.");
+    }
+    let recipient;
+    try {
+      recipient = new import_web33.PublicKey(source.receiverAddress);
+    } catch {
+      throw new SkillError("BAD_DEPOSIT_ADDRESS", "The deposit address is not a valid Solana address.");
+    }
+    const mintInfo = await getMint(connection, mint);
+    const expectedDecimals = decimalsFor(source.chainId, source.tokenSymbol);
+    if (mintInfo.decimals !== expectedDecimals) {
       throw new SkillError(
-        "DEPOSIT_ACCOUNT_MISMATCH",
-        "The deposit token account is for a different mint. Refusing to send."
+        "DECIMALS_MISMATCH",
+        `Mint reports ${mintInfo.decimals} decimals, expected ${expectedDecimals} for ${source.tokenSymbol} on Solana. Refusing to sign.`
       );
     }
-    toAta = recipient;
-    toIsTokenAccount = true;
-  } catch (err) {
-    if (err instanceof SkillError) throw err;
-    toAta = await getAssociatedTokenAddress(mint, recipient);
+    const fromAta = await getAssociatedTokenAddress(mint, keypair.publicKey);
+    let fromAccount;
     try {
-      await getAccount(connection, toAta);
+      fromAccount = await getAccount(connection, fromAta);
     } catch {
       throw new SkillError(
-        "DEPOSIT_ACCOUNT_MISSING",
-        "The deposit address has no token account for this mint. Refusing to create one on its behalf \u2014 re-run create-order.js for fresh instructions."
+        "NO_TOKEN_ACCOUNT",
+        `The sender has no ${source.tokenSymbol} token account on Solana.`
       );
     }
-  }
-  const tx = new import_web32.Transaction();
-  tx.add(
-    createTransferCheckedInstruction(
-      fromAta,
-      mint,
-      toAta,
-      keypair.publicKey,
-      amountAtomic,
-      mintInfo.decimals
-    )
-  );
-  if (source.receiverMemo) {
+    if (fromAccount.amount < amountAtomic) {
+      throw new SkillError(
+        "INSUFFICIENT_BALANCE",
+        `Sender holds ${fromAccount.amount} atomic units; ${amountAtomic} are required.`
+      );
+    }
+    let toAta;
+    try {
+      const acc = await getAccount(connection, recipient);
+      if (acc.mint.toBase58() !== mint.toBase58()) {
+        throw new SkillError(
+          "DEPOSIT_ACCOUNT_MISMATCH",
+          "The deposit token account is for a different mint. Refusing to send."
+        );
+      }
+      toAta = recipient;
+      toIsTokenAccount = true;
+    } catch (err) {
+      if (err instanceof SkillError) throw err;
+      toAta = await getAssociatedTokenAddress(mint, recipient);
+      try {
+        await getAccount(connection, toAta);
+      } catch {
+        throw new SkillError(
+          "DEPOSIT_ACCOUNT_MISSING",
+          "The deposit address has no token account for this mint. Refusing to create one on its behalf \u2014 re-run create-order.js for fresh instructions."
+        );
+      }
+    }
+    tx = new import_web33.Transaction();
     tx.add(
-      new import_web32.TransactionInstruction({
-        keys: [],
-        programId: MEMO_PROGRAM_ID,
-        data: Buffer.from(String(source.receiverMemo), "utf8")
-      })
+      createTransferCheckedInstruction(
+        fromAta,
+        mint,
+        toAta,
+        keypair.publicKey,
+        amountAtomic,
+        mintInfo.decimals
+      )
     );
+    if (source.receiverMemo) {
+      tx.add(
+        new import_web33.TransactionInstruction({
+          keys: [],
+          programId: MEMO_PROGRAM_ID,
+          data: Buffer.from(String(source.receiverMemo), "utf8")
+        })
+      );
+    }
+    ({ blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed"));
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = keypair.publicKey;
+    networkFee = await solFeePrecheck({
+      connection,
+      payer: keypair.publicKey,
+      message: tx.compileMessage()
+    });
   }
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
-  tx.recentBlockhash = blockhash;
-  tx.feePayer = keypair.publicKey;
-  const networkFee = await solFeePrecheck({
-    connection,
-    payer: keypair.publicKey,
-    message: tx.compileMessage()
-  });
   if (dryRun) {
     emit({
       success: true,
@@ -34345,6 +34560,9 @@ async function main(argv) {
       wouldSend: {
         chain: chainName(900),
         tokenSymbol: source.tokenSymbol,
+        native,
+        kind: native ? "native SOL transfer" : "SPL transfer",
+        priceLockedUntil: native ? quoteExpiresAt : null,
         amountAtomic: amountAtomic.toString(),
         amount: source.amount,
         toMasked: maskAddress(source.receiverAddress),
@@ -34367,6 +34585,7 @@ async function main(argv) {
     linkId: state.linkId,
     chainId: source.chainId,
     intentExpiresAt: payment?.expiresAt,
+    quoteExpiresAt,
     state,
     rozoPaymentId
   });
@@ -34375,6 +34594,7 @@ async function main(argv) {
     {
       chainId: "900",
       tokenSymbol: source.tokenSymbol,
+      native,
       from: sender,
       to: source.receiverAddress,
       amountAtomic: amountAtomic.toString(),

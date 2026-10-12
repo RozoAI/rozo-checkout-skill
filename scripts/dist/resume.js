@@ -379,6 +379,7 @@ var CHAIN_NAMES = {
   56: "BNB Chain",
   137: "Polygon",
   8453: "Base",
+  42161: "Arbitrum",
   900: "Solana",
   1500: "Stellar",
   lightning: "Bitcoin Lightning"
@@ -388,10 +389,20 @@ var CHAIN_FAMILY = {
   56: "evm",
   137: "evm",
   8453: "evm",
+  42161: "evm",
   900: "solana",
   1500: "stellar",
   lightning: "lightning"
 };
+var NATIVE_COINS = Object.freeze({
+  "1:ETH": { chainId: "1", symbol: "ETH", decimals: 18 },
+  "8453:ETH": { chainId: "8453", symbol: "ETH", decimals: 18 },
+  "42161:ETH": { chainId: "42161", symbol: "ETH", decimals: 18 },
+  "56:BNB": { chainId: "56", symbol: "BNB", decimals: 18 },
+  "137:POL": { chainId: "137", symbol: "POL", decimals: 18 },
+  "900:SOL": { chainId: "900", symbol: "SOL", decimals: 9 }
+});
+var NATIVE_MIN_USD_FALLBACK = Object.freeze({ "1:ETH": 1 });
 var DECIMALS = {
   "1:USDC": 6,
   "1:USDT": 6,
@@ -401,10 +412,20 @@ var DECIMALS = {
   "137:USDC": 6,
   "137:USDT": 6,
   "8453:USDC": 6,
+  // Arbitrum One: native USDC and USDT0 are both 6-decimals.
+  "42161:USDC": 6,
+  "42161:USDT": 6,
   "900:USDC": 6,
   "900:USDT": 6,
   // Stellar classic assets carry 7 decimal places.
-  "1500:USDC": 7
+  "1500:USDC": 7,
+  // Native coins: wei (18) on every EVM chain, lamports (9) on Solana.
+  "1:ETH": 18,
+  "8453:ETH": 18,
+  "42161:ETH": 18,
+  "56:BNB": 18,
+  "137:POL": 18,
+  "900:SOL": 9
 };
 var AmountError = class extends Error {
   constructor(code, message) {
@@ -501,9 +522,19 @@ var STELLAR_MEMO_TYPE = "MEMO_TEXT";
 function chainFamily(chainId) {
   return CHAIN_FAMILY[String(chainId)] || CHAIN_FAMILY[chainId] || null;
 }
+function isNativeSource(chainId, tokenSymbol) {
+  return Object.prototype.hasOwnProperty.call(NATIVE_COINS, decimalsKey(chainId, tokenSymbol));
+}
 
 // scripts/src/lib/guards.mjs
 var UNPAID_STATUS = "payment_unpaid";
+var NATIVE_PROGRESS_STATUSES = /* @__PURE__ */ new Set([
+  "payment_payin_completed",
+  "payment_bridging",
+  "payment_payout_started",
+  "payment_payout_completed",
+  "payment_completed"
+]);
 function receiptSignal(source) {
   const raw = source?.amountReceived;
   if (raw === null || raw === void 0 || raw === "") {
@@ -750,7 +781,8 @@ function classifyStatus({
   if (!bitrefill && (routerStatus === "paid" || coinbase?.settled === true)) {
     return mk("settled", "Coinbase invoice settled by the funder wallet.", { terminal: true });
   }
-  if (moneyDetected && receipt && receipt.state === "underpaid") {
+  const nativeAccepted = isNativeSource(source.chainId, source.tokenSymbol) && NATIVE_PROGRESS_STATUSES.has(payment?.status);
+  if (moneyDetected && receipt && receipt.state === "underpaid" && !nativeAccepted) {
     return mk(
       "underpaid",
       "Less arrived than the order requires. Do NOT send a top-up to the same address \u2014 escalate.",
@@ -954,6 +986,7 @@ var MARGINS_MS = {
   56: 10 * MINUTE,
   137: 10 * MINUTE,
   8453: 10 * MINUTE,
+  42161: 10 * MINUTE,
   900: 5 * MINUTE,
   1500: 10 * MINUTE,
   lightning: 10 * MINUTE
@@ -994,13 +1027,16 @@ function checkExpiry({
   chainId,
   intentExpiresAt,
   coinbaseExpiry,
-  bolt11ExpiresAt = void 0
+  bolt11ExpiresAt = void 0,
+  quoteExpiresAt = void 0
 }) {
   const marginMs = marginFor(chainId);
   const intentMs = parseDeadline(intentExpiresAt);
   const coinbaseMs = parseDeadline(coinbaseExpiry);
   const bolt11Ms = bolt11ExpiresAt === void 0 ? void 0 : parseDeadline(bolt11ExpiresAt);
-  const deadlines = { intentMs, coinbaseMs, bolt11Ms: bolt11Ms ?? null };
+  const native = quoteExpiresAt !== void 0;
+  const quoteMs = native ? parseDeadline(quoteExpiresAt) : null;
+  const deadlines = { intentMs, coinbaseMs, bolt11Ms: bolt11Ms ?? null, quoteMs };
   const base = {
     marginMs,
     effectiveDeadlineMs: null,
@@ -1024,7 +1060,16 @@ function checkExpiry({
       reason: "Coinbase preApprovalExpiry is missing or unparsable."
     };
   }
-  const effective = Math.min(intentMs, coinbaseMs);
+  if (native && quoteMs === null) {
+    return {
+      ...base,
+      ok: false,
+      code: "EXPIRY_UNPARSABLE",
+      reason: "This native coin order carries no price lock (quoteExpiresAt), so the coin amount cannot be trusted to be honoured. Refusing to treat it as payable."
+    };
+  }
+  const effective = native ? Math.min(intentMs, coinbaseMs, quoteMs) : Math.min(intentMs, coinbaseMs);
+  const lockBinds = native && quoteMs <= Math.min(intentMs, coinbaseMs);
   const msRemaining = effective - now;
   const msOfSlack = msRemaining - marginMs;
   const withDeadline = {
@@ -1037,16 +1082,16 @@ function checkExpiry({
     return {
       ...withDeadline,
       ok: false,
-      code: "EXPIRED",
-      reason: "The order or the Coinbase link has already expired."
+      code: lockBinds ? "QUOTE_EXPIRED" : "EXPIRED",
+      reason: lockBinds ? "The coin price for this order was locked until quoteExpiresAt, and that has passed. A payment now would be valued at the price when it arrives and may fall short. Do not send it; let the order expire unfunded and start a new one." : "The order or the Coinbase link has already expired."
     };
   }
   if (msOfSlack <= 0) {
     return {
       ...withDeadline,
       ok: false,
-      code: "EXPIRY_MARGIN",
-      reason: `Only ${Math.floor(msRemaining / 1e3)}s left before the earliest deadline; this chain needs a ${Math.floor(marginMs / 6e4)} min safety margin.`
+      code: lockBinds ? "QUOTE_EXPIRY_MARGIN" : "EXPIRY_MARGIN",
+      reason: `Only ${Math.floor(msRemaining / 1e3)}s left before the earliest deadline${lockBinds ? " (the coin price lock)" : ""}; this chain needs a ${Math.floor(marginMs / 6e4)} min safety margin.`
     };
   }
   if (bolt11ExpiresAt !== void 0) {
@@ -1069,6 +1114,12 @@ function checkExpiry({
     }
   }
   return { ...withDeadline, ok: true, code: null, reason: null };
+}
+function priceLockFor({ native, payment = null, others = [] }) {
+  if (!native) return void 0;
+  const candidates = [payment?.quoteExpiresAt, payment?.source?.quoteExpiresAt, ...others].map(parseDeadline).filter((ms) => ms !== null);
+  if (!candidates.length) return null;
+  return new Date(Math.min(...candidates)).toISOString();
 }
 
 // scripts/src/lib/bitrefill.mjs
@@ -1148,7 +1199,7 @@ function localSendFor(id, read = readState) {
   if (!send || !send.status) return null;
   return { status: send.status, txHash: publicHash(send.txHash ?? null), claimedAt: send.claimedAt ?? null };
 }
-function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, now = Date.now() }) {
+function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, quoteExpiresAt, now = Date.now() }) {
   if (provider === "bitrefill") {
     const deadline = bitrefillExpiry ?? null;
     const expiry2 = checkExpiry({
@@ -1168,7 +1219,9 @@ function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, no
     now,
     chainId,
     intentExpiresAt: payment?.expiresAt ?? status?.rozoPayment?.expiresAt,
-    coinbaseExpiry: status?.coinbase?.preApprovalExpiry
+    coinbaseExpiry: status?.coinbase?.preApprovalExpiry,
+    // Native orders: the price lock is a deadline too (undefined otherwise).
+    ...quoteExpiresAt !== void 0 ? { quoteExpiresAt } : {}
   });
   return expiry.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 6e4), deadlineMs: expiry.effectiveDeadlineMs } : { ok: false, code: expiry.code, reason: expiry.reason };
 }
@@ -1222,6 +1275,18 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
     provider
   });
   const source = payment?.source || status?.rozoPayment?.source || {};
+  const native = isNativeSource(source.chainId, source.tokenSymbol);
+  let localState = null;
+  try {
+    localState = id && isRozoPaymentId(id) ? readState(id) : null;
+  } catch {
+    localState = null;
+  }
+  const quoteExpiresAt = priceLockFor({
+    native,
+    payment: payment || status?.rozoPayment || null,
+    others: [localState?.confirmation?.quoteExpiresAt, localState?.quoteExpiresAt]
+  });
   let bitrefillExpiry = null;
   let state = verdict.state;
   let terminal = verdict.terminal;
@@ -1281,10 +1346,17 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       const iso = provider === "bitrefill" ? bitrefillExpiry : payment?.expiresAt ?? status?.rozoPayment?.expiresAt ?? null;
       if (!iso) return { expiresAt: null, expiresIn: null, msRemaining: null };
       const ms = Date.parse(iso) - Date.now();
+      const lockMs = quoteExpiresAt ? Date.parse(quoteExpiresAt) - Date.now() : NaN;
       return {
         expiresAt: iso,
         expiresIn: formatRemaining(ms),
-        msRemaining: Number.isFinite(ms) ? ms : null
+        msRemaining: Number.isFinite(ms) ? ms : null,
+        // Native orders: the order stays open after the price lock, but a
+        // payment after it is valued at the arrival price. Pay before this.
+        ...native ? {
+          quoteExpiresAt: quoteExpiresAt ?? null,
+          priceLockExpiresIn: Number.isFinite(lockMs) ? formatRemaining(lockMs) : null
+        } : {}
       };
     })(),
     payout: {
@@ -1292,7 +1364,7 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       confirmedAt: payment?.destination?.confirmedAt ?? status?.rozoPayment?.destination?.confirmedAt ?? null
     },
     localSend: localSendFor(id),
-    sendWindow: state === "awaiting_deposit" ? sendWindowFor({ provider, chainId: source.chainId, payment, status, bitrefillExpiry }) : null,
+    sendWindow: state === "awaiting_deposit" ? sendWindowFor({ provider, chainId: source.chainId, payment, status, bitrefillExpiry, quoteExpiresAt }) : null,
     errors: [statusError, paymentError].filter(Boolean)
   };
 }
@@ -1451,11 +1523,14 @@ async function main(argv) {
       EXIT_ERROR
     );
   }
+  const native = isNativeSource(source.chainId, source.tokenSymbol);
+  const quoteExpiresAt = priceLockFor({ native, payment, others: [snap.expiry?.quoteExpiresAt] });
   const finalWindow = checkExpiry({
     now: Date.now(),
     chainId: source.chainId,
     intentExpiresAt: payment?.expiresAt ?? snap.sendWindow?.deadlineMs,
-    coinbaseExpiry: snap.sendWindow?.deadlineMs
+    coinbaseExpiry: snap.sendWindow?.deadlineMs,
+    ...native ? { quoteExpiresAt } : {}
   });
   if (!finalWindow.ok) {
     emit(
@@ -1496,7 +1571,7 @@ async function main(argv) {
     }
   }
   const expiresAt = payment?.expiresAt ?? snap.expiry?.expiresAt ?? null;
-  const msRemaining = expiresAt ? Date.parse(expiresAt) - Date.now() : NaN;
+  const msRemaining = Number.isFinite(finalWindow.effectiveDeadlineMs) ? finalWindow.effectiveDeadlineMs - Date.now() : NaN;
   const expiresIn = Number.isFinite(msRemaining) ? formatRemaining(msRemaining) : null;
   const paymentLink = payment?.paymentLink ?? localPaymentLink(id);
   const bolt11 = source.lnInvoice ?? payment?.lnInvoice ?? null;
@@ -1528,7 +1603,10 @@ async function main(argv) {
       lnInvoice: bolt11 || null,
       payTo: guard.deposit.payTo,
       expiresAt,
-      expiresIn
+      expiresIn,
+      native,
+      exactOut: native || lightning,
+      quoteExpiresAt: native ? quoteExpiresAt : null
     } : null,
     depositWithheld: !confirmed,
     display: {
@@ -1539,9 +1617,16 @@ async function main(argv) {
       payToMasked: maskAddress(guard.deposit.payTo),
       receiverMemoMasked: maskMemo(source.receiverMemo),
       hasMemo: Boolean(source.receiverMemo),
-      memoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null
+      memoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
+      native,
+      priceLockedUntil: native ? quoteExpiresAt : null
     },
-    expiry: { expiresAt, expiresIn, minutesOfSlack: snap.sendWindow?.minutesOfSlack ?? null },
+    expiry: {
+      expiresAt,
+      expiresIn,
+      ...native ? { quoteExpiresAt } : {},
+      minutesOfSlack: snap.sendWindow?.minutesOfSlack ?? null
+    },
     note: confirmed ? "Send exactly once, exactly this amount, on this chain. Then: rozo-checkout status <id> --watch" : "Deposit address withheld. Confirm the chain, token and amount with the payer, then re-run with --confirm, or open paymentLink."
   });
 }

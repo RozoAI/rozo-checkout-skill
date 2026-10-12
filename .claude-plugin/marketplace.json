@@ -6,7 +6,7 @@
     {
       "name": "rozo-checkout",
       "source": "./",
-      "description": "Pay OpenRouter, or any Coinbase invoice, with the crypto you already hold: USDT/USDC on Solana, BNB Chain, Ethereum or Polygon, USDC on Base or Stellar, or BTC over Lightning. No Coinbase account needed.",
+      "description": "Pay OpenRouter, or any Coinbase invoice, with the crypto you already hold: USDT/USDC on Solana, BNB Chain, Ethereum, Polygon or Arbitrum, USDC on Base or Stellar, BTC over Lightning, or native ETH (Ethereum, Base, Arbitrum), BNB, SOL or POL. No Coinbase account needed.",
       "category": "payments",
       "homepage": "https://github.com/RozoAI/rozo-checkout-skill#readme",
       "license": "MIT"

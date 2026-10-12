@@ -3,8 +3,8 @@
 [English](../README.md) | [简体中文](README.zh.md) | **日本語** | [Español](README.es.md)
 
 **OpenRouter の Coinbase 決済リンク (Payment Link)** を、そのリンクが直接受け取れない
-通貨で支払います — Lightning 経由の BTC、または Solana、BNB Chain、Ethereum、
-Polygon、Base、Stellar 上の USDT/USDC です。Coinbase の決済リンクは Base 上の USDC しか
+通貨で支払います：Lightning 経由の BTC、Solana、BNB Chain、Ethereum、
+Polygon、Arbitrum、Base、Stellar 上の USDT/USDC、またはネイティブコイン（Ethereum・Base・Arbitrum の ETH、BNB、SOL、POL）です。Coinbase の決済リンクは Base 上の USDC しか
 受け付けません。本ツールは、あなたが実際に保有している通貨をブリッジ経由で中継し、
 資金提供ウォレット (funder wallet) があなたに代わってインボイスを決済します。
 アカウントも API キーもブラウザーも不要です。
@@ -31,12 +31,26 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 | Ethereum | `usdt-ethereum` `usdc-ethereum` | `1` | 小数点以下 6 桁 |
 | BNB Chain | `usdt-bnb` `usdc-bnb` | `56` | 小数点以下 18 桁 |
 | Polygon | `usdt-polygon` `usdc-polygon` | `137` | 小数点以下 6 桁 |
+| Arbitrum | `usdt-arbitrum` `usdc-arbitrum` | `42161` | 小数点以下 6 桁 |
 | Base | `usdc-base` | `8453` | 小数点以下 6 桁 |
-| Solana | `usdt-solana` `usdc-solana` | `900` | SPL。ネイティブの SOL は Web のみ（下記参照） |
+| Solana | `usdt-solana` `usdc-solana` | `900` | SPL |
 | Stellar | `usdc-stellar` | `1500` | `MEMO_TEXT` のメモが必須 — 入金ブロックに表示されます |
 | Bitcoin Lightning | `btc-lightning` | `lightning` | BOLT11。金額は satoshi 単位 |
 
-この CLI はネイティブコインとオンチェーンの BTC を受け付けません。ネイティブコインは Web の [checkout.rozo.ai](https://checkout.rozo.ai) で支払えます：Ethereum・Base・Arbitrum の ETH、BNB Chain の BNB、Solana の SOL、Polygon の POL（Beta）。オンチェーンの BTC はどの経路でも受け付けません。
+**ネイティブコイン**（それぞれ自分のチェーン上のみ）：
+
+| コイン | `--with` | チェーン id | 備考 |
+|---|---|---|---|
+| Ethereum の ETH | `eth-ethereum` | `1` | 小数点以下 18 桁（wei）。最低 $1 |
+| Base の ETH | `eth-base` | `8453` | 小数点以下 18 桁（wei） |
+| Arbitrum の ETH | `eth-arbitrum` | `42161` | 小数点以下 18 桁（wei） |
+| BNB | `bnb-bnb` または `bnb` | `56` | 小数点以下 18 桁 |
+| SOL | `sol-solana` または `sol` | `900` | 小数点以下 9 桁（lamports） |
+| POL | `pol-polygon` または `pol` | `137` | 小数点以下 18 桁 |
+
+ネイティブコインは、そのインボイスの見積もりに含まれている場合にのみ使えます（`quote` で確認できます）。上限は 1 件 $2,000 です。注文は Lightning と同じく**exact-out（受取額固定）**で、入金ブロックのコイン数量をそのまま正確に送ってください。価格は表示された時刻（約 1 時間）までしか固定されません。それを過ぎたら送らず、注文の期限切れを待って新しく作り直してください。コイン数量にはサービス手数料に加えて為替スプレッドが含まれます。ウォレットにはネットワーク手数料用に同じコインが少し余分に必要です。取引所から出金する場合は、着金額が全額になるよう、出金手数料が差し引かれないことを確認してください。`--send` もネイティブコインに対応しており、正確な数量の通常送金として送ります。
+
+オンチェーンの BTC と Tron には対応していません。
 
 ## どのウォレットが必要ですか？
 

@@ -3,8 +3,9 @@
 [English](../README.md) | [简体中文](README.zh.md) | [日本語](README.ja.md) | **Español**
 
 Pagar un **enlace de pago de Coinbase (Payment Link) de OpenRouter** con una
-moneda que ese enlace no puede aceptar directamente: BTC por Lightning, o
-USDT/USDC en Solana, BNB Chain, Ethereum, Polygon, Base o Stellar. Un enlace de
+moneda que ese enlace no puede aceptar directamente: BTC por Lightning,
+USDT/USDC en Solana, BNB Chain, Ethereum, Polygon, Arbitrum, Base o Stellar, o
+una moneda nativa: ETH en Ethereum, Base o Arbitrum, BNB, SOL o POL. Un enlace de
 pago de Coinbase solo acepta USDC en Base; esto enruta la moneda que realmente
 se posee a través de un puente, y una billetera fondeadora liquida la factura en
 nombre del usuario. Sin cuenta, sin clave de API, sin navegador.
@@ -32,12 +33,26 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 | Ethereum | `usdt-ethereum` `usdc-ethereum` | `1` | 6 decimales |
 | BNB Chain | `usdt-bnb` `usdc-bnb` | `56` | 18 decimales |
 | Polygon | `usdt-polygon` `usdc-polygon` | `137` | 6 decimales |
+| Arbitrum | `usdt-arbitrum` `usdc-arbitrum` | `42161` | 6 decimales |
 | Base | `usdc-base` | `8453` | 6 decimales |
-| Solana | `usdt-solana` `usdc-solana` | `900` | SPL; SOL nativo solo en la web (ver abajo) |
+| Solana | `usdt-solana` `usdc-solana` | `900` | SPL |
 | Stellar | `usdc-stellar` | `1500` | memo `MEMO_TEXT` obligatorio — se muestra en el bloque de depósito |
 | Bitcoin Lightning | `btc-lightning` | `lightning` | BOLT11; importes en satoshis |
 
-Esta CLI no acepta monedas nativas ni BTC on-chain. Las monedas nativas se pueden pagar en la web en [checkout.rozo.ai](https://checkout.rozo.ai): ETH en Ethereum, Base o Arbitrum, BNB en BNB Chain, SOL en Solana y POL en Polygon (Beta). El BTC on-chain no se acepta en ningún canal.
+**Monedas nativas**, cada una en su propia cadena:
+
+| Moneda | `--with` | Id de cadena | Notas |
+|---|---|---|---|
+| ETH en Ethereum | `eth-ethereum` | `1` | 18 decimales (wei); mínimo $1 |
+| ETH en Base | `eth-base` | `8453` | 18 decimales (wei) |
+| ETH en Arbitrum | `eth-arbitrum` | `42161` | 18 decimales (wei) |
+| BNB | `bnb-bnb` o `bnb` | `56` | 18 decimales |
+| SOL | `sol-solana` o `sol` | `900` | 9 decimales (lamports) |
+| POL | `pol-polygon` o `pol` | `137` | 18 decimales |
+
+Una moneda nativa solo se ofrece cuando la cotización de la factura la incluye (`quote` lo muestra), y solo para facturas de hasta $2,000. La orden es **exact-out**, como Lightning: envía exactamente la cantidad de moneda del bloque de depósito. Su precio queda fijado solo hasta la hora indicada (alrededor de una hora); pasada esa hora, no la envíes: deja que la orden expire y crea una nueva. La cantidad incluye un diferencial cambiario además de la comisión de servicio, y la billetera necesita un poco más de la misma moneda para la comisión de red. Si pagas desde un exchange, debe llegar la cantidad completa: comprueba que la comisión de retiro no se descuente de ella. `--send` también paga monedas nativas, como una transferencia normal de la cantidad exacta.
+
+El BTC on-chain y Tron no están soportados.
 
 ## ¿Qué wallet necesito?
 

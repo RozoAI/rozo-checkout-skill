@@ -3,8 +3,8 @@
 [English](QUICKSTART.md) | [简体中文](QUICKSTART.zh.md) | [日本語](QUICKSTART.ja.md) | **Español**
 
 Pagar un enlace de pago de Coinbase (Coinbase Payment Link) de OpenRouter con
-USDT/USDC en Solana, BNB Chain, Ethereum, Polygon, Base o Stellar, o con BTC por
-Lightning. Cinco minutos. Para saber cómo funciona y por qué, ver
+USDT/USDC en Solana, BNB Chain, Ethereum, Polygon, Arbitrum, Base o Stellar, con BTC por
+Lightning, o con una moneda nativa (ETH en Ethereum, Base o Arbitrum, BNB, SOL, POL). Cinco minutos. Para saber cómo funciona y por qué, ver
 [README.md](../README.md).
 
 ## El comando de una sola línea
@@ -26,9 +26,17 @@ npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLI
 ```
 
 Monedas para `--with`: `usdt-solana`, `usdc-solana`, `usdt-bnb`, `usdc-bnb`, `usdt-ethereum`,
-`usdc-ethereum`, `usdt-polygon`, `usdc-polygon`, `usdc-base`, `usdc-stellar`,
-`btc-lightning`. Los scripts y los agentes deben pasar siempre `--with`: el
-selector solo aparece en una terminal y no hay moneda por defecto.
+`usdc-ethereum`, `usdt-polygon`, `usdc-polygon`, `usdt-arbitrum`, `usdc-arbitrum`,
+`usdc-base`, `usdc-stellar`, `btc-lightning`, y las monedas nativas `eth-ethereum`,
+`eth-base`, `eth-arbitrum`, `bnb-bnb`, `sol-solana`, `pol-polygon`. Los scripts y
+los agentes deben pasar siempre `--with`: el selector solo aparece en una
+terminal y no hay moneda por defecto.
+
+Una moneda nativa solo se ofrece cuando la cotización de la factura la incluye,
+para facturas de hasta $2,000 (ETH nativo en Ethereum: mínimo $1). Es exact-out:
+envía exactamente la cantidad indicada antes de que termine el precio fijado
+(alrededor de una hora), y guarda un poco de la misma moneda para el gas. El BTC
+on-chain y Tron no están soportados.
 
 Por defecto solo imprime una dirección para pagar desde cualquier billetera: sin
 clave privada y sin configuración. Añadir `--send` únicamente si se quiere que la
@@ -55,7 +63,7 @@ LINK="https://payments.coinbase.com/payment-links/pl_01YOURLINKID"
 ```
 
 Ids de cadena: `1` Ethereum · `56` BNB Chain · `137` Polygon · `8453` Base ·
-`900` Solana · `1500` Stellar · `lightning` Bitcoin Lightning.
+`42161` Arbitrum · `900` Solana · `1500` Stellar · `lightning` Bitcoin Lightning.
 
 ## ¿Qué wallet necesito?
 

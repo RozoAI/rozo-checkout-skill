@@ -89,15 +89,27 @@ test('comparePayment: none / exact / underpaid / overpaid', () => {
   assert.equal(comparePayment({ ...unpaid.source, amountReceived: '0.000000' }).state, 'none');
 });
 
-test('supported source whitelist includes Lightning and excludes native SOL', () => {
+test('supported source whitelist: stablecoins, Lightning, Arbitrum and the native coins', () => {
   assert.ok(isSupportedSource('900', 'USDT'));
   assert.ok(isSupportedSource('900', 'usdc'));
-  assert.ok(!isSupportedSource('900', 'SOL'));
   assert.ok(isSupportedSource('lightning', 'BTC'));
   assert.ok(isSupportedSource('56', 'USDT'));
-  // Base and Stellar are USDC-only.
+  assert.ok(isSupportedSource('42161', 'USDC'));
+  assert.ok(isSupportedSource('42161', 'USDT'));
+  // Native coins, each on its own chain only.
+  for (const [cid, sym] of [['1', 'ETH'], ['8453', 'ETH'], ['42161', 'ETH'], ['56', 'BNB'], ['137', 'POL'], ['900', 'SOL']]) {
+    assert.ok(isSupportedSource(cid, sym), `${sym}@${cid}`);
+  }
+  assert.ok(!isSupportedSource('1', 'BNB'));
+  assert.ok(!isSupportedSource('137', 'ETH'));
+  assert.ok(!isSupportedSource('900', 'ETH'));
+  assert.ok(!isSupportedSource('1500', 'XLM'));
+  // Base and Stellar are USDC-only among stablecoins.
   assert.ok(!isSupportedSource('8453', 'USDT'));
   assert.ok(!isSupportedSource('1500', 'USDT'));
+  // On-chain BTC and Tron stay unsupported.
+  assert.ok(!isSupportedSource('0', 'BTC'));
+  assert.ok(!isSupportedSource('728126428', 'USDT'));
 });
 
 test('chain families', () => {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * send-sol.js — Mode B, Solana only (USDC / USDT SPL transfers).
+ * send-sol.js: Mode B, Solana only. USDC / USDT as SPL transfers, and native
+ * SOL as a System Program transfer of the exact lamports.
  *
  *   ROZO_CHECKOUT_SOL_KEY=<base58 secret key> \
  *     node scripts/dist/send-sol.js --rozo-payment-id <uuid> --send
@@ -28,7 +29,7 @@ import {
   publicHash,
 } from './lib/output.mjs';
 import { assertRozoPaymentId, maskAddress } from './lib/ids.mjs';
-import { chainName, decimalsFor } from './lib/amounts.mjs';
+import { chainName, decimalsFor, isNativeSource } from './lib/amounts.mjs';
 import { assertNoTrackedDotEnv } from './lib/keys.mjs';
 import { planKeySource, loadKeySource } from './lib/key-source.mjs';
 import { applyDotenv, envFileCandidates } from './lib/dotenv.mjs';
@@ -37,6 +38,8 @@ import { preflight, finalPayabilityCheck } from './lib/presend.mjs';
 import { claimSend, recordSendResult } from './lib/state.mjs';
 import { broadcastOutcome } from './lib/outcomes.mjs';
 import { solFeePrecheck } from './lib/gas.mjs';
+import { rpcFor } from './lib/rpc.mjs';
+import { prepareSolNativeSend, MEMO_PROGRAM_ID } from './lib/native-send.mjs';
 
 import {
   Connection,
@@ -52,7 +55,6 @@ import {
   getMint,
 } from './spl-lite.mjs';
 
-const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 const MAINNET_GENESIS = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
 
 const B58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -81,7 +83,7 @@ async function main(argv) {
   const keySource = loaded.label;
 
   const dryRun = Boolean(args['dry-run']);
-  const { source, state, expiry, amountAtomic, payment } = await preflight({
+  const { source, state, expiry, amountAtomic, payment, quoteExpiresAt } = await preflight({
     rozoPaymentId,
     expectFamily: 'solana',
     senderAddress: sender,
@@ -89,10 +91,7 @@ async function main(argv) {
     dryRun,
   });
 
-  const rpcUrl =
-    (args.rpc && args.rpc !== true && String(args.rpc)) ||
-    process.env.ROZO_CHECKOUT_RPC_900 ||
-    'https://api.mainnet-beta.solana.com';
+  const rpcUrl = rpcFor('900', args.rpc);
   const connection = new Connection(rpcUrl, 'confirmed');
 
   // Prove the RPC is Solana mainnet before signing anything.
@@ -109,109 +108,129 @@ async function main(argv) {
     );
   }
 
-  let mint;
-  try {
-    mint = new PublicKey(source.tokenAddress);
-  } catch {
-    throw new SkillError('NO_TOKEN_ADDRESS', 'The order did not carry a usable SPL mint address.');
-  }
-  let recipient;
-  try {
-    recipient = new PublicKey(source.receiverAddress);
-  } catch {
-    throw new SkillError('BAD_DEPOSIT_ADDRESS', 'The deposit address is not a valid Solana address.');
-  }
-
-  const mintInfo = await getMint(connection, mint);
-  const expectedDecimals = decimalsFor(source.chainId, source.tokenSymbol);
-  if (mintInfo.decimals !== expectedDecimals) {
-    throw new SkillError(
-      'DECIMALS_MISMATCH',
-      `Mint reports ${mintInfo.decimals} decimals, expected ${expectedDecimals} for ` +
-        `${source.tokenSymbol} on Solana. Refusing to sign.`,
-    );
-  }
-
-  const fromAta = await getAssociatedTokenAddress(mint, keypair.publicKey);
-  let fromAccount;
-  try {
-    fromAccount = await getAccount(connection, fromAta);
-  } catch {
-    throw new SkillError(
-      'NO_TOKEN_ACCOUNT',
-      `The sender has no ${source.tokenSymbol} token account on Solana.`,
-    );
-  }
-  if (fromAccount.amount < amountAtomic) {
-    throw new SkillError(
-      'INSUFFICIENT_BALANCE',
-      `Sender holds ${fromAccount.amount} atomic units; ${amountAtomic} are required.`,
-    );
-  }
-
-  // The backend hands out the recipient's TOKEN account for SPL deposits when
-  // it can; if it handed a wallet address, derive its ATA. Either way we
-  // transfer to a token account owned by that address.
-  let toAta;
+  const native = isNativeSource(source.chainId, source.tokenSymbol);
+  let tx;
+  let blockhash;
+  let lastValidBlockHeight;
+  let networkFee;
   let toIsTokenAccount = false;
-  try {
-    const acc = await getAccount(connection, recipient);
-    if (acc.mint.toBase58() !== mint.toBase58()) {
+
+  if (native) {
+    // Native SOL: a System Program transfer of the exact lamports to a plain
+    // wallet, with the payment itself counted in the fee precheck.
+    const prepared = await prepareSolNativeSend({
+      connection,
+      payer: keypair.publicKey,
+      recipientAddress: source.receiverAddress,
+      amountAtomic,
+      memo: source.receiverMemo ?? null,
+      tokenAddress: source.tokenAddress,
+    });
+    ({ tx, blockhash, lastValidBlockHeight, networkFee } = prepared);
+  } else {
+    let mint;
+    try {
+      mint = new PublicKey(source.tokenAddress);
+    } catch {
+      throw new SkillError('NO_TOKEN_ADDRESS', 'The order did not carry a usable SPL mint address.');
+    }
+    let recipient;
+    try {
+      recipient = new PublicKey(source.receiverAddress);
+    } catch {
+      throw new SkillError('BAD_DEPOSIT_ADDRESS', 'The deposit address is not a valid Solana address.');
+    }
+
+    const mintInfo = await getMint(connection, mint);
+    const expectedDecimals = decimalsFor(source.chainId, source.tokenSymbol);
+    if (mintInfo.decimals !== expectedDecimals) {
       throw new SkillError(
-        'DEPOSIT_ACCOUNT_MISMATCH',
-        'The deposit token account is for a different mint. Refusing to send.',
+        'DECIMALS_MISMATCH',
+        `Mint reports ${mintInfo.decimals} decimals, expected ${expectedDecimals} for ` +
+          `${source.tokenSymbol} on Solana. Refusing to sign.`,
       );
     }
-    toAta = recipient;
-    toIsTokenAccount = true;
-  } catch (err) {
-    if (err instanceof SkillError) throw err;
-    toAta = await getAssociatedTokenAddress(mint, recipient);
+
+    const fromAta = await getAssociatedTokenAddress(mint, keypair.publicKey);
+    let fromAccount;
     try {
-      await getAccount(connection, toAta);
+      fromAccount = await getAccount(connection, fromAta);
     } catch {
       throw new SkillError(
-        'DEPOSIT_ACCOUNT_MISSING',
-        'The deposit address has no token account for this mint. Refusing to create one on its ' +
-          'behalf — re-run create-order.js for fresh instructions.',
+        'NO_TOKEN_ACCOUNT',
+        `The sender has no ${source.tokenSymbol} token account on Solana.`,
       );
     }
-  }
+    if (fromAccount.amount < amountAtomic) {
+      throw new SkillError(
+        'INSUFFICIENT_BALANCE',
+        `Sender holds ${fromAccount.amount} atomic units; ${amountAtomic} are required.`,
+      );
+    }
 
-  const tx = new Transaction();
-  tx.add(
-    createTransferCheckedInstruction(
-      fromAta,
-      mint,
-      toAta,
-      keypair.publicKey,
-      amountAtomic,
-      mintInfo.decimals,
-    ),
-  );
-  if (source.receiverMemo) {
+    // The backend hands out the recipient's TOKEN account for SPL deposits when
+    // it can; if it handed a wallet address, derive its ATA. Either way we
+    // transfer to a token account owned by that address.
+    let toAta;
+    try {
+      const acc = await getAccount(connection, recipient);
+      if (acc.mint.toBase58() !== mint.toBase58()) {
+        throw new SkillError(
+          'DEPOSIT_ACCOUNT_MISMATCH',
+          'The deposit token account is for a different mint. Refusing to send.',
+        );
+      }
+      toAta = recipient;
+      toIsTokenAccount = true;
+    } catch (err) {
+      if (err instanceof SkillError) throw err;
+      toAta = await getAssociatedTokenAddress(mint, recipient);
+      try {
+        await getAccount(connection, toAta);
+      } catch {
+        throw new SkillError(
+          'DEPOSIT_ACCOUNT_MISSING',
+          'The deposit address has no token account for this mint. Refusing to create one on its ' +
+            'behalf — re-run create-order.js for fresh instructions.',
+        );
+      }
+    }
+
+    tx = new Transaction();
     tx.add(
-      new TransactionInstruction({
-        keys: [],
-        programId: MEMO_PROGRAM_ID,
-        data: Buffer.from(String(source.receiverMemo), 'utf8'),
-      }),
+      createTransferCheckedInstruction(
+        fromAta,
+        mint,
+        toAta,
+        keypair.publicKey,
+        amountAtomic,
+        mintInfo.decimals,
+      ),
     );
+    if (source.receiverMemo) {
+      tx.add(
+        new TransactionInstruction({
+          keys: [],
+          programId: MEMO_PROGRAM_ID,
+          data: Buffer.from(String(source.receiverMemo), 'utf8'),
+        }),
+      );
+    }
+
+    ({ blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed'));
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = keypair.publicKey;
+
+    // The SPL balance is not enough: the fee is paid in SOL. Check it on the
+    // exact message about to be signed, before claimSend. A broadcast that fails
+    // for want of SOL would otherwise lock this order against any further
+    // automated send.
+    networkFee = await solFeePrecheck({
+      connection,
+      payer: keypair.publicKey,
+      message: tx.compileMessage(),
+    });
   }
-
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-  tx.recentBlockhash = blockhash;
-  tx.feePayer = keypair.publicKey;
-
-  // The SPL balance is not enough: the fee is paid in SOL. Check it on the
-  // exact message about to be signed, before claimSend. A broadcast that fails
-  // for want of SOL would otherwise lock this order against any further
-  // automated send.
-  const networkFee = await solFeePrecheck({
-    connection,
-    payer: keypair.publicKey,
-    message: tx.compileMessage(),
-  });
 
   if (dryRun) {
     emit({
@@ -222,6 +241,9 @@ async function main(argv) {
       wouldSend: {
         chain: chainName(900),
         tokenSymbol: source.tokenSymbol,
+        native,
+        kind: native ? 'native SOL transfer' : 'SPL transfer',
+        priceLockedUntil: native ? quoteExpiresAt : null,
         amountAtomic: amountAtomic.toString(),
         amount: source.amount,
         toMasked: maskAddress(source.receiverAddress),
@@ -251,6 +273,7 @@ async function main(argv) {
     linkId: state.linkId,
     chainId: source.chainId,
     intentExpiresAt: payment?.expiresAt,
+    quoteExpiresAt,
     state,
     rozoPaymentId,
   });
@@ -262,6 +285,7 @@ async function main(argv) {
     {
       chainId: '900',
       tokenSymbol: source.tokenSymbol,
+      native,
       from: sender,
       to: source.receiverAddress,
       amountAtomic: amountAtomic.toString(),

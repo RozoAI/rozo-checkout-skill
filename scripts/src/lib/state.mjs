@@ -195,6 +195,8 @@ function createOrderRecordUnlocked(record) {
     amount: record.amount,
     amountUnit: record.amountUnit ?? null,
     expiresAt: record.expiresAt ?? null,
+    // Native coin orders only: the price lock the backend reported at create.
+    quoteExpiresAt: record.quoteExpiresAt ?? existing?.quoteExpiresAt ?? null,
     createdAt: existing?.createdAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     confirmation: existing?.confirmation ?? null,
@@ -228,7 +230,7 @@ export function depositDigest(source) {
  * Record that a human was shown the full deposit instructions and said yes
  * (PLAN §3 step 6b). This is what makes a later `--send` legitimate.
  */
-export function recordConfirmation(rozoPaymentId, { source, invoiceAmount, tier }) {
+export function recordConfirmation(rozoPaymentId, { source, invoiceAmount, tier, quoteExpiresAt = null }) {
   // Under the lock, for the same reason as createOrderRecord: an unlocked
   // read-modify-write here can clobber a send claim written concurrently.
   return withLock(() => {
@@ -244,6 +246,9 @@ export function recordConfirmation(rozoPaymentId, { source, invoiceAmount, tier 
         depositDigest: depositDigest(source),
         invoiceAmount: invoiceAmount ?? state.invoiceAmount ?? null,
         tier: tier ?? null,
+        // The native price lock the human was shown. A send never goes out
+        // after it, even if the backend later reports a later one.
+        quoteExpiresAt: quoteExpiresAt ?? null,
       },
     };
     writeAtomic(statePath(rozoPaymentId), next);
@@ -288,6 +293,7 @@ export function claimSend(rozoPaymentId, intent, { skipCaps = false } = {}) {
         claimedAt: new Date().toISOString(),
         chainId: intent.chainId,
         tokenSymbol: intent.tokenSymbol,
+        native: Boolean(intent.native),
         from: intent.from,
         to: intent.to,
         amountAtomic: intent.amountAtomic,

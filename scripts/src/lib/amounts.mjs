@@ -16,6 +16,7 @@ export const CHAIN_IDS = {
   bnb: '56',
   polygon: '137',
   base: '8453',
+  arbitrum: '42161',
   solana: '900',
   stellar: '1500',
   lightning: 'lightning',
@@ -26,6 +27,7 @@ export const CHAIN_NAMES = {
   56: 'BNB Chain',
   137: 'Polygon',
   8453: 'Base',
+  42161: 'Arbitrum',
   900: 'Solana',
   1500: 'Stellar',
   lightning: 'Bitcoin Lightning',
@@ -37,6 +39,7 @@ export const CHAIN_FAMILY = {
   56: 'evm',
   137: 'evm',
   8453: 'evm',
+  42161: 'evm',
   900: 'solana',
   1500: 'stellar',
   lightning: 'lightning',
@@ -45,16 +48,46 @@ export const CHAIN_FAMILY = {
 /**
  * Server-side source whitelist (PLAN §2). Lightning lives outside the
  * server's SUPPORTED_SOURCE payload, so we carry it locally (fix P1-13).
+ *
+ * Native coins (ETH, BNB, POL, SOL) are listed after the stablecoins on their
+ * chain. They are accepted here, but an order for one is only created when the
+ * router's quote-invoice lists it in `supportedSources` for that invoice (see
+ * nativeOfferFor), and only inside the native USD bounds.
  */
 export const SUPPORTED_SOURCES = [
-  { chainId: '1', chain: 'Ethereum', tokens: ['USDC', 'USDT'] },
-  { chainId: '56', chain: 'BNB Chain', tokens: ['USDC', 'USDT'] },
-  { chainId: '137', chain: 'Polygon', tokens: ['USDC', 'USDT'] },
-  { chainId: '900', chain: 'Solana', tokens: ['USDC', 'USDT'] },
-  { chainId: '8453', chain: 'Base', tokens: ['USDC'] },
+  { chainId: '1', chain: 'Ethereum', tokens: ['USDC', 'USDT', 'ETH'] },
+  { chainId: '56', chain: 'BNB Chain', tokens: ['USDC', 'USDT', 'BNB'] },
+  { chainId: '137', chain: 'Polygon', tokens: ['USDC', 'USDT', 'POL'] },
+  { chainId: '900', chain: 'Solana', tokens: ['USDC', 'USDT', 'SOL'] },
+  { chainId: '8453', chain: 'Base', tokens: ['USDC', 'ETH'] },
+  { chainId: '42161', chain: 'Arbitrum', tokens: ['USDC', 'USDT', 'ETH'] },
   { chainId: '1500', chain: 'Stellar', tokens: ['USDC'] },
   { chainId: 'lightning', chain: 'Bitcoin Lightning', tokens: ['BTC'] },
 ];
+
+/**
+ * The chain's own coin, keyed `${chainId}:${SYMBOL}`. A native order is
+ * exact-out like Lightning: source.amount is the exact coin amount to send, the
+ * price is locked only until quoteExpiresAt, and it is sent as a plain value
+ * transfer (EVM) or a System Program transfer (Solana), never as a token.
+ */
+export const NATIVE_COINS = Object.freeze({
+  '1:ETH': { chainId: '1', symbol: 'ETH', decimals: 18 },
+  '8453:ETH': { chainId: '8453', symbol: 'ETH', decimals: 18 },
+  '42161:ETH': { chainId: '42161', symbol: 'ETH', decimals: 18 },
+  '56:BNB': { chainId: '56', symbol: 'BNB', decimals: 18 },
+  '137:POL': { chainId: '137', symbol: 'POL', decimals: 18 },
+  '900:SOL': { chainId: '900', symbol: 'SOL', decimals: 9 },
+});
+
+/** Backend limit on one native order, in USD (rozo-intents-api MAX_NATIVE_PAYIN_USD). */
+export const NATIVE_MAX_USD = 2000;
+
+/**
+ * Fallback USD minimum per native coin, used only when the quote does not
+ * carry its own `nativeMinUsd`. Native ETH on Ethereum needs $1 because of gas.
+ */
+export const NATIVE_MIN_USD_FALLBACK = Object.freeze({ '1:ETH': 1 });
 
 /** Per-(chain, token) decimals. Keys are `${chainId}:${SYMBOL}`. */
 const DECIMALS = {
@@ -66,10 +99,20 @@ const DECIMALS = {
   '137:USDC': 6,
   '137:USDT': 6,
   '8453:USDC': 6,
+  // Arbitrum One: native USDC and USDT0 are both 6-decimals.
+  '42161:USDC': 6,
+  '42161:USDT': 6,
   '900:USDC': 6,
   '900:USDT': 6,
   // Stellar classic assets carry 7 decimal places.
   '1500:USDC': 7,
+  // Native coins: wei (18) on every EVM chain, lamports (9) on Solana.
+  '1:ETH': 18,
+  '8453:ETH': 18,
+  '42161:ETH': 18,
+  '56:BNB': 18,
+  '137:POL': 18,
+  '900:SOL': 9,
 };
 
 export class AmountError extends Error {
@@ -226,4 +269,100 @@ export function isSupportedSource(chainId, tokenSymbol) {
   const cid = String(chainId).trim();
   const sym = String(tokenSymbol || '').trim().toUpperCase();
   return SUPPORTED_SOURCES.some((s) => s.chainId === cid && s.tokens.includes(sym));
+}
+
+/** True when (chain, token) is the chain's own coin rather than a token. */
+export function isNativeSource(chainId, tokenSymbol) {
+  return Object.prototype.hasOwnProperty.call(NATIVE_COINS, decimalsKey(chainId, tokenSymbol));
+}
+
+/**
+ * Every spelling of "the chain's native coin" the backend uses as a
+ * tokenAddress: absent, the EVM zero address, the 0xEeee... sentinel, or
+ * "native" (Solana). Anything else on a native order is a contract or mint we
+ * did not expect, and the send scripts refuse it.
+ */
+const NATIVE_TOKEN_ADDRESSES = new Set([
+  '',
+  '0x0000000000000000000000000000000000000000',
+  '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+  'native',
+  '11111111111111111111111111111111',
+]);
+
+export function isNativeTokenAddress(tokenAddress) {
+  if (tokenAddress === null || tokenAddress === undefined) return true;
+  return NATIVE_TOKEN_ADDRESSES.has(String(tokenAddress).trim().toLowerCase());
+}
+
+/**
+ * USD minimum for a native coin on this invoice: the quote's own
+ * `nativeMinUsd` (shaped { "<chainId>": { "<SYMBOL>": number } }) when it says,
+ * else NATIVE_MIN_USD_FALLBACK, else null (no minimum known).
+ */
+export function nativeMinUsdFor(chainId, tokenSymbol, quoteNativeMinUsd) {
+  const cid = String(chainId).trim();
+  const sym = String(tokenSymbol || '').trim().toUpperCase();
+  const fromQuote = quoteNativeMinUsd?.[cid]?.[sym];
+  const n = Number(fromQuote);
+  if (fromQuote !== undefined && fromQuote !== null && Number.isFinite(n) && n > 0) return n;
+  return NATIVE_MIN_USD_FALLBACK[`${cid}:${sym}`] ?? null;
+}
+
+/**
+ * Is this native coin on offer for this invoice? It must be listed in the
+ * router's quote-invoice `supportedSources` ({ "<chainId>": ["USDC", "ETH"] })
+ * and the invoice must sit inside the native USD bounds. A missing or
+ * malformed supportedSources means "not offered": native coins are never
+ * assumed.
+ *
+ * @returns {{ok:boolean, code:string|null, reason:string|null, minUsd:number|null}}
+ */
+export function nativeOfferFor({ chainId, tokenSymbol, supportedSources, nativeMinUsd, callerPaysUsd }) {
+  const cid = String(chainId).trim();
+  const sym = String(tokenSymbol || '').trim().toUpperCase();
+  const label = `${sym} on ${chainName(cid)}`;
+  const minUsd = nativeMinUsdFor(cid, sym, nativeMinUsd);
+  if (!isNativeSource(cid, sym)) {
+    return { ok: false, code: 'NOT_NATIVE', reason: `${label} is not a native coin.`, minUsd: null };
+  }
+  const list = supportedSources && typeof supportedSources === 'object' ? supportedSources[cid] : null;
+  if (!Array.isArray(list) || !list.map((t) => String(t).toUpperCase()).includes(sym)) {
+    return {
+      ok: false,
+      code: 'NATIVE_NOT_OFFERED',
+      reason: `${label} is not offered for this invoice. Pay with USDC or USDT instead.`,
+      minUsd,
+    };
+  }
+  const usd = Number(callerPaysUsd);
+  // Without a USD amount the $2,000 cap and the minimum cannot be checked, so
+  // refuse the native coin rather than let the order through unchecked.
+  if (!Number.isFinite(usd) || usd <= 0) {
+    return {
+      ok: false,
+      code: 'NATIVE_AMOUNT_UNKNOWN',
+      reason: `The quote carries no USD amount, so ${label} cannot be checked against the native limits. Pay with USDC or USDT instead.`,
+      minUsd,
+    };
+  }
+  {
+    if (usd > NATIVE_MAX_USD) {
+      return {
+        ok: false,
+        code: 'NATIVE_AMOUNT_TOO_HIGH',
+        reason: `Native coin orders are limited to $${NATIVE_MAX_USD} per invoice; this one is $${usd}. Pay with USDC or USDT instead.`,
+        minUsd,
+      };
+    }
+    if (minUsd !== null && usd < minUsd) {
+      return {
+        ok: false,
+        code: 'NATIVE_AMOUNT_TOO_LOW',
+        reason: `${label} needs an invoice of at least $${minUsd}; this one is $${usd}. Pay with another coin.`,
+        minUsd,
+      };
+    }
+  }
+  return { ok: true, code: null, reason: null, minUsd };
 }

@@ -23,10 +23,10 @@
 import { parseArgs, emit, fail, usage, EXIT_UNCONFIRMED, EXIT_ERROR, publicHash } from './lib/output.mjs';
 import { isRozoPaymentId, maskAddress } from './lib/ids.mjs';
 import { invoiceStatus, getPayment } from './lib/api.mjs';
-import { chainName, formatAmount } from './lib/amounts.mjs';
+import { chainName, formatAmount, isNativeSource } from './lib/amounts.mjs';
 import { classifyStatus, checkPayable } from './lib/guards.mjs';
 import { SUPPORT } from './lib/support.mjs';
-import { formatRemaining, checkExpiry, lightningWatchMs, DEFAULT_WATCH_MS } from './lib/expiry.mjs';
+import { formatRemaining, checkExpiry, lightningWatchMs, DEFAULT_WATCH_MS, priceLockFor } from './lib/expiry.mjs';
 import { findByLinkId, readState } from './lib/state.mjs';
 import { providerFromPayment, earliestExpiry, intentBitrefillExpiry } from './lib/bitrefill.mjs';
 import { SCHEMA_VERSION, paymentOutcomeFor, nextActionFor } from './lib/receipt.mjs';
@@ -75,7 +75,7 @@ export function localSendFor(id, read = readState) {
  * Missing data fails closed. Lightning BOLT11 validity is checked by pay
  * itself before the invoice is shown and is not re-checked here.
  */
-export function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, now = Date.now() }) {
+export function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, quoteExpiresAt, now = Date.now() }) {
   if (provider === 'bitrefill') {
     const deadline = bitrefillExpiry ?? null;
     const expiry = checkExpiry({
@@ -98,6 +98,8 @@ export function sendWindowFor({ provider, chainId, payment, status, bitrefillExp
     chainId,
     intentExpiresAt: payment?.expiresAt ?? status?.rozoPayment?.expiresAt,
     coinbaseExpiry: status?.coinbase?.preApprovalExpiry,
+    // Native orders: the price lock is a deadline too (undefined otherwise).
+    ...(quoteExpiresAt !== undefined ? { quoteExpiresAt } : {}),
   });
   return expiry.ok
     ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 60000), deadlineMs: expiry.effectiveDeadlineMs }
@@ -166,6 +168,20 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
   });
 
   const source = payment?.source || status?.rozoPayment?.source || {};
+  const native = isNativeSource(source.chainId, source.tokenSymbol);
+  let localState = null;
+  try {
+    localState = id && isRozoPaymentId(id) ? readState(id) : null;
+  } catch {
+    localState = null;
+  }
+  // Native orders: the price lock (earliest of the live one and any this
+  // machine recorded). undefined for every other coin.
+  const quoteExpiresAt = priceLockFor({
+    native,
+    payment: payment || status?.rozoPayment || null,
+    others: [localState?.confirmation?.quoteExpiresAt, localState?.quoteExpiresAt],
+  });
 
   // Bitrefill: the invoice deadline is the only clock. Unknown → never call
   // the order payable; past → invoice_expired (unless money already moved).
@@ -234,10 +250,19 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
           : (payment?.expiresAt ?? status?.rozoPayment?.expiresAt ?? null);
       if (!iso) return { expiresAt: null, expiresIn: null, msRemaining: null };
       const ms = Date.parse(iso) - Date.now();
+      const lockMs = quoteExpiresAt ? Date.parse(quoteExpiresAt) - Date.now() : NaN;
       return {
         expiresAt: iso,
         expiresIn: formatRemaining(ms),
         msRemaining: Number.isFinite(ms) ? ms : null,
+        // Native orders: the order stays open after the price lock, but a
+        // payment after it is valued at the arrival price. Pay before this.
+        ...(native
+          ? {
+              quoteExpiresAt: quoteExpiresAt ?? null,
+              priceLockExpiresIn: Number.isFinite(lockMs) ? formatRemaining(lockMs) : null,
+            }
+          : {}),
       };
     })(),
     payout: {
@@ -248,7 +273,7 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
     localSend: localSendFor(id),
     sendWindow:
       state === 'awaiting_deposit'
-        ? sendWindowFor({ provider, chainId: source.chainId, payment, status, bitrefillExpiry })
+        ? sendWindowFor({ provider, chainId: source.chainId, payment, status, bitrefillExpiry, quoteExpiresAt })
         : null,
     errors: [statusError, paymentError].filter(Boolean),
   };
@@ -317,6 +342,11 @@ export function watchTimeoutMs(timeoutArg, result, now = Date.now()) {
   }
   if (result?.payin?.chain === chainName('lightning')) {
     return lightningWatchMs(result?.expiry?.expiresAt, { now, fallbackMs: DEFAULT_WATCH_MS });
+  }
+  // A native coin order, like Lightning, is exact-out against a deadline: watch
+  // for as long as its price lock lasts (at most 60 minutes).
+  if (result?.expiry?.quoteExpiresAt) {
+    return lightningWatchMs(result.expiry.quoteExpiresAt, { now, fallbackMs: DEFAULT_WATCH_MS });
   }
   return DEFAULT_WATCH_MS;
 }

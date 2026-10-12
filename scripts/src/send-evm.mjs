@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
- * send-evm.js — Mode B, EVM chains only (Ethereum, BNB Chain, Polygon, Base).
+ * send-evm.js: Mode B, EVM chains only (Ethereum, BNB Chain, Polygon, Base,
+ * Arbitrum). Pays an ERC-20 order with `transfer`, and a native coin order
+ * (ETH, BNB, POL) with a plain value transfer of the exact wei amount.
  *
  *   ROZO_CHECKOUT_EVM_KEY=0x... node scripts/dist/send-evm.js \
  *     --rozo-payment-id <uuid> --send
@@ -33,7 +35,7 @@ import {
   publicHash,
 } from './lib/output.mjs';
 import { assertRozoPaymentId, maskAddress } from './lib/ids.mjs';
-import { chainName, decimalsFor } from './lib/amounts.mjs';
+import { chainName, decimalsFor, isNativeSource } from './lib/amounts.mjs';
 import { assertNoTrackedDotEnv } from './lib/keys.mjs';
 import { planKeySource, loadKeySource } from './lib/key-source.mjs';
 import { applyDotenv, envFileCandidates } from './lib/dotenv.mjs';
@@ -41,7 +43,9 @@ import { promptPassphrase } from './lib/passphrase.mjs';
 import { preflight, finalPayabilityCheck } from './lib/presend.mjs';
 import { claimSend, recordSendResult } from './lib/state.mjs';
 import { broadcastOutcome } from './lib/outcomes.mjs';
-import { evmGasPrecheck, OP_STACK_CHAIN_IDS, OP_STACK_GAS_PRICE_ORACLE } from './lib/gas.mjs';
+import { evmGasPrecheck, OP_STACK_CHAIN_IDS, OP_STACK_GAS_PRICE_ORACLE, EVM_FEE_COIN } from './lib/gas.mjs';
+import { rpcFor } from './lib/rpc.mjs';
+import { prepareEvmNativeSend, assertPreparedNativeRequest } from './lib/native-send.mjs';
 import { estimateL1Fee } from 'viem/op-stack';
 
 import {
@@ -81,32 +85,15 @@ const ERC20_TRANSFER_ABI = [
   },
 ];
 
-const DEFAULT_RPC = {
-  1: 'https://eth.llamarpc.com',
-  56: 'https://bsc-dataseed.binance.org',
-  137: 'https://polygon-rpc.com',
-  8453: 'https://mainnet.base.org',
-};
-
-function rpcFor(chainId, override) {
-  if (override && override !== true) return String(override);
-  const env = process.env[`ROZO_CHECKOUT_RPC_${chainId}`];
-  if (env) return env;
-  const fallback = DEFAULT_RPC[String(chainId)];
-  if (!fallback) {
-    throw new SkillError(
-      'NO_RPC',
-      `No RPC known for chain ${chainId}. Pass --rpc <url> or set ROZO_CHECKOUT_RPC_${chainId}.`,
-    );
-  }
-  return fallback;
-}
-
 function chainDef(chainId, rpcUrl) {
   return defineChain({
     id: Number(chainId),
     name: chainName(chainId),
-    nativeCurrency: { name: 'Native', symbol: 'NATIVE', decimals: 18 },
+    nativeCurrency: {
+      name: EVM_FEE_COIN[Number(chainId)]?.symbol ?? 'Native',
+      symbol: EVM_FEE_COIN[Number(chainId)]?.symbol ?? 'NATIVE',
+      decimals: 18,
+    },
     rpcUrls: { default: { http: [rpcUrl] } },
   });
 }
@@ -133,7 +120,7 @@ async function main(argv) {
   const keySource = loaded.label;
 
   const dryRun = Boolean(args['dry-run']);
-  const { source, state, expiry, amountAtomic, payment } = await preflight({
+  const { source, state, expiry, amountAtomic, payment, quoteExpiresAt } = await preflight({
     rozoPaymentId,
     expectFamily: 'evm',
     senderAddress: sender,
@@ -142,8 +129,9 @@ async function main(argv) {
   });
 
   const chainId = Number(source.chainId);
+  const native = isNativeSource(source.chainId, source.tokenSymbol);
   const tokenAddress = source.tokenAddress;
-  if (!tokenAddress || !/^0x[0-9a-fA-F]{40}$/.test(tokenAddress)) {
+  if (!native && (!tokenAddress || !/^0x[0-9a-fA-F]{40}$/.test(tokenAddress))) {
     throw new SkillError('NO_TOKEN_ADDRESS', 'The order did not carry a usable ERC-20 address.');
   }
   const to = source.receiverAddress;
@@ -170,70 +158,98 @@ async function main(argv) {
     );
   }
 
-  // On-chain decimals must agree with our table (BNB Chain is 18, not 6).
-  let onChainDecimals;
-  try {
-    onChainDecimals = Number(
-      await pub.readContract({ address: tokenAddress, abi: ERC20_TRANSFER_ABI, functionName: 'decimals' }),
-    );
-  } catch (err) {
-    throw new SkillError('TOKEN_READ_FAILED', `Could not read token decimals: ${redact(err?.message)}`);
-  }
-  const expectedDecimals = decimalsFor(source.chainId, source.tokenSymbol);
-  if (onChainDecimals !== expectedDecimals) {
-    throw new SkillError(
-      'DECIMALS_MISMATCH',
-      `Token reports ${onChainDecimals} decimals but ${source.tokenSymbol} on ${chainName(chainId)} ` +
-        `is expected to have ${expectedDecimals}. Refusing to sign an amount that could be off by ` +
-        'orders of magnitude.',
-    );
-  }
-
-  let balance;
-  try {
-    balance = await pub.readContract({
-      address: tokenAddress,
-      abi: ERC20_TRANSFER_ABI,
-      functionName: 'balanceOf',
-      args: [sender],
-    });
-  } catch (err) {
-    throw new SkillError('TOKEN_READ_FAILED', `Could not read balance: ${redact(err?.message)}`);
-  }
-  if (balance < amountAtomic) {
-    throw new SkillError(
-      'INSUFFICIENT_BALANCE',
-      `Sender holds ${balance} atomic units of ${source.tokenSymbol} on ${chainName(chainId)}; ` +
-        `${amountAtomic} are required.`,
-    );
-  }
-
-  const data = encodeFunctionData({
-    abi: ERC20_TRANSFER_ABI,
-    functionName: 'transfer',
-    args: [to, amountAtomic],
-  });
-
-  // The token balance is not enough: the network fee is paid in the chain's
-  // native coin. Check it on the exact transfer about to be signed, before
-  // anything is signed or claimed, so a shortfall leaves the order untouched.
-  const networkFee = await evmGasPrecheck({
-    client: pub,
-    chainId,
-    from: sender,
-    to: tokenAddress,
-    data,
-    estimateL1Fee: OP_STACK_CHAIN_IDS.has(chainId)
+  // OP-stack chains (Base) also charge an L1 data fee; estimated on the exact
+  // transaction about to be signed.
+  const l1FeeFor = (tx) =>
+    OP_STACK_CHAIN_IDS.has(chainId)
       ? () =>
           estimateL1Fee(pub, {
             account: sender,
-            to: tokenAddress,
-            data,
+            ...tx,
             chain,
             gasPriceOracleAddress: OP_STACK_GAS_PRICE_ORACLE,
           })
-      : null,
-  });
+      : null;
+
+  // What gets signed: { to, data, value }. For an ERC-20 order, transfer() on
+  // the token with value 0. For a native order, the exact wei to the deposit
+  // address with no calldata.
+  let txRequest;
+  let networkFee;
+
+  if (native) {
+    // Balance (amount + fee, in the same coin) and the fee precheck happen on
+    // the exact value transfer, before anything is signed or claimed.
+    const prepared = await prepareEvmNativeSend({
+      client: pub,
+      chainId,
+      from: sender,
+      to,
+      amountAtomic,
+      tokenAddress,
+      tokenSymbol: source.tokenSymbol,
+      estimateL1Fee: l1FeeFor({ to, value: amountAtomic }),
+    });
+    txRequest = prepared.request;
+    networkFee = prepared.networkFee;
+  } else {
+    // On-chain decimals must agree with our table (BNB Chain is 18, not 6).
+    let onChainDecimals;
+    try {
+      onChainDecimals = Number(
+        await pub.readContract({ address: tokenAddress, abi: ERC20_TRANSFER_ABI, functionName: 'decimals' }),
+      );
+    } catch (err) {
+      throw new SkillError('TOKEN_READ_FAILED', `Could not read token decimals: ${redact(err?.message)}`);
+    }
+    const expectedDecimals = decimalsFor(source.chainId, source.tokenSymbol);
+    if (onChainDecimals !== expectedDecimals) {
+      throw new SkillError(
+        'DECIMALS_MISMATCH',
+        `Token reports ${onChainDecimals} decimals but ${source.tokenSymbol} on ${chainName(chainId)} ` +
+          `is expected to have ${expectedDecimals}. Refusing to sign an amount that could be off by ` +
+          'orders of magnitude.',
+      );
+    }
+
+    let balance;
+    try {
+      balance = await pub.readContract({
+        address: tokenAddress,
+        abi: ERC20_TRANSFER_ABI,
+        functionName: 'balanceOf',
+        args: [sender],
+      });
+    } catch (err) {
+      throw new SkillError('TOKEN_READ_FAILED', `Could not read balance: ${redact(err?.message)}`);
+    }
+    if (balance < amountAtomic) {
+      throw new SkillError(
+        'INSUFFICIENT_BALANCE',
+        `Sender holds ${balance} atomic units of ${source.tokenSymbol} on ${chainName(chainId)}; ` +
+          `${amountAtomic} are required.`,
+      );
+    }
+
+    const data = encodeFunctionData({
+      abi: ERC20_TRANSFER_ABI,
+      functionName: 'transfer',
+      args: [to, amountAtomic],
+    });
+
+    // The token balance is not enough: the network fee is paid in the chain's
+    // native coin. Check it on the exact transfer about to be signed, before
+    // anything is signed or claimed, so a shortfall leaves the order untouched.
+    networkFee = await evmGasPrecheck({
+      client: pub,
+      chainId,
+      from: sender,
+      to: tokenAddress,
+      data,
+      estimateL1Fee: l1FeeFor({ to: tokenAddress, data }),
+    });
+    txRequest = { to: tokenAddress, data, value: 0n };
+  }
 
   if (dryRun) {
     emit({
@@ -245,6 +261,9 @@ async function main(argv) {
         chainId,
         chain: chainName(chainId),
         tokenSymbol: source.tokenSymbol,
+        native,
+        kind: native ? 'native value transfer' : 'ERC-20 transfer',
+        priceLockedUntil: native ? quoteExpiresAt : null,
         amountAtomic: amountAtomic.toString(),
         amount: source.amount,
         toMasked: maskAddress(to),
@@ -265,11 +284,9 @@ async function main(argv) {
   // Sign first: this fixes the nonce and yields the transaction hash BEFORE
   // anything is broadcast, so an ambiguous send can be resolved by looking the
   // exact transaction up rather than by guessing from nonce arithmetic.
-  const request = await wallet.prepareTransactionRequest({
-    to: tokenAddress,
-    data,
-    value: 0n,
-  });
+  const request = await wallet.prepareTransactionRequest(txRequest);
+  // viem fills nonce, gas and fees; it must not have changed what is paid.
+  if (native) assertPreparedNativeRequest(request, { to, value: amountAtomic });
   const serialized = await wallet.signTransaction(request);
   const expectedTxHash = keccak256(serialized);
   const nonceBefore = Number(request.nonce);
@@ -280,6 +297,7 @@ async function main(argv) {
     linkId: state.linkId,
     chainId: source.chainId,
     intentExpiresAt: payment?.expiresAt,
+    quoteExpiresAt,
     state,
     rozoPaymentId,
   });
@@ -290,6 +308,7 @@ async function main(argv) {
     {
       chainId: String(chainId),
       tokenSymbol: source.tokenSymbol,
+      native,
       from: sender,
       to,
       amountAtomic: amountAtomic.toString(),

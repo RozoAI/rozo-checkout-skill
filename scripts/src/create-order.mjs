@@ -21,7 +21,10 @@
  *   5. reuse guard: unpaid + no txHash + no receipt + no confirmedAt,
  *      and the source must match what was asked for
  *                                     -> ORDER_ALREADY_FUNDED / REUSED_SOURCE_MISMATCH
- *   6. expiry margins on min(intent expiry, Coinbase expiry)  -> EXPIRY_MARGIN
+ *   1b. native coins only: the quote must offer the coin for this invoice
+ *      and the invoice must sit inside the native USD bounds   -> NATIVE_*
+ *   6. expiry margins on min(intent expiry, Coinbase expiry), and for a
+ *      native coin also its price lock (quoteExpiresAt)  -> EXPIRY_MARGIN / QUOTE_*
  *   7. blacklist check on the deposit address                 -> BLACKLIST_HIT
  *   8. payability revalidation immediately before exposing the address
  *                                                             -> LINK_NO_LONGER_PAYABLE
@@ -49,9 +52,12 @@ import {
   chainFamily,
   formatAmount,
   isSatsUnit,
+  isNativeSource,
+  nativeOfferFor,
   STELLAR_MEMO_TYPE,
 } from './lib/amounts.mjs';
-import { checkExpiry, formatRemaining } from './lib/expiry.mjs';
+import { checkExpiry, formatRemaining, priceLockFor } from './lib/expiry.mjs';
+import { nativeDepositWarnings } from './lib/native.mjs';
 import {
   reuseGuard,
   verifyCreateAgainstQuote,
@@ -59,7 +65,7 @@ import {
   normalizeMerchant,
 } from './lib/guards.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
-import { createOrderRecord, recordConfirmation } from './lib/state.mjs';
+import { createOrderRecord, recordConfirmation, readState } from './lib/state.mjs';
 import { SUPPORT, contactEmailFromArgs, contactEmailAttached } from './lib/support.mjs';
 
 function confirmTier(usdAmount) {
@@ -109,6 +115,31 @@ async function main(argv) {
   const quote = await quoteInvoice({ url: String(url) });
   const snapshot = snapshotFromQuote(quote);
   const quoteReceipt = quote?.quoteReceipt ?? null;
+
+  // --- 1b. native coin: offered for THIS invoice, inside the USD bounds ----
+  // Checked before create, so a refusal leaves nothing behind.
+  const native = isNativeSource(chainId, tokenSymbol);
+  if (native) {
+    const offer = nativeOfferFor({
+      chainId,
+      tokenSymbol,
+      supportedSources: quote?.supportedSources,
+      nativeMinUsd: quote?.nativeMinUsd,
+      callerPaysUsd: snapshot.callerPays ?? snapshot.original,
+    });
+    if (!offer.ok) {
+      emit(
+        {
+          success: false,
+          step: 'native-offer',
+          error: { code: offer.code, message: offer.reason },
+          linkId: snapshot.linkId ?? parsedLinkId,
+          guidance: 'Nothing was created. Choose USDC or USDT, or another coin the quote lists.',
+        },
+        EXIT_ERROR,
+      );
+    }
+  }
 
   // --- 2. create ----------------------------------------------------------
   const created = await createInvoice({
@@ -224,6 +255,21 @@ async function main(argv) {
   // --- 6. expiry margins --------------------------------------------------
   const lightning = String(source.chainId) === 'lightning';
   const bolt11 = source.lnInvoice ?? payment?.lnInvoice ?? null;
+  // Native: the price lock. The create response and the live GET both carry
+  // it; the earlier one wins, and none at all is a refusal.
+  // A re-run (reused order) also keeps any lock this machine already recorded
+  // or confirmed: a later lock from the backend never extends the window.
+  let prior = null;
+  try {
+    prior = native ? readState(rozoPaymentId) : null;
+  } catch {
+    prior = null;
+  }
+  const quoteExpiresAt = priceLockFor({
+    native,
+    payment,
+    others: [created?.quoteExpiresAt, prior?.quoteExpiresAt, prior?.confirmation?.quoteExpiresAt],
+  });
   const expiry = checkExpiry({
     now: Date.now(),
     chainId: source.chainId ?? chainId,
@@ -233,6 +279,7 @@ async function main(argv) {
     // separate expiry if the backend exposes one; otherwise the intent expiry
     // governs and we still require the 10-minute floor via the margin.
     ...(lightning ? { bolt11ExpiresAt: payment?.expiresAt } : {}),
+    ...(native ? { quoteExpiresAt } : {}),
   });
   if (!expiry.ok) {
     emit(
@@ -242,9 +289,11 @@ async function main(argv) {
         error: { code: expiry.code, message: expiry.reason, details: expiry },
         linkId: created.linkId ?? parsedLinkId,
         rozoPaymentId,
-        guidance:
-          'Not enough time remains to fund, bridge and settle safely. Ask the merchant for a ' +
-          'fresh link and start over. Do not fund this order.',
+        guidance: String(expiry.code).startsWith('QUOTE_')
+          ? 'The coin price lock for this order has run out, or is about to. Do not fund it. An ' +
+            'unfunded order costs nothing; once it has expired, run pay again for a fresh price.'
+          : 'Not enough time remains to fund, bridge and settle safely. Ask the merchant for a ' +
+            'fresh link and start over. Do not fund this order.',
       },
       EXIT_ERROR,
     );
@@ -308,6 +357,7 @@ async function main(argv) {
     amount: source.amount,
     amountUnit: source.amountUnit ?? null,
     expiresAt: payment?.expiresAt ?? null,
+    ...(native ? { quoteExpiresAt } : {}),
   });
 
   const usd = created.original ?? snapshot.original;
@@ -319,7 +369,12 @@ async function main(argv) {
   const depositInfo = guard.deposit;
 
   if (confirmed) {
-    recordConfirmation(rozoPaymentId, { source, invoiceAmount: usd, tier });
+    recordConfirmation(rozoPaymentId, {
+      source,
+      invoiceAmount: usd,
+      tier,
+      ...(native ? { quoteExpiresAt } : {}),
+    });
   }
 
   const memoRequirement = lightning
@@ -377,6 +432,11 @@ async function main(argv) {
           payTo: depositInfo.payTo,
           expiresAt: payment?.expiresAt ?? null,
           expiresIn: formatRemaining(expiry.msRemaining),
+          // Native coins are exact-out like Lightning: this exact coin amount,
+          // at a price locked only until quoteExpiresAt.
+          native,
+          exactOut: native || lightning,
+          quoteExpiresAt: native ? quoteExpiresAt : null,
         }
       : null,
     depositWithheld: !confirmed,
@@ -392,11 +452,16 @@ async function main(argv) {
       hasMemo: Boolean(source.receiverMemo),
       memoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
       memoRequirement,
+      native,
+      priceLockedUntil: native ? quoteExpiresAt : null,
+      // The bare decimal amount (not secret), for balance comparisons.
+      coinAmount: isSatsUnit(source.amountUnit) ? null : String(source.amount ?? ''),
     },
 
     expiry: {
       intentExpiresAt: payment?.expiresAt ?? null,
       coinbaseExpiry: snapshot?.coinbase?.preApprovalExpiry ?? null,
+      quoteExpiresAt: native ? quoteExpiresAt : null,
       effectiveDeadlineIso: new Date(expiry.effectiveDeadlineMs).toISOString(),
       // A duration, not just a timestamp: this is what a payer actually needs.
       expiresIn: formatRemaining(expiry.msRemaining),
@@ -418,6 +483,7 @@ async function main(argv) {
         memoRequirement,
         'Send exactly once. A second send to the same one-time address is not guaranteed to be credited.',
         'The deposit amount can exceed the invoice: it includes the bridge and network fees.',
+        ...(native ? nativeDepositWarnings({ tokenSymbol: source.tokenSymbol, chainId: source.chainId }) : []),
       ],
     },
 

@@ -6,6 +6,13 @@
  * where the margin must cover submission + confirmations + bridge + Coinbase
  * settlement on the chosen chain.
  *
+ * Native coin orders (ETH, BNB, POL, SOL) add a third deadline: the price
+ * lock, `quoteExpiresAt`. The order itself stays open for hours after it, but
+ * a payment that arrives after the lock is valued at the arrival price and can
+ * end up short. So for a native order the lock is part of the effective
+ * deadline, and a native order whose lock is missing is refused, not waved
+ * through.
+ *
  * Lightning is not margin-based in the same way: the BOLT11 expiry is just
  * another deadline, and we additionally require >= 10 minutes of BOLT11
  * validity. Inside that window the caller must ask the backend for a fresh
@@ -22,6 +29,7 @@ export const MARGINS_MS = {
   56: 10 * MINUTE,
   137: 10 * MINUTE,
   8453: 10 * MINUTE,
+  42161: 10 * MINUTE,
   900: 5 * MINUTE,
   1500: 10 * MINUTE,
   lightning: 10 * MINUTE,
@@ -64,8 +72,11 @@ export function lightningWatchMs(expiresAt, { now = Date.now(), fallbackMs = DEF
  */
 export function settlementWatchSeconds(opts, deposit, now = Date.now()) {
   const fallbackMs = Number(opts.timeout ?? 900) * 1000;
-  if (opts.timeoutExplicit || !deposit?.lnInvoice) return Math.round(fallbackMs / 1000);
-  return Math.ceil(lightningWatchMs(deposit.expiresAt, { now, fallbackMs }) / 1000);
+  if (opts.timeoutExplicit) return Math.round(fallbackMs / 1000);
+  // Exact-out orders: Lightning watches its invoice, a native coin its price lock.
+  const until = deposit?.lnInvoice ? deposit.expiresAt : deposit?.quoteExpiresAt;
+  if (!until) return Math.round(fallbackMs / 1000);
+  return Math.ceil(lightningWatchMs(until, { now, fallbackMs }) / 1000);
 }
 
 /** Whole minutes of validity left on a deadline, or null when unknown. 0 once expired. */
@@ -165,6 +176,9 @@ export function parseDeadline(value) {
  * @param {*} input.intentExpiresAt       payments/<id>.expiresAt
  * @param {*} input.coinbaseExpiry        Coinbase preApprovalExpiry
  * @param {*} [input.bolt11ExpiresAt]     Lightning only
+ * @param {*} [input.quoteExpiresAt]      native coin orders only: the price lock.
+ *                                        Pass it (even null) for every native
+ *                                        order; undefined means "not native".
  * @returns {{ok:boolean, code:string|null, reason:string|null, marginMs:number,
  *            effectiveDeadlineMs:number|null, msRemaining:number|null,
  *            msOfSlack:number|null, deadlines:object}}
@@ -175,13 +189,16 @@ export function checkExpiry({
   intentExpiresAt,
   coinbaseExpiry,
   bolt11ExpiresAt = undefined,
+  quoteExpiresAt = undefined,
 }) {
   const marginMs = marginFor(chainId);
   const intentMs = parseDeadline(intentExpiresAt);
   const coinbaseMs = parseDeadline(coinbaseExpiry);
   const bolt11Ms = bolt11ExpiresAt === undefined ? undefined : parseDeadline(bolt11ExpiresAt);
+  const native = quoteExpiresAt !== undefined;
+  const quoteMs = native ? parseDeadline(quoteExpiresAt) : null;
 
-  const deadlines = { intentMs, coinbaseMs, bolt11Ms: bolt11Ms ?? null };
+  const deadlines = { intentMs, coinbaseMs, bolt11Ms: bolt11Ms ?? null, quoteMs };
 
   const base = {
     marginMs,
@@ -207,8 +224,19 @@ export function checkExpiry({
       reason: 'Coinbase preApprovalExpiry is missing or unparsable.',
     };
   }
+  if (native && quoteMs === null) {
+    return {
+      ...base,
+      ok: false,
+      code: 'EXPIRY_UNPARSABLE',
+      reason:
+        'This native coin order carries no price lock (quoteExpiresAt), so the coin amount cannot ' +
+        'be trusted to be honoured. Refusing to treat it as payable.',
+    };
+  }
 
-  const effective = Math.min(intentMs, coinbaseMs);
+  const effective = native ? Math.min(intentMs, coinbaseMs, quoteMs) : Math.min(intentMs, coinbaseMs);
+  const lockBinds = native && quoteMs <= Math.min(intentMs, coinbaseMs);
   const msRemaining = effective - now;
   const msOfSlack = msRemaining - marginMs;
   const withDeadline = {
@@ -222,17 +250,22 @@ export function checkExpiry({
     return {
       ...withDeadline,
       ok: false,
-      code: 'EXPIRED',
-      reason: 'The order or the Coinbase link has already expired.',
+      code: lockBinds ? 'QUOTE_EXPIRED' : 'EXPIRED',
+      reason: lockBinds
+        ? 'The coin price for this order was locked until quoteExpiresAt, and that has passed. A ' +
+          'payment now would be valued at the price when it arrives and may fall short. Do not ' +
+          'send it; let the order expire unfunded and start a new one.'
+        : 'The order or the Coinbase link has already expired.',
     };
   }
   if (msOfSlack <= 0) {
     return {
       ...withDeadline,
       ok: false,
-      code: 'EXPIRY_MARGIN',
+      code: lockBinds ? 'QUOTE_EXPIRY_MARGIN' : 'EXPIRY_MARGIN',
       reason:
-        `Only ${Math.floor(msRemaining / 1000)}s left before the earliest deadline; ` +
+        `Only ${Math.floor(msRemaining / 1000)}s left before the earliest deadline` +
+        `${lockBinds ? ' (the coin price lock)' : ''}; ` +
         `this chain needs a ${Math.floor(marginMs / 60000)} min safety margin.`,
     };
   }
@@ -261,4 +294,27 @@ export function checkExpiry({
   }
 
   return { ...withDeadline, ok: true, code: null, reason: null };
+}
+
+/**
+ * The price-lock deadline to pass to checkExpiry as `quoteExpiresAt`.
+ *
+ * Returns undefined for a non-native order (no lock applies). For a native
+ * order it returns the EARLIEST parsable lock among the live payment
+ * (`quoteExpiresAt`, top level or on `source`) and any locally recorded one, or
+ * null when none is known, which checkExpiry treats as a refusal. A lock can
+ * only ever move earlier, never later.
+ *
+ * @param {object} args
+ * @param {boolean} args.native   is this a native coin order
+ * @param {object} [args.payment] payments/<id> response
+ * @param {...*} [args.others]    further candidate deadlines (ISO / epoch)
+ */
+export function priceLockFor({ native, payment = null, others = [] }) {
+  if (!native) return undefined;
+  const candidates = [payment?.quoteExpiresAt, payment?.source?.quoteExpiresAt, ...others]
+    .map(parseDeadline)
+    .filter((ms) => ms !== null);
+  if (!candidates.length) return null;
+  return new Date(Math.min(...candidates)).toISOString();
 }

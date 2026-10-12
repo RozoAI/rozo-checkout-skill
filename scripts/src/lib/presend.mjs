@@ -14,6 +14,9 @@
  *   CONFIRMATION_STALE -> live deposit data differs from what was confirmed
  *   DEPOSIT_CHANGED    -> live deposit address/amount differs from the record
  *   EXPIRY_MARGIN      -> not enough time left on this chain
+ *   QUOTE_EXPIRED / QUOTE_EXPIRY_MARGIN -> a native coin's price lock has run
+ *                         out, or is inside the margin (lock = the earlier of
+ *                         the live quoteExpiresAt and the one confirmed)
  *   LINK_NO_LONGER_PAYABLE / LINK_PAYABILITY_UNKNOWN -> Coinbase state
  *   BLACKLIST_UNAVAILABLE / BLACKLIST_HIT -> compromised-address rails
  *   CAP_PER_TX -> the single per-payment limit (charged at claim time)
@@ -24,10 +27,10 @@
 
 import { getPayment, invoiceStatus } from './api.mjs';
 import { reuseGuard, checkPayable, validateDepositInstructions } from './guards.mjs';
-import { checkExpiry } from './expiry.mjs';
+import { checkExpiry, priceLockFor } from './expiry.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './blacklist.mjs';
 import { readState, depositDigest } from './state.mjs';
-import { chainFamily } from './amounts.mjs';
+import { chainFamily, isNativeSource } from './amounts.mjs';
 import { SkillError } from './output.mjs';
 import { verifyBitrefillDestination, checkBitrefillExpiry } from './bitrefill.mjs';
 
@@ -44,6 +47,22 @@ function assertBitrefillLive(state, payment) {
   const expiry = checkBitrefillExpiry(state.bitrefill.expiresAt, Date.now());
   if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
   return expiry;
+}
+
+/**
+ * The price lock a send must respect for this order: undefined when the order
+ * is not a native coin, else the EARLIEST of the live quoteExpiresAt and the
+ * lock recorded when the order was created and confirmed (null when none is
+ * known, which checkExpiry refuses). The lock a human confirmed can only make
+ * the window shorter, never longer.
+ */
+export function sendPriceLock(payment, state) {
+  const source = payment?.source || {};
+  return priceLockFor({
+    native: isNativeSource(source.chainId, source.tokenSymbol),
+    payment,
+    others: [state?.confirmation?.quoteExpiresAt, state?.quoteExpiresAt],
+  });
 }
 
 /**
@@ -172,14 +191,19 @@ export async function preflight({
   let statusNow = null;
   let expiry;
   if (state.provider === 'bitrefill') {
+    if (isNativeSource(source.chainId, source.tokenSymbol)) {
+      throw new SkillError('NATIVE_NOT_AVAILABLE', 'Native coins are not available for Bitrefill invoices.');
+    }
     expiry = assertBitrefillLive(state, payment);
   } else {
     statusNow = await invoiceStatus({ linkId: state.linkId });
+    const quoteExpiresAt = sendPriceLock(payment, state);
     expiry = checkExpiry({
       now: Date.now(),
       chainId: source.chainId,
       intentExpiresAt: payment?.expiresAt,
       coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry,
+      ...(quoteExpiresAt !== undefined ? { quoteExpiresAt } : {}),
     });
     if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
 
@@ -208,6 +232,7 @@ export async function preflight({
     amountAtomic: deposit.amountAtomic,
     deposit,
     statusNow,
+    quoteExpiresAt: sendPriceLock(payment, state),
   };
 }
 
@@ -219,8 +244,18 @@ export async function preflight({
  * by another payer in that window. Both send scripts call this immediately
  * before they broadcast.
  */
-export async function finalPayabilityCheck({ linkId, chainId, intentExpiresAt, state = null, rozoPaymentId = null }) {
+export async function finalPayabilityCheck({
+  linkId,
+  chainId,
+  intentExpiresAt,
+  quoteExpiresAt = undefined,
+  state = null,
+  rozoPaymentId = null,
+}) {
   if (state?.provider === 'bitrefill') {
+    if (isNativeSource(state?.source?.chainId, state?.source?.tokenSymbol)) {
+      throw new SkillError('NATIVE_NOT_AVAILABLE', 'Native coins are not available for Bitrefill invoices.');
+    }
     // No Coinbase resource to re-read. Re-prove instead that the intent is
     // still unpaid and unfunded, and that the invoice has not run out.
     const id = rozoPaymentId ?? state.rozoPaymentId;
@@ -242,6 +277,8 @@ export async function finalPayabilityCheck({ linkId, chainId, intentExpiresAt, s
     chainId,
     intentExpiresAt,
     coinbaseExpiry: statusNow?.coinbase?.preApprovalExpiry,
+    // Native orders: the price lock, re-checked as the very last gate too.
+    ...(quoteExpiresAt !== undefined ? { quoteExpiresAt } : {}),
   });
   if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
 
