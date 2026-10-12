@@ -1671,7 +1671,17 @@ async function main(argv) {
   }
   const lightning = String(source.chainId) === "lightning";
   const bolt11 = source.lnInvoice ?? payment?.lnInvoice ?? null;
-  const quoteExpiresAt = priceLockFor({ native, payment, others: [created?.quoteExpiresAt] });
+  let prior = null;
+  try {
+    prior = native ? readState(rozoPaymentId) : null;
+  } catch {
+    prior = null;
+  }
+  const quoteExpiresAt = priceLockFor({
+    native,
+    payment,
+    others: [created?.quoteExpiresAt, prior?.quoteExpiresAt, prior?.confirmation?.quoteExpiresAt]
+  });
   const expiry = checkExpiry({
     now: Date.now(),
     chainId: source.chainId ?? chainId,

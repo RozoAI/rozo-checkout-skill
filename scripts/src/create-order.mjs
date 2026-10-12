@@ -65,7 +65,7 @@ import {
   normalizeMerchant,
 } from './lib/guards.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
-import { createOrderRecord, recordConfirmation } from './lib/state.mjs';
+import { createOrderRecord, recordConfirmation, readState } from './lib/state.mjs';
 import { SUPPORT, contactEmailFromArgs, contactEmailAttached } from './lib/support.mjs';
 
 function confirmTier(usdAmount) {
@@ -257,7 +257,19 @@ async function main(argv) {
   const bolt11 = source.lnInvoice ?? payment?.lnInvoice ?? null;
   // Native: the price lock. The create response and the live GET both carry
   // it; the earlier one wins, and none at all is a refusal.
-  const quoteExpiresAt = priceLockFor({ native, payment, others: [created?.quoteExpiresAt] });
+  // A re-run (reused order) also keeps any lock this machine already recorded
+  // or confirmed: a later lock from the backend never extends the window.
+  let prior = null;
+  try {
+    prior = native ? readState(rozoPaymentId) : null;
+  } catch {
+    prior = null;
+  }
+  const quoteExpiresAt = priceLockFor({
+    native,
+    payment,
+    others: [created?.quoteExpiresAt, prior?.quoteExpiresAt, prior?.confirmation?.quoteExpiresAt],
+  });
   const expiry = checkExpiry({
     now: Date.now(),
     chainId: source.chainId ?? chainId,

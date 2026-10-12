@@ -826,3 +826,27 @@ test('resume: the payment countdown is the earliest deadline, not the price lock
     assert.equal(payload.expiry.quoteExpiresAt, new Date(payment.quoteExpiresAt).toISOString());
   });
 });
+
+test('create: re-confirming a reused native order never extends a recorded price lock', async () => {
+  const early = inMin(40);
+  let payment = nativePayment({ quoteExpiresAt: early });
+  await withHttp(
+    [
+      ['/quote-invoice', () => json(quoteBody())],
+      ['/create-invoice', () => json(createBody(payment, { reused: true }))],
+      [`/payments/${ID}`, () => json(payment)],
+      ['/invoice-status', () => json(invoiceStatusBody())],
+    ],
+    async () => {
+      assert.equal((await capture(() => runCreateOrder([...createArgs(), '--confirm']))).exitCode, 0);
+      // The backend now reports a later lock for the same order.
+      payment = nativePayment({ quoteExpiresAt: inMin(90) });
+      const again = await capture(() => runCreateOrder([...createArgs(), '--confirm']));
+      assert.equal(again.exitCode, 0, JSON.stringify(again.payload));
+      const want = new Date(early).toISOString();
+      assert.equal(again.payload.deposit.quoteExpiresAt, want);
+      assert.equal(readState(ID).quoteExpiresAt, want);
+      assert.equal(readState(ID).confirmation.quoteExpiresAt, want);
+    },
+  );
+});
