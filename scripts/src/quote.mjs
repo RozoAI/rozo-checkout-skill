@@ -14,7 +14,14 @@
 import { parseArgs, emit, fail, usage, EXIT_ERROR, SkillError } from './lib/output.mjs';
 import { extractLinkId } from './lib/ids.mjs';
 import { quoteInvoice, snapshotFromQuote } from './lib/api.mjs';
-import { SUPPORTED_SOURCES, isSupportedSource, chainName } from './lib/amounts.mjs';
+import {
+  SUPPORTED_SOURCES,
+  NATIVE_COINS,
+  isSupportedSource,
+  isNativeSource,
+  nativeOfferFor,
+  chainName,
+} from './lib/amounts.mjs';
 import { parseDeadline } from './lib/expiry.mjs';
 import { normalizeDecimal } from './lib/guards.mjs';
 
@@ -92,6 +99,32 @@ async function main(argv) {
   const snapshot = snapshotFromQuote(quote);
   const payability = derivePayable(snapshot, now);
 
+  // Native coins on offer for THIS invoice: listed by the router's
+  // supportedSources and inside the native USD bounds. Never assumed.
+  const nativeOffered = Object.values(NATIVE_COINS)
+    .map((c) => ({
+      chainId: c.chainId,
+      tokenSymbol: c.symbol,
+      chain: chainName(c.chainId),
+      offer: nativeOfferFor({
+        chainId: c.chainId,
+        tokenSymbol: c.symbol,
+        supportedSources: quote?.supportedSources,
+        nativeMinUsd: quote?.nativeMinUsd,
+        callerPaysUsd: snapshot.callerPays ?? snapshot.original,
+      }),
+    }))
+    .filter((c) => c.offer.ok)
+    .map((c) => ({ chainId: c.chainId, tokenSymbol: c.tokenSymbol, chain: c.chain, minUsd: c.offer.minUsd }));
+  const nativeRequested = chosenSource && isNativeSource(chosenSource.chainId, chosenSource.tokenSymbol)
+    ? nativeOfferFor({
+        ...chosenSource,
+        supportedSources: quote?.supportedSources,
+        nativeMinUsd: quote?.nativeMinUsd,
+        callerPaysUsd: snapshot.callerPays ?? snapshot.original,
+      })
+    : null;
+
   const payload = {
     success: payability.payable,
     step: 'quote',
@@ -110,6 +143,14 @@ async function main(argv) {
     coinbaseExpiryIso: payability.expiryMs ? new Date(payability.expiryMs).toISOString() : null,
     chosenSource,
     supportedSources: SUPPORTED_SOURCES,
+    // The router's own per-invoice list ({ chainId: [symbols] }), verbatim,
+    // and the native coins it makes payable for this invoice.
+    routerSupportedSources:
+      quote?.supportedSources && typeof quote.supportedSources === 'object' ? quote.supportedSources : null,
+    nativeOffered,
+    nativeNote:
+      'Native coins are exact-out: the coin amount is fixed at order creation and its price is ' +
+      'locked only until quoteExpiresAt. Up to $2,000 per invoice; native ETH on Ethereum needs $1.',
     quoteReceipt: quote?.quoteReceipt ?? null,
     quoteReceiptTtlSeconds: 60,
     quoteReceiptNote:
@@ -122,6 +163,12 @@ async function main(argv) {
 
   if (!payability.payable) {
     payload.error = { code: payability.code, message: payability.reason };
+    emit(payload, EXIT_ERROR);
+  }
+  if (nativeRequested && !nativeRequested.ok) {
+    payload.success = false;
+    payload.nextStep = null;
+    payload.error = { code: nativeRequested.code, message: nativeRequested.reason };
     emit(payload, EXIT_ERROR);
   }
 

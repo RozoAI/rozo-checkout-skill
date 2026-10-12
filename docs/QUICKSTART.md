@@ -3,7 +3,8 @@
 **English** | [简体中文](QUICKSTART.zh.md) | [日本語](QUICKSTART.ja.md) | [Español](QUICKSTART.es.md)
 
 Pay an OpenRouter Coinbase Payment Link with USDT/USDC on Solana, BNB Chain,
-Ethereum, Polygon, Base or Stellar, or with BTC over Lightning. Five minutes.
+Ethereum, Polygon, Arbitrum, Base or Stellar, with BTC over Lightning, or with a
+native coin (ETH on Ethereum, Base or Arbitrum, BNB, SOL, POL). Five minutes.
 For how it works and why, see [README.md](../README.md).
 
 ## The one-liner
@@ -25,9 +26,16 @@ npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLI
 ```
 
 Coins for `--with`: `usdt-solana`, `usdc-solana`, `usdt-bnb`, `usdc-bnb`,
-`usdt-ethereum`, `usdc-ethereum`, `usdt-polygon`, `usdc-polygon`, `usdc-base`,
-`usdc-stellar`, `btc-lightning`. Scripts and agents must pass `--with`: the
-picker only appears on a terminal, and there is no default coin.
+`usdt-ethereum`, `usdc-ethereum`, `usdt-polygon`, `usdc-polygon`,
+`usdt-arbitrum`, `usdc-arbitrum`, `usdc-base`, `usdc-stellar`, `btc-lightning`,
+and the native coins `eth-ethereum`, `eth-base`, `eth-arbitrum`, `bnb-bnb`,
+`sol-solana`, `pol-polygon`. Scripts and agents must pass `--with`: the picker
+only appears on a terminal, and there is no default coin.
+
+A native coin is offered only when the invoice's quote lists it, for invoices up
+to $2,000 (native ETH on Ethereum: $1 minimum). It is exact-out: send exactly
+the coin amount shown, before its price lock ends (about an hour), and keep a
+little of the same coin for gas. On-chain BTC and Tron are not supported.
 
 By default it just prints an address for you to pay from any wallet — no key
 and no configuration needed. Add `--send` only if you want the CLI to sign
@@ -52,7 +60,7 @@ LINK="https://payments.coinbase.com/payment-links/pl_01YOURLINKID"
 ```
 
 Chain ids: `1` Ethereum · `56` BNB Chain · `137` Polygon · `8453` Base ·
-`900` Solana · `1500` Stellar · `lightning` Bitcoin Lightning.
+`42161` Arbitrum · `900` Solana · `1500` Stellar · `lightning` Bitcoin Lightning.
 
 ## Which wallet do I need?
 

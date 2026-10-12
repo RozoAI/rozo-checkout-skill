@@ -9,7 +9,8 @@ Base. This skill pays them from whatever you hold instead, and it does three
 things the official path cannot:
 
 - **Pay from the chain you are already on.** USDT or USDC on Solana, BNB Chain,
-  Ethereum or Polygon, USDC on Base or Stellar, or BTC over Lightning. Coinbase's
+  Ethereum, Polygon or Arbitrum, USDC on Base or Stellar, BTC over Lightning, or
+  a native coin: ETH on Ethereum, Base or Arbitrum, BNB, SOL or POL. Coinbase's
   own direct pay takes USDC on Base.
 - **No Coinbase account.** Pay the deposit address from any wallet or straight
   from an exchange withdrawal. No sign-up, no API key, no browser.
@@ -61,12 +62,34 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 | Ethereum | `usdt-ethereum` `usdc-ethereum` | `1` | 6 decimals |
 | BNB Chain | `usdt-bnb` `usdc-bnb` | `56` | 18 decimals |
 | Polygon | `usdt-polygon` `usdc-polygon` | `137` | 6 decimals |
+| Arbitrum | `usdt-arbitrum` `usdc-arbitrum` | `42161` | 6 decimals |
 | Base | `usdc-base` | `8453` | 6 decimals |
-| Solana | `usdt-solana` `usdc-solana` | `900` | SPL; native SOL on the web only (see below) |
+| Solana | `usdt-solana` `usdc-solana` | `900` | SPL |
 | Stellar | `usdc-stellar` | `1500` | `MEMO_TEXT` memo required — shown in the deposit block |
 | Bitcoin Lightning | `btc-lightning` | `lightning` | BOLT11; amounts in satoshis. Any wallet that can pay an invoice works, including Cashu/ecash wallets — the mint melts your ecash into the Lightning payment. |
 
-This CLI does not take native coins or on-chain BTC. Native coins can be paid on the web at [checkout.rozo.ai](https://checkout.rozo.ai) instead: ETH on Ethereum, Base or Arbitrum, BNB on BNB Chain, SOL on Solana, and POL on Polygon (Beta). On-chain BTC is not accepted anywhere.
+**Native coins**, each on its own chain:
+
+| Coin | `--with` | Chain id | Notes |
+|---|---|---|---|
+| ETH on Ethereum | `eth-ethereum` | `1` | 18 decimals (wei); $1 minimum |
+| ETH on Base | `eth-base` | `8453` | 18 decimals (wei) |
+| ETH on Arbitrum | `eth-arbitrum` | `42161` | 18 decimals (wei) |
+| BNB | `bnb-bnb` or `bnb` | `56` | 18 decimals |
+| SOL | `sol-solana` or `sol` | `900` | 9 decimals (lamports) |
+| POL | `pol-polygon` or `pol` | `137` | 18 decimals |
+
+A native coin is offered only when the invoice's quote lists it (`quote` shows
+which), and only for invoices up to $2,000. The order is **exact-out**, like
+Lightning: send exactly the coin amount in the deposit block. Its price is
+locked only until the time shown (about an hour); after that, do not send it,
+let the order expire and start a new one. The coin amount includes an FX spread
+on top of the service fee, and your wallet needs a little more of the same coin
+for the network fee. If you pay from an exchange, the amount that arrives must
+be the full amount: check that the withdrawal fee is not taken out of it.
+`--send` pays native coins too, as a plain transfer of the exact amount.
+
+On-chain BTC and Tron are not supported.
 
 ## Which wallet do I need?
 
@@ -88,8 +111,8 @@ already hold and pay from wherever it already lives.
   route settles against ROZO's own Lightning node rather than a third-party
   swap, so no special handling is needed on our side.
 - **Only `--send` needs a private key**, read from `ROZO_CHECKOUT_EVM_KEY` or
-  `ROZO_CHECKOUT_SOL_KEY`, and it covers EVM chains and Solana only. Everything
-  else is keyless.
+  `ROZO_CHECKOUT_SOL_KEY`, and it covers EVM chains and Solana only (their
+  native coins included). Everything else is keyless.
 
 ## Use it from your agent
 
@@ -168,7 +191,8 @@ ROZO_CHECKOUT_EVM_KEYSTORE=/replace/me/keystores/my-hot-wallet
 # are prompted instead, and nothing is stored.
 ROZO_CHECKOUT_KEYSTORE_PASSPHRASE=REPLACE_ME_not_a_real_passphrase
 
-# Optional RPC overrides, one per chain id. 8453 = Base, 900 = Solana.
+# Optional RPC overrides, one per chain id. 8453 = Base, 42161 = Arbitrum,
+# 900 = Solana.
 ROZO_CHECKOUT_RPC_8453=https://mainnet.base.org
 ROZO_CHECKOUT_RPC_900=https://api.mainnet-beta.solana.com
 ```
@@ -437,10 +461,12 @@ done < links.txt
   Lightning: `deposit.lnInvoice` (the BOLT11) for `deposit.amount` sats. Other
   coins: `deposit.receiverAddress` and `deposit.amount`, plus
   `deposit.receiverMemo` on Stellar. `--send` cannot pay Lightning or Stellar.
+  A native coin order has `deposit.native: true` and `deposit.exactOut: true`.
 - The deadline to watch is `order.expiry.effectiveDeadlineIso`, not
   `deposit.expiresAt`: it is the earlier of our order expiry and the Coinbase
-  link expiry. Stop paying at least `order.expiry.marginMinutes` before it,
-  since settlement needs that much time.
+  link expiry, and for a native coin also its price lock
+  (`deposit.quoteExpiresAt`). Stop paying at least `order.expiry.marginMinutes`
+  before it, since settlement needs that much time.
 - If time has passed since you created the order, do not pay saved deposit
   details blindly. Re-run the same `pay` command (same `--with`): while the
   order is still payable it re-checks the link and the deadline and hands back
@@ -485,7 +511,9 @@ layers. Delivery is always `unknown`: Rozo cannot see your OpenRouter credits.
 
 With `--send`, the wallet must also hold the chain's fee coin (ETH, BNB, POL or
 SOL). If it does not, the CLI stops with `INSUFFICIENT_GAS` before signing and
-tells you how much is missing; the order is left untouched.
+tells you how much is missing; the order is left untouched. Paying with a native
+coin spends that same coin, so the wallet needs the order amount plus the fee.
+A native order is never sent after its price lock (`QUOTE_EXPIRED`).
 
 **Retrying without paying twice.** Running `pay` again on the same link does
 not create a second order while its order is open: you get the same order

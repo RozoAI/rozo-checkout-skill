@@ -22,10 +22,10 @@
 import { parseArgs, emit, usage, EXIT_OK, EXIT_ERROR, SkillError, publicPayPage } from './lib/output.mjs';
 import { isRozoPaymentId, maskAddress, maskMemo } from './lib/ids.mjs';
 import { getPayment } from './lib/api.mjs';
-import { chainName, chainFamily, formatAmount, isSatsUnit, STELLAR_MEMO_TYPE } from './lib/amounts.mjs';
+import { chainName, chainFamily, formatAmount, isSatsUnit, isNativeSource, STELLAR_MEMO_TYPE } from './lib/amounts.mjs';
 import { reuseGuard } from './lib/guards.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
-import { formatRemaining, checkExpiry } from './lib/expiry.mjs';
+import { formatRemaining, checkExpiry, priceLockFor } from './lib/expiry.mjs';
 import { readState } from './lib/state.mjs';
 import { SUPPORT } from './lib/support.mjs';
 import { snapshot, statusGuidance, EXPIRED_UNFUNDED_GUIDANCE } from './status.mjs';
@@ -200,11 +200,15 @@ async function main(argv) {
   // payment we are about to show: its deadline may be earlier, or the clock
   // may have crossed the safety margin in between. The earlier snapshot
   // deadline (Coinbase / Bitrefill) still bounds it.
+  // Native coins: the price lock, from this fresh read and the snapshot's.
+  const native = isNativeSource(source.chainId, source.tokenSymbol);
+  const quoteExpiresAt = priceLockFor({ native, payment, others: [snap.expiry?.quoteExpiresAt] });
   const finalWindow = checkExpiry({
     now: Date.now(),
     chainId: source.chainId,
     intentExpiresAt: payment?.expiresAt ?? snap.sendWindow?.deadlineMs,
     coinbaseExpiry: snap.sendWindow?.deadlineMs,
+    ...(native ? { quoteExpiresAt } : {}),
   });
   if (!finalWindow.ok) {
     emit(
@@ -247,7 +251,10 @@ async function main(argv) {
   }
 
   const expiresAt = payment?.expiresAt ?? snap.expiry?.expiresAt ?? null;
-  const msRemaining = expiresAt ? Date.parse(expiresAt) - Date.now() : NaN;
+  // What the payer must beat: for a native coin the price lock, which ends
+  // long before the order itself.
+  const payBy = native ? quoteExpiresAt : expiresAt;
+  const msRemaining = payBy ? Date.parse(payBy) - Date.now() : NaN;
   const expiresIn = Number.isFinite(msRemaining) ? formatRemaining(msRemaining) : null;
   const paymentLink = payment?.paymentLink ?? localPaymentLink(id);
   const bolt11 = source.lnInvoice ?? payment?.lnInvoice ?? null;
@@ -282,6 +289,9 @@ async function main(argv) {
           payTo: guard.deposit.payTo,
           expiresAt,
           expiresIn,
+          native,
+          exactOut: native || lightning,
+          quoteExpiresAt: native ? quoteExpiresAt : null,
         }
       : null,
     depositWithheld: !confirmed,
@@ -294,8 +304,15 @@ async function main(argv) {
       receiverMemoMasked: maskMemo(source.receiverMemo),
       hasMemo: Boolean(source.receiverMemo),
       memoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
+      native,
+      priceLockedUntil: native ? quoteExpiresAt : null,
     },
-    expiry: { expiresAt, expiresIn, minutesOfSlack: snap.sendWindow?.minutesOfSlack ?? null },
+    expiry: {
+      expiresAt,
+      expiresIn,
+      ...(native ? { quoteExpiresAt } : {}),
+      minutesOfSlack: snap.sendWindow?.minutesOfSlack ?? null,
+    },
     note: confirmed
       ? 'Send exactly once, exactly this amount, on this chain. Then: rozo-checkout status <id> --watch'
       : 'Deposit address withheld. Confirm the chain, token and amount with the payer, then re-run with --confirm, or open paymentLink.',

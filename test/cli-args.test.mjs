@@ -16,6 +16,7 @@ import {
   CHAIN_ALIASES,
   HELP,
   PICKER_OPTIONS,
+  pickerOptionsFor,
   resolvePickerChoice,
 } from '../scripts/src/lib/cli-args.mjs';
 import { isSupportedSource } from '../scripts/src/lib/amounts.mjs';
@@ -33,6 +34,14 @@ test('presets map to exactly the right chain and token', () => {
     'usdc-polygon': { chainId: '137', tokenSymbol: 'USDC' },
     'usdc-stellar': { chainId: '1500', tokenSymbol: 'USDC' },
     'btc-lightning': { chainId: 'lightning', tokenSymbol: 'BTC' },
+    'usdc-arbitrum': { chainId: '42161', tokenSymbol: 'USDC' },
+    'usdt-arbitrum': { chainId: '42161', tokenSymbol: 'USDT' },
+    'eth-ethereum': { chainId: '1', tokenSymbol: 'ETH' },
+    'eth-base': { chainId: '8453', tokenSymbol: 'ETH' },
+    'eth-arbitrum': { chainId: '42161', tokenSymbol: 'ETH' },
+    'bnb-bnb': { chainId: '56', tokenSymbol: 'BNB' },
+    'sol-solana': { chainId: '900', tokenSymbol: 'SOL' },
+    'pol-polygon': { chainId: '137', tokenSymbol: 'POL' },
   };
   for (const [preset, want] of Object.entries(expected)) {
     assert.deepEqual(resolvePreset(preset), want, preset);
@@ -46,6 +55,24 @@ test('chain aliases resolve to the same chain as their canonical name', () => {
   assert.deepEqual(resolvePreset('usdt-matic'), resolvePreset('usdt-polygon'));
   assert.deepEqual(resolvePreset('btc-ln'), resolvePreset('btc-lightning'));
   assert.deepEqual(resolvePreset('usdc-xlm'), resolvePreset('usdc-stellar'));
+  assert.deepEqual(resolvePreset('usdc-arb'), resolvePreset('usdc-arbitrum'));
+  assert.deepEqual(resolvePreset('eth-arb'), resolvePreset('eth-arbitrum'));
+  assert.deepEqual(resolvePreset('eth-eth'), resolvePreset('eth-ethereum'));
+  assert.deepEqual(resolvePreset('bnb-bsc'), resolvePreset('bnb-bnb'));
+  assert.deepEqual(resolvePreset('sol-sol'), resolvePreset('sol-solana'));
+  assert.deepEqual(resolvePreset('pol-matic'), resolvePreset('pol-polygon'));
+});
+
+test('single-chain native coins have a one-word shortcut; ETH does not', () => {
+  assert.deepEqual(resolvePreset('bnb'), { chainId: '56', tokenSymbol: 'BNB' });
+  assert.deepEqual(resolvePreset('SOL'), { chainId: '900', tokenSymbol: 'SOL' });
+  assert.deepEqual(resolvePreset(' pol '), { chainId: '137', tokenSymbol: 'POL' });
+  // ETH lives on three chains: guessing one would be a way to lose money.
+  assert.throws(() => resolvePreset('eth'), (e) => e.code === 'BAD_PRESET' && /eth-ethereum, eth-base or eth-arbitrum/.test(e.message));
+  // --with goes through the same resolver.
+  assert.deepEqual(parseCliArgs(['pay', 'pl_01ABC', '--with', 'sol']).source, { chainId: '900', tokenSymbol: 'SOL' });
+  assert.deepEqual(parseCliArgs(['pay', 'pl_01ABC', '--with', 'eth-base']).source, { chainId: '8453', tokenSymbol: 'ETH' });
+  assert.deepEqual(parseCliArgs(['pay', 'pl_01ABC', '--chain', '42161', '--token', 'eth']).source, { chainId: '42161', tokenSymbol: 'ETH' });
 });
 
 test('presets are case- and whitespace-insensitive', () => {
@@ -72,9 +99,15 @@ test('unsupported and malformed presets are refused, never guessed', () => {
   // Real chain, wrong token for it.
   assert.throws(() => resolvePreset('usdt-base'), (e) => e.code === 'UNSUPPORTED_SOURCE');
   assert.throws(() => resolvePreset('usdt-stellar'), (e) => e.code === 'UNSUPPORTED_SOURCE');
-  // Native gas coins are not payable.
-  assert.throws(() => resolvePreset('sol-solana'), (e) => e.code === 'UNSUPPORTED_SOURCE');
-  assert.throws(() => resolvePreset('eth-ethereum'), (e) => e.code === 'UNSUPPORTED_SOURCE');
+  // A native coin only on its own chain.
+  assert.throws(() => resolvePreset('sol-ethereum'), (e) => e.code === 'UNSUPPORTED_SOURCE');
+  assert.throws(() => resolvePreset('eth-polygon'), (e) => e.code === 'UNSUPPORTED_SOURCE');
+  assert.throws(() => resolvePreset('bnb-base'), (e) => e.code === 'UNSUPPORTED_SOURCE');
+  assert.throws(() => resolvePreset('usdt-base'), (e) => e.code === 'UNSUPPORTED_SOURCE');
+  // On-chain BTC and Tron are not supported.
+  // ("btc-bitcoin" is an alias for Lightning, the only BTC rail.)
+  assert.deepEqual(resolvePreset('btc-bitcoin'), { chainId: 'lightning', tokenSymbol: 'BTC' });
+  assert.throws(() => resolvePreset('usdt-tron'), (e) => e.code === 'BAD_PRESET');
   // Unknown chain.
   assert.throws(() => resolvePreset('usdc-avalanche'), (e) => e.code === 'BAD_PRESET');
   // Malformed.
@@ -86,7 +119,7 @@ test('unsupported and malformed presets are refused, never guessed', () => {
 test('every alias points at a chain the amounts table knows', () => {
   for (const [alias, chainId] of Object.entries(CHAIN_ALIASES)) {
     assert.ok(
-      ['1', '56', '137', '8453', '900', '1500', 'lightning'].includes(chainId),
+      ['1', '56', '137', '8453', '42161', '900', '1500', 'lightning'].includes(chainId),
       `alias ${alias} -> ${chainId}`,
     );
   }
@@ -193,24 +226,38 @@ test('picker: the menu covers every supported combo exactly once', () => {
     PICKER_OPTIONS.map((o) => o.number),
     PICKER_OPTIONS.map((_, i) => i + 1),
   );
-  // Grouped by coin: USDT block, then USDC, then BTC.
-  assert.deepEqual([...new Set(PICKER_OPTIONS.map((o) => o.token))], ['USDT', 'USDC', 'BTC']);
+  // Grouped: USDT block, then USDC, then BTC, then the native coins.
+  assert.deepEqual([...new Set(PICKER_OPTIONS.map((o) => o.group))], ['USDT', 'USDC', 'BTC', 'Native coins']);
+  // Native rows are flagged and name their coin.
+  for (const o of PICKER_OPTIONS) {
+    assert.equal(o.native, o.group === 'Native coins', o.preset);
+    if (o.native) assert.match(o.label, new RegExp(`^${o.tokenSymbol} on `));
+  }
 });
 
-test('picker: numbers map to the right chain and token', () => {
+test('picker: numbers map to the right chain and token (full menu)', () => {
   const expected = {
     1: { chainId: '900', tokenSymbol: 'USDT', preset: 'usdt-solana' },
     2: { chainId: '56', tokenSymbol: 'USDT', preset: 'usdt-bnb' },
     3: { chainId: '1', tokenSymbol: 'USDT', preset: 'usdt-ethereum' },
     4: { chainId: '137', tokenSymbol: 'USDT', preset: 'usdt-polygon' },
-    5: { chainId: '900', tokenSymbol: 'USDC', preset: 'usdc-solana' },
-    6: { chainId: '56', tokenSymbol: 'USDC', preset: 'usdc-bnb' },
-    7: { chainId: '1', tokenSymbol: 'USDC', preset: 'usdc-ethereum' },
-    8: { chainId: '137', tokenSymbol: 'USDC', preset: 'usdc-polygon' },
-    9: { chainId: '8453', tokenSymbol: 'USDC', preset: 'usdc-base' },
-    10: { chainId: '1500', tokenSymbol: 'USDC', preset: 'usdc-stellar' },
-    11: { chainId: 'lightning', tokenSymbol: 'BTC', preset: 'btc-lightning' },
+    5: { chainId: '42161', tokenSymbol: 'USDT', preset: 'usdt-arbitrum' },
+    6: { chainId: '900', tokenSymbol: 'USDC', preset: 'usdc-solana' },
+    7: { chainId: '56', tokenSymbol: 'USDC', preset: 'usdc-bnb' },
+    8: { chainId: '1', tokenSymbol: 'USDC', preset: 'usdc-ethereum' },
+    9: { chainId: '137', tokenSymbol: 'USDC', preset: 'usdc-polygon' },
+    10: { chainId: '8453', tokenSymbol: 'USDC', preset: 'usdc-base' },
+    11: { chainId: '42161', tokenSymbol: 'USDC', preset: 'usdc-arbitrum' },
+    12: { chainId: '1500', tokenSymbol: 'USDC', preset: 'usdc-stellar' },
+    13: { chainId: 'lightning', tokenSymbol: 'BTC', preset: 'btc-lightning' },
+    14: { chainId: '8453', tokenSymbol: 'ETH', preset: 'eth-base' },
+    15: { chainId: '1', tokenSymbol: 'ETH', preset: 'eth-ethereum' },
+    16: { chainId: '42161', tokenSymbol: 'ETH', preset: 'eth-arbitrum' },
+    17: { chainId: '56', tokenSymbol: 'BNB', preset: 'bnb-bnb' },
+    18: { chainId: '900', tokenSymbol: 'SOL', preset: 'sol-solana' },
+    19: { chainId: '137', tokenSymbol: 'POL', preset: 'pol-polygon' },
   };
+  assert.equal(Object.keys(expected).length, PICKER_OPTIONS.length);
   for (const [n, want] of Object.entries(expected)) {
     assert.deepEqual(resolvePickerChoice(n), want, `choice ${n}`);
     assert.deepEqual(resolvePickerChoice(Number(n)), want, `choice ${n} as a number`);
@@ -219,12 +266,30 @@ test('picker: numbers map to the right chain and token', () => {
   assert.deepEqual(resolvePickerChoice('  1  '), expected[1]);
 });
 
+test('picker: native coins show only when the quote offers them, numbers stay contiguous', () => {
+  // No predicate: no native coin is ever assumed.
+  const plain = pickerOptionsFor();
+  assert.equal(plain.length, 13);
+  assert.ok(plain.every((o) => !o.native));
+  assert.deepEqual(plain.map((o) => o.number), plain.map((_, i) => i + 1));
+  assert.throws(() => resolvePickerChoice('14', plain), (e) => e.code === 'BAD_CHOICE');
+
+  // The quote offers Base ETH and SOL only.
+  const offered = new Set(['8453:ETH', '900:SOL']);
+  const some = pickerOptionsFor((cid, sym) => offered.has(`${cid}:${sym}`));
+  assert.deepEqual(some.filter((o) => o.native).map((o) => o.preset), ['eth-base', 'sol-solana']);
+  assert.deepEqual(some.map((o) => o.number), some.map((_, i) => i + 1));
+  assert.deepEqual(resolvePickerChoice('14', some), { chainId: '8453', tokenSymbol: 'ETH', preset: 'eth-base' });
+  assert.deepEqual(resolvePickerChoice('15', some), { chainId: '900', tokenSymbol: 'SOL', preset: 'sol-solana' });
+  assert.throws(() => resolvePickerChoice('16', some), (e) => e.code === 'BAD_CHOICE');
+});
+
 test('picker: out-of-range and junk input are refused, never guessed', () => {
-  for (const bad of ['0', '12', '99', '-1', '', '   ', null, undefined]) {
+  for (const bad of ['0', '20', '99', '-1', '', '   ', null, undefined]) {
     assert.throws(() => resolvePickerChoice(bad), CliError, JSON.stringify(bad));
   }
   assert.throws(() => resolvePickerChoice('0'), (e) => e.code === 'BAD_CHOICE');
-  assert.throws(() => resolvePickerChoice('12'), (e) => e.code === 'BAD_CHOICE');
+  assert.throws(() => resolvePickerChoice('20'), (e) => e.code === 'BAD_CHOICE');
   // A typed preset name still works, for anyone who knows it already.
   assert.deepEqual(resolvePickerChoice('usdt-solana'), {
     chainId: '900',

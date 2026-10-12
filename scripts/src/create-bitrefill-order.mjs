@@ -30,6 +30,7 @@ import { createBitrefillInvoice, getPayment } from './lib/api.mjs';
 import {
   SUPPORTED_SOURCES,
   isSupportedSource,
+  isNativeSource,
   chainName,
   chainFamily,
   formatAmount,
@@ -81,6 +82,15 @@ async function main(argv) {
     throw new SkillError('UNSUPPORTED_SOURCE', `${tokenSymbol} on ${chainName(chainId)} is not a supported source.`, {
       supported: SUPPORTED_SOURCES,
     });
+  }
+  // A Bitrefill invoice has no quote step, so there is no per-invoice
+  // supportedSources to prove a native coin is offered. Stablecoins only.
+  if (isNativeSource(chainId, tokenSymbol)) {
+    throw new SkillError(
+      'NATIVE_NOT_AVAILABLE',
+      `${tokenSymbol} on ${chainName(chainId)} is a native coin, and native coins are not available ` +
+        'for Bitrefill invoices. Pay with USDC, USDT or BTC over Lightning.',
+    );
   }
   const requested = { chainId, tokenSymbol };
   const confirmed = Boolean(args.confirm);

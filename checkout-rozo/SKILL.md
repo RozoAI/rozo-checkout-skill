@@ -2,9 +2,10 @@
 name: checkout-rozo
 description: >
   Alias for the `rozo-checkout` skill. Triggers on "checkout-rozo" and
-  "/checkout-rozo". Pay an OpenRouter Coinbase Payment Link with BTC Lightning
-  or USDT/USDC on Solana, BNB Chain, Ethereum, Polygon, Base or Stellar, or
-  pay a Bitrefill invoice ("pay bitrefill", "bitrefill invoice").
+  "/checkout-rozo". Pay an OpenRouter Coinbase Payment Link with BTC Lightning,
+  USDT/USDC on Solana, BNB Chain, Ethereum, Polygon, Arbitrum, Base or Stellar,
+  or a native coin (ETH on Ethereum, Base or Arbitrum, BNB, SOL, POL), or pay a
+  Bitrefill invoice ("pay bitrefill", "bitrefill invoice").
 metadata:
   version: 1.0.0
 ---

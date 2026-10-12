@@ -3,7 +3,7 @@
 [English](QUICKSTART.md) | [简体中文](QUICKSTART.zh.md) | **日本語** | [Español](QUICKSTART.es.md)
 
 OpenRouter の Coinbase 決済リンク (Payment Link) を、Solana、BNB Chain、
-Ethereum、Polygon、Base、Stellar 上の USDT/USDC、または Lightning 経由の BTC で支払います。所要 5 分。
+Ethereum、Polygon、Arbitrum、Base、Stellar 上の USDT/USDC、Lightning 経由の BTC、またはネイティブコイン（Ethereum・Base・Arbitrum の ETH、BNB、SOL、POL）で支払います。所要 5 分。
 仕組みと設計意図については [README.md](../README.md) を参照してください。
 
 ## ワンライナー
@@ -25,9 +25,14 @@ npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLI
 
 `--with` に指定できる通貨: `usdt-solana`、
 `usdc-solana`、`usdt-bnb`、`usdc-bnb`、`usdt-ethereum`、`usdc-ethereum`、
-`usdt-polygon`、`usdc-polygon`、`usdc-base`、`usdc-stellar`、`btc-lightning`。
+`usdt-polygon`、`usdc-polygon`、`usdt-arbitrum`、`usdc-arbitrum`、`usdc-base`、`usdc-stellar`、`btc-lightning`、
+ネイティブコインの `eth-ethereum`、`eth-base`、`eth-arbitrum`、`bnb-bnb`、`sol-solana`、`pol-polygon`。
 スクリプトやエージェントでは必ず `--with` を渡してください。対話式の選択は端末でのみ
 表示され、既定の通貨はありません。
+
+ネイティブコインは、インボイスの見積もりに含まれている場合のみ使えます（上限 $2,000、Ethereum の ETH は最低 $1）。
+受取額固定（exact-out）なので、表示された数量を価格固定の期限（約 1 時間）までに正確に送り、ガス代として同じコインを少し残してください。
+オンチェーンの BTC と Tron には対応していません。
 
 既定では、任意のウォレットから支払うためのアドレスを表示するだけです — 鍵も設定も
 不要です。CLI にホットウォレットから署名させたい場合にだけ `--send` を、機械可読な
@@ -52,7 +57,7 @@ LINK="https://payments.coinbase.com/payment-links/pl_01YOURLINKID"
 ```
 
 チェーン id: `1` Ethereum · `56` BNB Chain · `137` Polygon · `8453` Base ·
-`900` Solana · `1500` Stellar · `lightning` Bitcoin Lightning。
+`42161` Arbitrum · `900` Solana · `1500` Stellar · `lightning` Bitcoin Lightning。
 
 ## どのウォレットが必要ですか？
 

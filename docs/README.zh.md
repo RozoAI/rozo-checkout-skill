@@ -3,8 +3,8 @@
 [English](../README.md) | **简体中文** | [日本語](README.ja.md) | [Español](README.es.md)
 
 用一种 **OpenRouter Coinbase 收款链接 (Payment Link)** 本身收不了的币去付款 —— 走
-闪电网络的 BTC，或者 Solana、BNB Chain、Ethereum、Polygon、Base、Stellar 上的
-USDT/USDC。Coinbase 收款链接只接受 Base 上的 USDC；本工具把你实际持有的币通过
+闪电网络的 BTC，Solana、BNB Chain、Ethereum、Polygon、Arbitrum、Base、Stellar 上的
+USDT/USDC，或者原生币：Ethereum、Base、Arbitrum 上的 ETH，以及 BNB、SOL、POL。Coinbase 收款链接只接受 Base 上的 USDC；本工具把你实际持有的币通过
 一座桥路由过去，再由一个出资钱包代你结清账单。无需账号、无需 API key、无需浏览器。
 
 ```bash
@@ -28,12 +28,26 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 | Ethereum | `usdt-ethereum` `usdc-ethereum` | `1` | 6 位小数 |
 | BNB Chain | `usdt-bnb` `usdc-bnb` | `56` | 18 位小数 |
 | Polygon | `usdt-polygon` `usdc-polygon` | `137` | 6 位小数 |
+| Arbitrum | `usdt-arbitrum` `usdc-arbitrum` | `42161` | 6 位小数 |
 | Base | `usdc-base` | `8453` | 6 位小数 |
-| Solana | `usdt-solana` `usdc-solana` | `900` | SPL；原生 SOL 仅限网页版（见下） |
+| Solana | `usdt-solana` `usdc-solana` | `900` | SPL |
 | Stellar | `usdc-stellar` | `1500` | 必须带 `MEMO_TEXT` memo —— 会在充值信息块里给出 |
 | Bitcoin Lightning | `btc-lightning` | `lightning` | BOLT11；金额单位为聪 |
 
-本 CLI 不接受原生币和链上 BTC。原生币可以在网页版 [checkout.rozo.ai](https://checkout.rozo.ai) 支付：Ethereum、Base 或 Arbitrum 上的 ETH，BNB Chain 上的 BNB，Solana 上的 SOL，以及 Polygon 上的 POL（Beta）。链上 BTC 任何渠道都不接受。
+**原生币**，各自只在自己的链上：
+
+| 币 | `--with` | 链 id | 备注 |
+|---|---|---|---|
+| Ethereum 上的 ETH | `eth-ethereum` | `1` | 18 位小数（wei）；最低 $1 |
+| Base 上的 ETH | `eth-base` | `8453` | 18 位小数（wei） |
+| Arbitrum 上的 ETH | `eth-arbitrum` | `42161` | 18 位小数（wei） |
+| BNB | `bnb-bnb` 或 `bnb` | `56` | 18 位小数 |
+| SOL | `sol-solana` 或 `sol` | `900` | 9 位小数（lamports） |
+| POL | `pol-polygon` 或 `pol` | `137` | 18 位小数 |
+
+只有当这张账单的报价列出某个原生币时才能用它（`quote` 会显示），且账单不超过 $2,000。原生币订单是**精确到账（exact-out）**，和闪电网络一样：按充值信息块里的币数一分不差地发送。币价只锁定到显示的时间（约 1 小时）；过了这个时间就不要再发，让订单过期后重新下单。币数里在服务费之外还含汇率价差，钱包里还需要多留一点同一种币付网络费。从交易所提币时，到账金额必须是完整金额：确认提币手续费没有从中扣除。`--send` 也能付原生币，按精确金额做一笔普通转账。
+
+链上 BTC 和 Tron 不支持。
 
 ## 我需要什么钱包？
 

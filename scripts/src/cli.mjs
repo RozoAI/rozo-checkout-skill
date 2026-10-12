@@ -26,9 +26,12 @@ import {
   CliError,
   HELP,
   PICKER_OPTIONS,
+  pickerOptionsFor,
   resolvePickerChoice,
 } from './lib/cli-args.mjs';
-import { chainFamily, isSatsUnit } from './lib/amounts.mjs';
+import { chainFamily, chainName, isSatsUnit, isNativeSource, decimalsFor, toAtomic } from './lib/amounts.mjs';
+import { fetchNativeBalances, fetchNativeBalance, assessNative, formatNativeHeld } from './lib/native.mjs';
+import { formatAtomic } from './lib/gas.mjs';
 import {
   detectAddressFamily,
   fetchWalletOptions,
@@ -190,53 +193,74 @@ async function askPayerAddress(saved) {
  * first — a hint only; the payment still comes from whichever wallet the user
  * actually opens.
  */
-async function pickSource({ invoiceUsd, saved, fresh }) {
+async function pickSource({ invoiceUsd, saved, fresh, isOffered }) {
   const payer = await askPayerAddress(fresh ? null : saved);
+  // Native coins appear only when this invoice's quote offers them.
+  const options = pickerOptionsFor(isOffered);
 
-  let marked = PICKER_OPTIONS.map((o) => ({ ...o, mark: 'unchecked', balanceUsd: null }));
+  let marked = options.map((o) => ({ ...o, mark: 'unchecked', balanceUsd: null }));
   let checked = null;
   if (payer) {
     out(dim('  Checking balances…'));
-    const result = await fetchWalletOptions({ address: payer.address, usdRequired: invoiceUsd });
-    if (result.ok) {
-      marked = markPickerOptions(PICKER_OPTIONS, result);
+    const [result, native] = await Promise.all([
+      fetchWalletOptions({ address: payer.address, usdRequired: invoiceUsd }),
+      payer.family === 'evm' || payer.family === 'solana'
+        ? fetchNativeBalances({ address: payer.address, family: payer.family, isOffered })
+        : Promise.resolve([]),
+    ]);
+    if (result.ok || native.some((n) => n.ok)) {
+      marked = markPickerOptions(options, { ...result, family: payer.family, native });
       checked = result;
-    } else {
-      out(`  ${yellow(`Could not check balances (${result.reason}). Showing all coins.`)}`);
+    }
+    if (!result.ok) {
+      out(`  ${yellow(`Could not check stablecoin balances (${result.reason}).`)}`);
     }
   }
 
   out();
   out(`  ${bold('Which coin do you want to pay with?')}`);
-  const savedPreset = fresh ? null : saved?.lastPreset ?? null;
+  // A remembered coin is only the default when it is on this invoice's list.
+  const remembered = fresh ? null : saved?.lastPreset ?? null;
+  const savedPreset = options.some((o) => o.preset === remembered) ? remembered : null;
   let group = null;
   for (const o of marked) {
-    if (o.token !== group) {
-      group = o.token;
+    const heading = o.group ?? o.token;
+    if (heading !== group) {
+      group = heading;
       out();
-      out(`  ${dim(o.token)}`);
+      out(`  ${dim(heading)}`);
+      if (heading === 'Native coins') {
+        out(`  ${dim('exact amount and price set when the order is created; price locked about 1 hour')}`);
+      }
     }
     const badge =
       o.mark === 'affordable'
         ? green(`✓ $${Number(o.balanceUsd ?? 0).toFixed(2)} available`)
-        : o.mark === 'insufficient'
-          ? dim('✗ insufficient')
-          : dim('— not checked');
+        : o.mark === 'held'
+          ? green(`✓ ${o.held} held`) + dim(' (plus gas needed)')
+          : o.mark === 'insufficient'
+            ? dim(o.note ? `✗ ${o.note}` : '✗ insufficient')
+            : dim('— not checked');
     const star = savedPreset === o.preset ? bold(' (last used)') : '';
-    out(`    ${String(o.number).padStart(2)}. ${o.chain.padEnd(12)} ${badge}${star}`);
+    out(`    ${String(o.number).padStart(2)}. ${(o.label ?? o.chain).padEnd(18)} ${badge}${star}`);
   }
   out();
 
   const defaultChoice = savedPreset ? ` [Enter for ${savedPreset}]` : '';
   for (let attempt = 0; attempt < 3; attempt++) {
-    const answer = String(await ask(`  Number 1-${PICKER_OPTIONS.length}${defaultChoice}: `)).trim();
+    const answer = String(await ask(`  Number 1-${options.length}${defaultChoice}: `)).trim();
     const raw = answer || savedPreset;
     if (!raw) {
       out(`  ${yellow('Type the number of a coin.')}`);
       continue;
     }
     try {
-      const choice = resolvePickerChoice(raw);
+      const choice = resolvePickerChoice(raw, options);
+      if (isNativeSource(choice.chainId, choice.tokenSymbol) && typeof isOffered === 'function' &&
+          !isOffered(choice.chainId, choice.tokenSymbol)) {
+        out(`  ${yellow(`${choice.tokenSymbol} on ${chainName(choice.chainId)} is not offered for this invoice. Choose another coin.`)}`);
+        continue;
+      }
       if (checked && isProvablyShort(choice, checked)) {
         out(`  ${yellow('That wallet appears not to hold enough for this invoice.')}`);
         out(`  ${dim('You can still choose it — you may be paying from a different wallet.')}`);
@@ -290,6 +314,10 @@ async function cmdQuote(opts) {
   out(`  Invoice   ${bold(`${payload.invoice?.amount} ${payload.invoice?.fiat?.currency ?? 'USD'}`)}`);
   out(`  You pay   ${payload.callerPays} ${dim('(no discount on this route)')}`);
   out(`  Expires   ${payload.coinbaseExpiryIso ?? 'unknown'}`);
+  const natives = (payload.nativeOffered ?? []).map((n) => presetFor(n.chainId, n.tokenSymbol)).filter(Boolean);
+  if (natives.length) {
+    out(`  Native    ${natives.join(', ')} ${dim('(exact-out; price locked about 1 hour)')}`);
+  }
   out();
   out(dim('  Next: rozo-checkout pay <link> --with usdt-solana'));
   out();
@@ -319,6 +347,9 @@ async function cmdStatus(opts) {
   if (payload.detail) out(`  ${dim(payload.detail)}`);
   if (payload.expiry?.expiresIn && !payload.terminal) {
     out(`  Expires in ${payload.expiry.expiresIn}`);
+  }
+  if (payload.expiry?.priceLockExpiresIn && !payload.terminal && payload.state === 'awaiting_deposit') {
+    out(`  Price locked for ${payload.expiry.priceLockExpiresIn} ${dim('(native coin: do not send after this)')}`);
   }
   if (payload.payin?.txHash) out(`  Pay-in  ${payload.payin.txHash}`);
   if (payload.guidance) out(`  ${payload.escalate ? red(payload.guidance) : dim(payload.guidance)}`);
@@ -390,7 +421,11 @@ async function cmdResume(opts) {
     if (payload.display?.hasMemo) {
       out(`  Memo      ${payload.display.receiverMemoMasked} ${dim(`(${payload.display.memoType})`)}`);
     }
-    if (payload.expiry?.expiresIn) out(`  Expires   in ${bold(payload.expiry.expiresIn)}`);
+    if (payload.display?.native) {
+      if (payload.expiry?.expiresIn) out(`  Price     locked for ${bold(payload.expiry.expiresIn)} more ${dim('(do not send after that)')}`);
+    } else if (payload.expiry?.expiresIn) {
+      out(`  Expires   in ${bold(payload.expiry.expiresIn)}`);
+    }
     if (payload.paymentLink) out(`  Pay page  ${payload.paymentLink}`);
     out();
   }
@@ -466,6 +501,8 @@ async function cmdPay(opts) {
 
   // The invoice amount drives the balance check, so quote before picking.
   let invoiceUsd = null;
+  // Native coins this invoice's quote offers (none known until quoted).
+  let isOffered = null;
   if (opts.bitrefill) {
     // No quote step: the invoice fixes the USDC amount Bitrefill must receive.
     invoiceUsd = Number(opts.bitrefill.amount);
@@ -478,6 +515,8 @@ async function cmdPay(opts) {
       return q.exitCode;
     }
     invoiceUsd = Number(q.payload.invoice?.amount);
+    const offered = new Set((q.payload.nativeOffered ?? []).map((n) => `${n.chainId}:${n.tokenSymbol}`));
+    isOffered = (chainId, tokenSymbol) => offered.has(`${chainId}:${String(tokenSymbol).toUpperCase()}`);
   }
 
   // No coin given. On a terminal we ask; for a script or an agent this stays a
@@ -491,7 +530,7 @@ async function cmdPay(opts) {
           'terminal to choose from a list. There is no default.',
       );
     }
-    const picked = await pickSource({ invoiceUsd, saved, fresh: opts.fresh });
+    const picked = await pickSource({ invoiceUsd, saved, fresh: opts.fresh, isOffered });
     opts.source = { chainId: picked.chainId, tokenSymbol: picked.tokenSymbol };
     chosenPreset = picked.preset;
     payer = picked.payer;
@@ -504,36 +543,57 @@ async function cmdPay(opts) {
       throw new CliError('BAD_PAYER_ADDRESS', 'That is not a recognisable EVM, Solana or Stellar address.');
     }
     assertNotBlacklisted([{ address: opts.payer, family, role: 'wallet address' }], loadBlacklist());
-    const result = await fetchWalletOptions({ address: opts.payer, usdRequired: invoiceUsd });
-    if (isProvablyShort(opts.source, result)) {
-      throw new SkillErrorLike(
-        'INSUFFICIENT_BALANCE',
-        `${opts.payer.slice(0, 6)}…${opts.payer.slice(-4)} does not appear to hold enough ` +
-          `${opts.source.tokenSymbol} for a $${invoiceUsd} invoice. Choose another coin, or ` +
-          'omit --payer to proceed anyway from a different wallet.',
-      );
-    }
-    if (!result.ok && !opts.json) {
-      out(`  ${yellow(`Could not check balances (${result.reason}). Continuing.`)}`);
-    } else if (result.ok && !opts.json) {
-      // Say so when the wallet CAN pay, not only when it cannot. A check that
-      // is silent on success is indistinguishable from a check that never ran,
-      // which is the wrong impression to leave right before someone commits
-      // money. "Not checked" is also a distinct, useful answer: the balance
-      // service only covers some chains, so absence of a row is not a verdict.
-      const hit = (result.options ?? []).find(
-        (o) =>
-          o.chainId === String(opts.source.chainId) &&
-          o.tokenSymbol === String(opts.source.tokenSymbol).toUpperCase(),
-      );
+    if (isNativeSource(opts.source.chainId, opts.source.tokenSymbol)) {
+      // The balance service does not cover native coins, and the coin amount
+      // is only known once the order exists. Here only an empty wallet is a
+      // provable shortfall; the full comparison runs after the order is priced.
+      const n = await fetchNativeBalance({ chainId: opts.source.chainId, address: opts.payer });
       const short = `${opts.payer.slice(0, 6)}…${opts.payer.slice(-4)}`;
-      if (hit?.balanceUsd != null) {
-        out(`  ${dim(`Payer ${short} holds about $${hit.balanceUsd} of ${opts.source.tokenSymbol} — enough for this invoice.`)}`);
-      } else {
-        out(`  ${dim(`Payer ${short}: balance not reported for this coin, so it was not verified.`)}`);
+      if (n.ok && n.balanceAtomic === 0n) {
+        throw new SkillErrorLike(
+          'INSUFFICIENT_BALANCE',
+          `${short} holds no ${opts.source.tokenSymbol} on ${chainName(opts.source.chainId)}. Choose ` +
+            'another coin, or omit --payer to proceed anyway from a different wallet.',
+        );
       }
+      if (!opts.json) {
+        out(`  ${dim(n.ok
+          ? `Payer ${short} holds ${formatNativeHeld(n)}; checked against the exact amount once the order is priced.`
+          : `Payer ${short}: ${opts.source.tokenSymbol} balance not checked (${n.reason}).`)}`);
+      }
+      payer = { address: opts.payer, family };
+    } else {
+      const result = await fetchWalletOptions({ address: opts.payer, usdRequired: invoiceUsd });
+      if (isProvablyShort(opts.source, result)) {
+        throw new SkillErrorLike(
+          'INSUFFICIENT_BALANCE',
+          `${opts.payer.slice(0, 6)}…${opts.payer.slice(-4)} does not appear to hold enough ` +
+            `${opts.source.tokenSymbol} for a $${invoiceUsd} invoice. Choose another coin, or ` +
+            'omit --payer to proceed anyway from a different wallet.',
+        );
+      }
+      if (!result.ok && !opts.json) {
+        out(`  ${yellow(`Could not check balances (${result.reason}). Continuing.`)}`);
+      } else if (result.ok && !opts.json) {
+        // Say so when the wallet CAN pay, not only when it cannot. A check that
+        // is silent on success is indistinguishable from a check that never ran,
+        // which is the wrong impression to leave right before someone commits
+        // money. "Not checked" is also a distinct, useful answer: the balance
+        // service only covers some chains, so absence of a row is not a verdict.
+        const hit = (result.options ?? []).find(
+          (o) =>
+            o.chainId === String(opts.source.chainId) &&
+            o.tokenSymbol === String(opts.source.tokenSymbol).toUpperCase(),
+        );
+        const short = `${opts.payer.slice(0, 6)}…${opts.payer.slice(-4)}`;
+        if (hit?.balanceUsd != null) {
+          out(`  ${dim(`Payer ${short} holds about $${hit.balanceUsd} of ${opts.source.tokenSymbol} — enough for this invoice.`)}`);
+        } else {
+          out(`  ${dim(`Payer ${short}: balance not reported for this coin, so it was not verified.`)}`);
+        }
+      }
+      payer = { address: opts.payer, family };
     }
-    payer = { address: opts.payer, family };
   }
 
   const { chainId, tokenSymbol } = opts.source;
@@ -622,8 +682,15 @@ async function cmdPay(opts) {
       out(`  Memo      ${p.display.receiverMemoMasked} ${dim(`(${p.display.memoType})`)}`);
     }
     const deadline = formatDeadline(p.expiry?.effectiveDeadlineIso);
-    out(`  Expires   ${bold(deadline ?? `in ${p.expiry?.expiresIn ?? '?'}`)}`);
-    out(`  ${dim('After that this order cannot be used and a new one must be created.')}`);
+    if (p.display?.native) {
+      // Native coins are exact-out: the deadline that matters is the price lock.
+      out(`  Price     ${bold(`locked ${deadline ?? `for ${p.expiry?.expiresIn ?? '?'}`}`)}`);
+      out(`  ${dim('Send exactly this amount before then. After that, do not send it: start a new order.')}`);
+      out(`  ${dim('The coin amount includes an FX spread on top of the service fee.')}`);
+    } else {
+      out(`  Expires   ${bold(deadline ?? `in ${p.expiry?.expiresIn ?? '?'}`)}`);
+      out(`  ${dim('After that this order cannot be used and a new one must be created.')}`);
+    }
     // Say plainly which of the two situations this is. The API's `reused` flag
     // answers "did an order already exist", which flips to true on the confirm
     // call for the very order this run just made — accurate, and confusing to
@@ -648,6 +715,47 @@ async function cmdPay(opts) {
     out(dim(`  normally larger than the invoice.`));
     for (const w of p.confirmation?.warnings ?? []) out(dim(`  · ${w}`));
     out();
+  }
+
+  // --- 1b. native coin: now that the amount is fixed, compare the payer ----
+  // A native payment also spends the same coin on gas, so "enough" means the
+  // amount plus a gas headroom. Only "holds less than the amount" is provable,
+  // and that is fatal only in the non-interactive --payer case (same rule as
+  // stablecoins); everything else is a warning.
+  if (payer && p.display?.native && p.display?.coinAmount) {
+    const n = await fetchNativeBalance({ chainId, address: payer.address });
+    if (n.ok) {
+      let amountAtomic = null;
+      try {
+        amountAtomic = toAtomic(p.display.coinAmount, decimalsFor(chainId, tokenSymbol));
+      } catch {
+        amountAtomic = null;
+      }
+      if (amountAtomic !== null) {
+        const verdict = assessNative({ balanceAtomic: n.balanceAtomic, headroomAtomic: n.headroomAtomic, amountAtomic });
+        const short = `${payer.address.slice(0, 6)}…${payer.address.slice(-4)}`;
+        const need = `${p.display.coinAmount} ${tokenSymbol} plus about ${formatAtomic(n.headroomAtomic, n.decimals)} ${tokenSymbol} for gas`;
+        if (verdict.mark === 'insufficient' && opts.payer && !chosenPreset) {
+          const payload = formatFailure({
+            code: 'INSUFFICIENT_BALANCE',
+            message:
+              `${short} holds ${formatNativeHeld(n)}; this order needs ${need}. Nothing was sent. ` +
+              'The unfunded order simply expires. Choose another coin, or omit --payer to pay from a different wallet.',
+          });
+          if (opts.json) printJson(payload);
+          else printError(payload);
+          return EXIT_ERROR;
+        }
+        if (!opts.json) {
+          if (verdict.mark === 'affordable') {
+            out(`  ${dim(`Payer ${short} holds ${formatNativeHeld(n)}: enough for ${need}.`)}`);
+          } else {
+            out(`  ${yellow(`Payer ${short} holds ${formatNativeHeld(n)}, but this order needs ${need}.`)}`);
+          }
+          out();
+        }
+      }
+    }
   }
 
   // --- 2. binding confirmation -------------------------------------------
@@ -818,7 +926,14 @@ function printDeposit(deposit, opts) {
           `${red(`(required, ${deposit.receiverMemoType})`)}`,
       );
     }
-    if (deposit.expiresIn) out(`    Expires  in ${bold(deposit.expiresIn)}`);
+    if (deposit.native) {
+      // Exact-out: the price lock is the deadline the payer must beat.
+      if (deposit.expiresIn) out(`    Price    locked for ${bold(deposit.expiresIn)} more`);
+      const lock = formatDeadline(deposit.quoteExpiresAt);
+      if (lock) out(`             ${dim(`(${lock})`)}`);
+    } else if (deposit.expiresIn) {
+      out(`    Expires  in ${bold(deposit.expiresIn)}`);
+    }
   }
   out();
   const unit = isSatsUnit(deposit.amountUnit) ? 'sats' : deposit.tokenSymbol;
@@ -827,6 +942,11 @@ function printDeposit(deposit, opts) {
     `  Make sure the wallet you pay from holds at least ` +
       `${bold(`${deposit.amount} ${unit}`)} ${where}.`,
   );
+  if (deposit.native) {
+    out(dim(`  Plus a little ${deposit.tokenSymbol} for the network fee. The amount that arrives must be`));
+    out(dim('  exactly the amount above: from an exchange, check its withdrawal fee is not taken from it.'));
+    out(dim('  After the price lock ends, do not send: start a new order.'));
+  }
   out(dim('  Copy the address from this block; do not retype it.'));
   out(dim('  Send it exactly once.'));
   out();

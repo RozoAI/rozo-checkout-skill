@@ -13,10 +13,19 @@
  *   NO_DISCOUNT_VIOLATION    callerPays != original, or discount != "0"
  */
 
-import { comparePayment, sourceAtomic, chainFamily } from './amounts.mjs';
+import { comparePayment, sourceAtomic, chainFamily, isNativeSource } from './amounts.mjs';
 
 /** Statuses that mean "nothing has been funded yet". */
 export const UNPAID_STATUS = 'payment_unpaid';
+
+/** Intent statuses past the pay-in, on the way to (or at) payout. */
+const NATIVE_PROGRESS_STATUSES = new Set([
+  'payment_payin_completed',
+  'payment_bridging',
+  'payment_payout_started',
+  'payment_payout_completed',
+  'payment_completed',
+]);
 
 /**
  * Decide whether a `source` shows a receipt, failing CLOSED.
@@ -501,7 +510,14 @@ export function classifyStatus({
     return mk('settled', 'Coinbase invoice settled by the funder wallet.', { terminal: true });
   }
 
-  if (moneyDetected && receipt && receipt.state === 'underpaid') {
+  // A native coin order is priced with a tolerance: the backend accepts a
+  // payment slightly under the quoted coin amount (for example an exchange
+  // withdrawal that lost its fee) and moves it on. Once the backend has moved
+  // such an order past the pay-in, follow the backend instead of escalating.
+  const nativeAccepted =
+    isNativeSource(source.chainId, source.tokenSymbol) &&
+    NATIVE_PROGRESS_STATUSES.has(payment?.status);
+  if (moneyDetected && receipt && receipt.state === 'underpaid' && !nativeAccepted) {
     return mk(
       'underpaid',
       'Less arrived than the order requires. Do NOT send a top-up to the same address — escalate.',

@@ -15,6 +15,8 @@
  */
 
 import { SkillError } from './output.mjs';
+import { isNativeSource } from './amounts.mjs';
+import { assessNative, formatNativeHeld } from './native.mjs';
 
 export const INTENT_API_BASE =
   process.env.ROZO_CHECKOUT_INTENT_API || 'https://intentapi.rozo.ai';
@@ -121,17 +123,42 @@ export function parsePaymentOptions(json) {
  * Annotate picker rows with balance marks, and sort affordable ones first
  * while keeping the original order within each group.
  *
+ * Native coin rows are not in the balance service's answer; they are marked
+ * from `native` (results of native.mjs fetchNativeBalances) instead. Before an
+ * order exists the coin amount is unknown, so a native row is at best 'held'
+ * (shows the coin balance) and 'insufficient' only when the wallet cannot even
+ * cover the gas headroom.
+ *
+ * `ok: false` (a failed stablecoin lookup) leaves every stablecoin row
+ * 'unchecked' rather than reading the empty answer as "holds nothing".
+ *
  * @returns {Array} picker options each carrying { mark, balanceUsd }
- *   mark: 'affordable' | 'insufficient' | 'unchecked'
+ *   mark: 'affordable' | 'held' | 'unchecked' | 'insufficient'
  */
-export function markPickerOptions(pickerOptions, { family = null, options = [] } = {}) {
+export function markPickerOptions(pickerOptions, { family = null, options = [], native = [], ok = true } = {}) {
   const index = new Map();
   for (const o of options) index.set(`${o.chainId}:${o.tokenSymbol}`, o);
+  const nativeIndex = new Map();
+  for (const n of native ?? []) if (n?.chainId) nativeIndex.set(String(n.chainId), n);
 
   const marked = pickerOptions.map((row) => {
     if (!family || !familyCoversChain(family, row.chainId)) {
       return { ...row, mark: 'unchecked', balanceUsd: null, note: null };
     }
+    if (isNativeSource(row.chainId, row.tokenSymbol)) {
+      const n = nativeIndex.get(String(row.chainId));
+      if (!n || !n.ok) return { ...row, mark: 'unchecked', balanceUsd: null, note: n?.reason ?? null };
+      const verdict = assessNative({ balanceAtomic: n.balanceAtomic, headroomAtomic: n.headroomAtomic });
+      return {
+        ...row,
+        mark: verdict.mark,
+        balanceUsd: null,
+        held: formatNativeHeld(n),
+        note: verdict.mark === 'insufficient' ? 'not enough to cover the network fee' : null,
+      };
+    }
+    // The stablecoin lookup failed: absence of a row proves nothing.
+    if (ok === false) return { ...row, mark: 'unchecked', balanceUsd: null, note: null };
     const hit = index.get(`${row.chainId}:${row.tokenSymbol}`);
     if (!hit) {
       return { ...row, mark: 'insufficient', balanceUsd: 0, note: 'no balance found' };
@@ -144,7 +171,7 @@ export function markPickerOptions(pickerOptions, { family = null, options = [] }
     };
   });
 
-  const rank = { affordable: 0, unchecked: 1, insufficient: 2 };
+  const rank = { affordable: 0, held: 1, unchecked: 2, insufficient: 3 };
   return marked
     .map((row, i) => ({ row, i }))
     .sort((a, b) => rank[a.row.mark] - rank[b.row.mark] || a.i - b.i)

@@ -330,19 +330,34 @@ var CHAIN_NAMES = {
   56: "BNB Chain",
   137: "Polygon",
   8453: "Base",
+  42161: "Arbitrum",
   900: "Solana",
   1500: "Stellar",
   lightning: "Bitcoin Lightning"
 };
 var SUPPORTED_SOURCES = [
-  { chainId: "1", chain: "Ethereum", tokens: ["USDC", "USDT"] },
-  { chainId: "56", chain: "BNB Chain", tokens: ["USDC", "USDT"] },
-  { chainId: "137", chain: "Polygon", tokens: ["USDC", "USDT"] },
-  { chainId: "900", chain: "Solana", tokens: ["USDC", "USDT"] },
-  { chainId: "8453", chain: "Base", tokens: ["USDC"] },
+  { chainId: "1", chain: "Ethereum", tokens: ["USDC", "USDT", "ETH"] },
+  { chainId: "56", chain: "BNB Chain", tokens: ["USDC", "USDT", "BNB"] },
+  { chainId: "137", chain: "Polygon", tokens: ["USDC", "USDT", "POL"] },
+  { chainId: "900", chain: "Solana", tokens: ["USDC", "USDT", "SOL"] },
+  { chainId: "8453", chain: "Base", tokens: ["USDC", "ETH"] },
+  { chainId: "42161", chain: "Arbitrum", tokens: ["USDC", "USDT", "ETH"] },
   { chainId: "1500", chain: "Stellar", tokens: ["USDC"] },
   { chainId: "lightning", chain: "Bitcoin Lightning", tokens: ["BTC"] }
 ];
+var NATIVE_COINS = Object.freeze({
+  "1:ETH": { chainId: "1", symbol: "ETH", decimals: 18 },
+  "8453:ETH": { chainId: "8453", symbol: "ETH", decimals: 18 },
+  "42161:ETH": { chainId: "42161", symbol: "ETH", decimals: 18 },
+  "56:BNB": { chainId: "56", symbol: "BNB", decimals: 18 },
+  "137:POL": { chainId: "137", symbol: "POL", decimals: 18 },
+  "900:SOL": { chainId: "900", symbol: "SOL", decimals: 9 }
+});
+var NATIVE_MAX_USD = 2e3;
+var NATIVE_MIN_USD_FALLBACK = Object.freeze({ "1:ETH": 1 });
+function decimalsKey(chainId, tokenSymbol) {
+  return `${String(chainId).trim()}:${String(tokenSymbol || "").trim().toUpperCase()}`;
+}
 function chainName(chainId) {
   return CHAIN_NAMES[String(chainId)] || CHAIN_NAMES[chainId] || `chain ${chainId}`;
 }
@@ -350,6 +365,55 @@ function isSupportedSource(chainId, tokenSymbol) {
   const cid = String(chainId).trim();
   const sym = String(tokenSymbol || "").trim().toUpperCase();
   return SUPPORTED_SOURCES.some((s) => s.chainId === cid && s.tokens.includes(sym));
+}
+function isNativeSource(chainId, tokenSymbol) {
+  return Object.prototype.hasOwnProperty.call(NATIVE_COINS, decimalsKey(chainId, tokenSymbol));
+}
+function nativeMinUsdFor(chainId, tokenSymbol, quoteNativeMinUsd) {
+  const cid = String(chainId).trim();
+  const sym = String(tokenSymbol || "").trim().toUpperCase();
+  const fromQuote = quoteNativeMinUsd?.[cid]?.[sym];
+  const n = Number(fromQuote);
+  if (fromQuote !== void 0 && fromQuote !== null && Number.isFinite(n) && n > 0) return n;
+  return NATIVE_MIN_USD_FALLBACK[`${cid}:${sym}`] ?? null;
+}
+function nativeOfferFor({ chainId, tokenSymbol, supportedSources, nativeMinUsd, callerPaysUsd }) {
+  const cid = String(chainId).trim();
+  const sym = String(tokenSymbol || "").trim().toUpperCase();
+  const label = `${sym} on ${chainName(cid)}`;
+  const minUsd = nativeMinUsdFor(cid, sym, nativeMinUsd);
+  if (!isNativeSource(cid, sym)) {
+    return { ok: false, code: "NOT_NATIVE", reason: `${label} is not a native coin.`, minUsd: null };
+  }
+  const list = supportedSources && typeof supportedSources === "object" ? supportedSources[cid] : null;
+  if (!Array.isArray(list) || !list.map((t) => String(t).toUpperCase()).includes(sym)) {
+    return {
+      ok: false,
+      code: "NATIVE_NOT_OFFERED",
+      reason: `${label} is not offered for this invoice. Pay with USDC or USDT instead.`,
+      minUsd
+    };
+  }
+  const usd = Number(callerPaysUsd);
+  if (Number.isFinite(usd) && usd > 0) {
+    if (usd > NATIVE_MAX_USD) {
+      return {
+        ok: false,
+        code: "NATIVE_AMOUNT_TOO_HIGH",
+        reason: `Native coin orders are limited to $${NATIVE_MAX_USD} per invoice; this one is $${usd}. Pay with USDC or USDT instead.`,
+        minUsd
+      };
+    }
+    if (minUsd !== null && usd < minUsd) {
+      return {
+        ok: false,
+        code: "NATIVE_AMOUNT_TOO_LOW",
+        reason: `${label} needs an invoice of at least $${minUsd}; this one is $${usd}. Pay with another coin.`,
+        minUsd
+      };
+    }
+  }
+  return { ok: true, code: null, reason: null, minUsd };
 }
 
 // scripts/src/lib/expiry.mjs
@@ -359,6 +423,7 @@ var MARGINS_MS = {
   56: 10 * MINUTE,
   137: 10 * MINUTE,
   8453: 10 * MINUTE,
+  42161: 10 * MINUTE,
   900: 5 * MINUTE,
   1500: 10 * MINUTE,
   lightning: 10 * MINUTE
@@ -459,6 +524,24 @@ async function main(argv) {
   const quote = await quoteInvoice({ url: String(url) });
   const snapshot = snapshotFromQuote(quote);
   const payability = derivePayable(snapshot, now);
+  const nativeOffered = Object.values(NATIVE_COINS).map((c) => ({
+    chainId: c.chainId,
+    tokenSymbol: c.symbol,
+    chain: chainName(c.chainId),
+    offer: nativeOfferFor({
+      chainId: c.chainId,
+      tokenSymbol: c.symbol,
+      supportedSources: quote?.supportedSources,
+      nativeMinUsd: quote?.nativeMinUsd,
+      callerPaysUsd: snapshot.callerPays ?? snapshot.original
+    })
+  })).filter((c) => c.offer.ok).map((c) => ({ chainId: c.chainId, tokenSymbol: c.tokenSymbol, chain: c.chain, minUsd: c.offer.minUsd }));
+  const nativeRequested = chosenSource && isNativeSource(chosenSource.chainId, chosenSource.tokenSymbol) ? nativeOfferFor({
+    ...chosenSource,
+    supportedSources: quote?.supportedSources,
+    nativeMinUsd: quote?.nativeMinUsd,
+    callerPaysUsd: snapshot.callerPays ?? snapshot.original
+  }) : null;
   const payload = {
     success: payability.payable,
     step: "quote",
@@ -477,6 +560,11 @@ async function main(argv) {
     coinbaseExpiryIso: payability.expiryMs ? new Date(payability.expiryMs).toISOString() : null,
     chosenSource,
     supportedSources: SUPPORTED_SOURCES,
+    // The router's own per-invoice list ({ chainId: [symbols] }), verbatim,
+    // and the native coins it makes payable for this invoice.
+    routerSupportedSources: quote?.supportedSources && typeof quote.supportedSources === "object" ? quote.supportedSources : null,
+    nativeOffered,
+    nativeNote: "Native coins are exact-out: the coin amount is fixed at order creation and its price is locked only until quoteExpiresAt. Up to $2,000 per invoice; native ETH on Ethereum needs $1.",
     quoteReceipt: quote?.quoteReceipt ?? null,
     quoteReceiptTtlSeconds: 60,
     quoteReceiptNote: "Short-lived (~60s). create-order.js takes its own fresh quote; do not carry this over.",
@@ -485,6 +573,12 @@ async function main(argv) {
   };
   if (!payability.payable) {
     payload.error = { code: payability.code, message: payability.reason };
+    emit(payload, EXIT_ERROR);
+  }
+  if (nativeRequested && !nativeRequested.ok) {
+    payload.success = false;
+    payload.nextStep = null;
+    payload.error = { code: nativeRequested.code, message: nativeRequested.reason };
     emit(payload, EXIT_ERROR);
   }
   if (snapshot.callerPays && snapshot.original && normalizeDecimal(snapshot.callerPays) !== normalizeDecimal(snapshot.original)) {

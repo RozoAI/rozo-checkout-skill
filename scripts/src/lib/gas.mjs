@@ -29,6 +29,7 @@ export const EVM_FEE_COIN = Object.freeze({
   56: { symbol: 'BNB', network: 'BNB Chain' },
   137: { symbol: 'POL', network: 'Polygon' },
   8453: { symbol: 'ETH', network: 'Base' },
+  42161: { symbol: 'ETH', network: 'Arbitrum' },
 });
 
 export const DEFAULT_GAS_BUFFER_PCT = 20;
@@ -86,10 +87,15 @@ export function assessFee({ balance, required, decimals, symbol, network }) {
 
 function insufficient(details, extra) {
   const need = details.required ? `about ${details.required} ${details.feeCoin}` : `some ${details.feeCoin}`;
+  // A native coin payment spends the fee coin itself: say that the total is
+  // the payment plus the fee, or the shortfall reads as a fee-only problem.
+  const forWhat = details.payment
+    ? `for the payment of ${details.payment} ${details.feeCoin} plus the network fee`
+    : 'for the network fee';
   return new SkillError(
     'INSUFFICIENT_GAS',
     `This wallet holds ${details.balance} ${details.feeCoin} on ${details.network} but needs ${need} ` +
-      `for the network fee${details.shortfall ? ` (short by ${details.shortfall} ${details.feeCoin})` : ''}. ` +
+      `${forWhat}${details.shortfall ? ` (short by ${details.shortfall} ${details.feeCoin})` : ''}. ` +
       `Nothing was signed. Add ${details.feeCoin} on ${details.network} to this wallet and re-run, or ` +
       'pay with a different coin.' +
       (extra ? ` ${extra}` : ''),
@@ -192,6 +198,7 @@ export async function evmGasPrecheck({
   const { ok, details } = assessFee({ balance, required, decimals: 18, symbol: coin.symbol, network: coin.network });
   const full = {
     ...details,
+    payment: value > 0n ? formatAtomic(value, 18) : null,
     gasLimit: req.gasLimit.toString(),
     pricing: req.pricing,
     bufferPct,
@@ -209,10 +216,13 @@ export const LAMPORTS_DECIMALS = 9;
  * rent-exempt minimum. This path never creates a token account (create-order
  * refuses an address with no token account), so no account rent is added.
  *
+ * `value` is the lamports the same transaction moves out of the payer (a
+ * native SOL payment); 0 for an SPL transfer, whose amount is not in SOL.
+ *
  * `connection` needs getBalance, getFeeForMessage and
  * getMinimumBalanceForRentExemption (web3.js Connection shape).
  */
-export async function solFeePrecheck({ connection, payer, message }) {
+export async function solFeePrecheck({ connection, payer, message, value = 0n }) {
   const network = 'Solana';
   let balance;
   let fee;
@@ -234,15 +244,20 @@ export async function solFeePrecheck({ connection, payer, message }) {
     throw unavailable(network, err);
   }
 
-  const remaining = balance - fee;
+  const remaining = balance - fee - value;
   // Ending at exactly zero is allowed; ending between 0 and the rent minimum is not.
-  const required = remaining === 0n ? fee : fee + rentMin;
+  const required = remaining === 0n ? fee + value : fee + value + rentMin;
   const { ok, details } = assessFee({ balance, required, decimals: LAMPORTS_DECIMALS, symbol: 'SOL', network });
-  const full = { ...details, fee: formatAtomic(fee, LAMPORTS_DECIMALS), rentExemptMinimum: formatAtomic(rentMin, LAMPORTS_DECIMALS) };
+  const full = {
+    ...details,
+    payment: value > 0n ? formatAtomic(value, LAMPORTS_DECIMALS) : null,
+    fee: formatAtomic(fee, LAMPORTS_DECIMALS),
+    rentExemptMinimum: formatAtomic(rentMin, LAMPORTS_DECIMALS),
+  };
   if (!ok) {
     throw insufficient(
       full,
-      balance >= fee
+      balance >= fee + value
         ? 'Solana also requires a wallet to keep a small minimum balance after paying the fee.'
         : null,
     );
