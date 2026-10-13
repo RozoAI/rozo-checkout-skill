@@ -37,6 +37,7 @@ para facturas de hasta $2,000 (ETH nativo en Ethereum: mínimo $1). Es exact-out
 envía exactamente la cantidad indicada antes de que termine el precio fijado
 (alrededor de una hora), y guarda un poco de la misma moneda para el gas. El BTC
 on-chain y Tron no están soportados.
+ZEC en Zcash (Beta): usa https://checkout.rozo.ai/zec, esta CLI no crea órdenes en ZEC.
 
 Por defecto solo imprime una dirección para pagar desde cualquier billetera: sin
 clave privada y sin configuración. Añadir `--send` únicamente si se quiere que la

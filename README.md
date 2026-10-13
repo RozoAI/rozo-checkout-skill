@@ -90,6 +90,7 @@ be the full amount: check that the withdrawal fee is not taken out of it.
 `--send` pays native coins too, as a plain transfer of the exact amount.
 
 On-chain BTC and Tron are not supported.
+ZEC on Zcash (Beta): use https://checkout.rozo.ai/zec, this CLI does not create ZEC orders.
 
 ## Which wallet do I need?
 

@@ -77,6 +77,7 @@ caller pay one with something else:
 
 Say exactly which one: "USDT **on** Solana" and "SOL" (the native coin) are
 different orders. On-chain BTC and Tron are **not** supported.
+ZEC on Zcash (Beta): send the user to https://checkout.rozo.ai/zec, this CLI does not create ZEC orders.
 
 **Native coins have extra rules.** Offer one only when the quote lists it for
 this invoice (`quote.js` reports `nativeOffered`; `create-order.js` refuses
