@@ -53,6 +53,7 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 Una moneda nativa solo se ofrece cuando la cotización de la factura la incluye (`quote` lo muestra), y solo para facturas de hasta $2,000. La orden es **exact-out**, como Lightning: envía exactamente la cantidad de moneda del bloque de depósito. Su precio queda fijado solo hasta la hora indicada (alrededor de una hora); pasada esa hora, no la envíes: deja que la orden expire y crea una nueva. La cantidad incluye un diferencial cambiario además de la comisión de servicio, y la billetera necesita un poco más de la misma moneda para la comisión de red. Si pagas desde un exchange, debe llegar la cantidad completa: comprueba que la comisión de retiro no se descuente de ella. `--send` también paga monedas nativas, como una transferencia normal de la cantidad exacta.
 
 El BTC on-chain y Tron no están soportados.
+ZEC en Zcash (Beta): usa https://checkout.rozo.ai/zec, esta CLI no crea órdenes en ZEC.
 
 ## ¿Qué wallet necesito?
 

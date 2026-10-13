@@ -36,6 +36,7 @@ A native coin is offered only when the invoice's quote lists it, for invoices up
 to $2,000 (native ETH on Ethereum: $1 minimum). It is exact-out: send exactly
 the coin amount shown, before its price lock ends (about an hour), and keep a
 little of the same coin for gas. On-chain BTC and Tron are not supported.
+ZEC on Zcash (Beta): use https://checkout.rozo.ai/zec, this CLI does not create ZEC orders.
 
 By default it just prints an address for you to pay from any wallet — no key
 and no configuration needed. Add `--send` only if you want the CLI to sign

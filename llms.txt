@@ -104,6 +104,7 @@ chainId "1" Ethereum (USDC, USDT, native ETH) · "56" BNB Chain (USDC, USDT;
 native SOL) · "1500" Stellar (USDC; deposit memo REQUIRED) · "lightning" (BTC;
 BOLT11 invoice, amounts in integer satoshis via source.amountUnit=="sats").
 USDT is not accepted on Base or Stellar. On-chain BTC and Tron are NOT supported.
+ZEC on Zcash (Beta): use https://checkout.rozo.ai/zec, this CLI does not create ZEC orders.
 Native coins (tokenSymbol "ETH", "BNB", "SOL" or "POL" on the chains above; ETH, BNB
 and POL have 18 decimals, SOL 9): offer one only when quote-invoice lists it in
 supportedSources for that invoice ({"<chainId>": ["USDC", "ETH", ...]}). A native

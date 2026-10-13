@@ -33,6 +33,7 @@ npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLI
 ネイティブコインは、インボイスの見積もりに含まれている場合のみ使えます（上限 $2,000、Ethereum の ETH は最低 $1）。
 受取額固定（exact-out）なので、表示された数量を価格固定の期限（約 1 時間）までに正確に送り、ガス代として同じコインを少し残してください。
 オンチェーンの BTC と Tron には対応していません。
+Zcash の ZEC（Beta）は https://checkout.rozo.ai/zec を使ってください。この CLI では ZEC の注文は作れません。
 
 既定では、任意のウォレットから支払うためのアドレスを表示するだけです — 鍵も設定も
 不要です。CLI にホットウォレットから署名させたい場合にだけ `--send` を、機械可読な
