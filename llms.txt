@@ -113,7 +113,7 @@ and the price is locked only until quoteExpiresAt (returned by create-invoice an
 the payments GET; the order's own expiresAt is later). Never send after
 quoteExpiresAt. The coin amount includes an FX spread on top of the service fee, and
 the payer also needs some of the same coin for gas. Native orders are limited to
-$2,000 per invoice (native ETH on Ethereum: $1 minimum; quote-invoice may report
+$3,500 per invoice (native ETH on Ethereum: $1 minimum; quote-invoice may report
 per-coin minimums in nativeMinUsd). The CLI enforces all of this, and --send pays a
 native coin as a plain transfer of the exact amount.
 

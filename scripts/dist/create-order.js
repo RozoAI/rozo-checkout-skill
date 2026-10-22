@@ -770,7 +770,7 @@ var NATIVE_COINS = Object.freeze({
   "137:POL": { chainId: "137", symbol: "POL", decimals: 18 },
   "900:SOL": { chainId: "900", symbol: "SOL", decimals: 9 }
 });
-var NATIVE_MAX_USD = 2e3;
+var NATIVE_MAX_USD = 3500;
 var NATIVE_MIN_USD_FALLBACK = Object.freeze({ "1:ETH": 1 });
 var DECIMALS = {
   "1:USDC": 6,

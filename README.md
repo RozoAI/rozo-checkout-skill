@@ -80,7 +80,7 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 | POL | `pol-polygon` or `pol` | `137` | 18 decimals |
 
 A native coin is offered only when the invoice's quote lists it (`quote` shows
-which), and only for invoices up to $2,000. The order is **exact-out**, like
+which), and only for invoices up to $3,500. The order is **exact-out**, like
 Lightning: send exactly the coin amount in the deposit block. Its price is
 locked only until the time shown (about an hour); after that, do not send it,
 let the order expire and start a new one. The coin amount includes an FX spread

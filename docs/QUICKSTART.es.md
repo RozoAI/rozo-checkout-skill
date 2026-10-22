@@ -33,7 +33,7 @@ los agentes deben pasar siempre `--with`: el selector solo aparece en una
 terminal y no hay moneda por defecto.
 
 Una moneda nativa solo se ofrece cuando la cotización de la factura la incluye,
-para facturas de hasta $2,000 (ETH nativo en Ethereum: mínimo $1). Es exact-out:
+para facturas de hasta $3,500 (ETH nativo en Ethereum: mínimo $1). Es exact-out:
 envía exactamente la cantidad indicada antes de que termine el precio fijado
 (alrededor de una hora), y guarda un poco de la misma moneda para el gas. El BTC
 on-chain y Tron no están soportados.

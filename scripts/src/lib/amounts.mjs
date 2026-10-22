@@ -81,7 +81,7 @@ export const NATIVE_COINS = Object.freeze({
 });
 
 /** Backend limit on one native order, in USD (rozo-intents-api MAX_NATIVE_PAYIN_USD). */
-export const NATIVE_MAX_USD = 2000;
+export const NATIVE_MAX_USD = 3500;
 
 /**
  * Fallback USD minimum per native coin, used only when the quote does not
@@ -336,7 +336,7 @@ export function nativeOfferFor({ chainId, tokenSymbol, supportedSources, nativeM
     };
   }
   const usd = Number(callerPaysUsd);
-  // Without a USD amount the $2,000 cap and the minimum cannot be checked, so
+  // Without a USD amount the $3,500 cap and the minimum cannot be checked, so
   // refuse the native coin rather than let the order through unchecked.
   if (!Number.isFinite(usd) || usd <= 0) {
     return {

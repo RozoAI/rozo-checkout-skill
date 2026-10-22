@@ -162,12 +162,14 @@ test('a native coin is offered only when supportedSources lists it for this invo
   assert.equal(offer('8453', 'USDC', ALL_SOURCES).code, 'NOT_NATIVE');
 });
 
-test('native USD bounds: $2,000 cap, $1 minimum for native ETH on Ethereum, quote minimum wins', () => {
+test('native USD bounds: $3,500 cap, $1 minimum for native ETH on Ethereum, quote minimum wins', () => {
   const offer = (chainId, tokenSymbol, callerPaysUsd, nativeMinUsd) =>
     nativeOfferFor({ chainId, tokenSymbol, supportedSources: ALL_SOURCES, nativeMinUsd, callerPaysUsd });
-  assert.equal(NATIVE_MAX_USD, 2000);
-  assert.equal(offer('8453', 'ETH', '2000').ok, true);
-  assert.equal(offer('8453', 'ETH', '2000.01').code, 'NATIVE_AMOUNT_TOO_HIGH');
+  assert.equal(NATIVE_MAX_USD, 3500);
+  assert.equal(offer('8453', 'ETH', '2000.01').ok, true, 'the old $2,000 cap is gone');
+  assert.equal(offer('8453', 'ETH', '3499.99').ok, true);
+  assert.equal(offer('8453', 'ETH', '3500').ok, true);
+  assert.equal(offer('8453', 'ETH', '3500.01').code, 'NATIVE_AMOUNT_TOO_HIGH');
   assert.equal(offer('1', 'ETH', '0.99').code, 'NATIVE_AMOUNT_TOO_LOW');
   assert.equal(offer('1', 'ETH', '1').ok, true);
   assert.equal(offer('8453', 'ETH', '0.5').ok, true);
@@ -642,7 +644,7 @@ test('create: a native coin the quote does not offer is refused before any order
     assert.equal(payload.error.code, 'NATIVE_NOT_OFFERED');
     assert.ok(!calls.some((c) => c.url.includes('/create-invoice')), 'nothing was created');
   });
-  await withHttp([['/quote-invoice', () => json(quoteBody({ callerPays: '2500.00' }))]], async (calls) => {
+  await withHttp([['/quote-invoice', () => json(quoteBody({ callerPays: '3500.01' }))]], async (calls) => {
     const { payload } = await capture(() => runCreateOrder(createArgs()));
     assert.equal(payload.error.code, 'NATIVE_AMOUNT_TOO_HIGH');
     assert.ok(!calls.some((c) => c.url.includes('/create-invoice')));
@@ -810,7 +812,8 @@ test('help text lists every native and Arbitrum preset, and never calls POL beta
     assert.ok(HELP.includes(p), p);
   }
   assert.doesNotMatch(HELP, /beta/i);
-  assert.match(HELP, /\$2,000/);
+  assert.match(HELP, /\$3,500/);
+  assert.doesNotMatch(HELP, /\$2,000/);
   assert.match(HELP, /On-chain BTC and Tron/);
 });
 

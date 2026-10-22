@@ -22,7 +22,7 @@ npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLI
 
 `--with` 可选的币种有：`usdt-solana`、`usdc-solana`、`usdt-bnb`、`usdc-bnb`、`usdt-ethereum`、`usdc-ethereum`、`usdt-polygon`、`usdc-polygon`、`usdt-arbitrum`、`usdc-arbitrum`、`usdc-base`、`usdc-stellar`、`btc-lightning`，以及原生币 `eth-ethereum`、`eth-base`、`eth-arbitrum`、`bnb-bnb`、`sol-solana`、`pol-polygon`。脚本和 agent 必须显式传 `--with`：交互式选择只在终端里出现，而且没有默认币种。
 
-原生币只有在这张账单的报价列出时才能用，账单上限 $2,000（Ethereum 上的 ETH 最低 $1）。原生币是精确到账（exact-out）：在币价锁定结束前（约 1 小时）按显示的币数精确发送，并留一点同一种币付 gas。链上 BTC 和 Tron 不支持。Zcash 上的 ZEC（Beta）：请用 https://checkout.rozo.ai/zec，本 CLI 不创建 ZEC 订单。
+原生币只有在这张账单的报价列出时才能用，账单上限 $3,500（Ethereum 上的 ETH 最低 $1）。原生币是精确到账（exact-out）：在币价锁定结束前（约 1 小时）按显示的币数精确发送，并留一点同一种币付 gas。链上 BTC 和 Tron 不支持。Zcash 上的 ZEC（Beta）：请用 https://checkout.rozo.ai/zec，本 CLI 不创建 ZEC 订单。
 
 默认情况下它只是打印一个地址，让你用任意钱包去付 —— 不需要私钥，也不需要任何配置。只有当你想让 CLI 改从热钱包签名时才加 `--send`；加 `--json` 输出机器可读格式。
 

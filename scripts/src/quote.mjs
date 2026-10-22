@@ -150,7 +150,7 @@ async function main(argv) {
     nativeOffered,
     nativeNote:
       'Native coins are exact-out: the coin amount is fixed at order creation and its price is ' +
-      'locked only until quoteExpiresAt. Up to $2,000 per invoice; native ETH on Ethereum needs $1.',
+      'locked only until quoteExpiresAt. Up to $3,500 per invoice; native ETH on Ethereum needs $1.',
     quoteReceipt: quote?.quoteReceipt ?? null,
     quoteReceiptTtlSeconds: 60,
     quoteReceiptNote:
