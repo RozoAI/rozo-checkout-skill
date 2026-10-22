@@ -528,7 +528,7 @@ COINS (--with)
 
 NATIVE COINS
   Offered only when the invoice's quote lists the coin, and only for invoices
-  up to $2,000 (native ETH on Ethereum: $1 minimum). The order is exact-out:
+  up to $3,500 (native ETH on Ethereum: $1 minimum). The order is exact-out:
   send exactly the coin amount shown. Its price is locked only until the time
   shown (about an hour); after that do not send, start a new order. The coin
   amount includes an FX spread on top of the service fee, and your wallet also

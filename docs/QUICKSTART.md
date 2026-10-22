@@ -33,7 +33,7 @@ and the native coins `eth-ethereum`, `eth-base`, `eth-arbitrum`, `bnb-bnb`,
 only appears on a terminal, and there is no default coin.
 
 A native coin is offered only when the invoice's quote lists it, for invoices up
-to $2,000 (native ETH on Ethereum: $1 minimum). It is exact-out: send exactly
+to $3,500 (native ETH on Ethereum: $1 minimum). It is exact-out: send exactly
 the coin amount shown, before its price lock ends (about an hour), and keep a
 little of the same coin for gas. On-chain BTC and Tron are not supported.
 ZEC on Zcash (Beta): use https://checkout.rozo.ai/zec, this CLI does not create ZEC orders.

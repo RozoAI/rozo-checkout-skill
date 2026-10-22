@@ -353,7 +353,7 @@ var NATIVE_COINS = Object.freeze({
   "137:POL": { chainId: "137", symbol: "POL", decimals: 18 },
   "900:SOL": { chainId: "900", symbol: "SOL", decimals: 9 }
 });
-var NATIVE_MAX_USD = 2e3;
+var NATIVE_MAX_USD = 3500;
 var NATIVE_MIN_USD_FALLBACK = Object.freeze({ "1:ETH": 1 });
 function decimalsKey(chainId, tokenSymbol) {
   return `${String(chainId).trim()}:${String(tokenSymbol || "").trim().toUpperCase()}`;
@@ -572,7 +572,7 @@ async function main(argv) {
     // and the native coins it makes payable for this invoice.
     routerSupportedSources: quote?.supportedSources && typeof quote.supportedSources === "object" ? quote.supportedSources : null,
     nativeOffered,
-    nativeNote: "Native coins are exact-out: the coin amount is fixed at order creation and its price is locked only until quoteExpiresAt. Up to $2,000 per invoice; native ETH on Ethereum needs $1.",
+    nativeNote: "Native coins are exact-out: the coin amount is fixed at order creation and its price is locked only until quoteExpiresAt. Up to $3,500 per invoice; native ETH on Ethereum needs $1.",
     quoteReceipt: quote?.quoteReceipt ?? null,
     quoteReceiptTtlSeconds: 60,
     quoteReceiptNote: "Short-lived (~60s). create-order.js takes its own fresh quote; do not carry this over.",
