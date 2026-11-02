@@ -338,11 +338,12 @@ async function main(argv) {
   } catch {
     prior = null;
   }
-  // Shielded ZEC: the lock lives in source.zec.quoteExpiresAt; like a native
-  // coin, a missing lock is a refusal (checkExpiry gets null, not undefined).
+  // Shielded ZEC: the lock is the LIVE source.zec.quoteExpiresAt and nothing
+  // else; a create response or a local record is never a substitute. A missing
+  // lock is a refusal (checkExpiry gets null, not undefined).
   const zecStatus = zec ? zecStatusOf(source) : null;
   const quoteExpiresAt = zec
-    ? (zecStatus?.quoteExpiresAt ?? created?.quoteExpiresAt ?? null)
+    ? (zecStatus?.quoteExpiresAt ?? null)
     : priceLockFor({
         native,
         payment,

@@ -1225,7 +1225,15 @@ function zecStatusOf(source) {
   const confirmations = Number.isInteger(z.confirmations) && z.confirmations >= 0 ? z.confirmations : null;
   const requiredConfirmations = z.requiredConfirmations === 1 || z.requiredConfirmations === 2 ? z.requiredConfirmations : null;
   const quoteExpiresAt = typeof z.quoteExpiresAt === "string" && z.quoteExpiresAt ? z.quoteExpiresAt : null;
-  return { receive, payinState, confirmations, requiredConfirmations, quoteExpiresAt };
+  const receivedZat = typeof z.receivedZat === "string" && /^\d+$/.test(z.receivedZat) ? z.receivedZat : null;
+  return { receive, payinState, confirmations, requiredConfirmations, quoteExpiresAt, receivedZat };
+}
+function zecMoneySeen(zec) {
+  if (!zec) return false;
+  if (zec.payinState === "seen" || zec.payinState === "confirming" || zec.payinState === "eligible") return true;
+  if (zec.receivedZat !== null && zec.receivedZat !== "0") return true;
+  if (zec.payinState === null) return true;
+  return false;
 }
 function parsePaymentUri(uri) {
   if (typeof uri !== "string") return null;
@@ -1387,13 +1395,14 @@ function reuseGuard({ payment, requested, reused = false }) {
   const hasTx = source.txHash !== null && source.txHash !== void 0 && source.txHash !== "";
   const signal = receiptSignal(source);
   const hasConfirm = source.confirmedAt !== null && source.confirmedAt !== void 0 && source.confirmedAt !== "";
-  if (hasTx || signal.money || hasConfirm) {
+  const zecSeen = isZecSource(source.chainId, source.tokenSymbol) && zecMoneySeen(zecStatusOf(source));
+  if (hasTx || signal.money || hasConfirm || zecSeen) {
     return {
       ok: false,
       code: "ORDER_ALREADY_FUNDED",
-      reason: signal.unparsable ? "This order reports an amountReceived that cannot be read. It is treated as funded until a human confirms otherwise \u2014 do NOT pay again." : "This Coinbase link already has a funded Rozo order (it may have been paid elsewhere). Do NOT pay again \u2014 escalate for manual reconciliation.",
+      reason: signal.unparsable ? "This order reports an amountReceived that cannot be read. It is treated as funded until a human confirms otherwise \u2014 do NOT pay again." : zecSeen && !hasTx && !signal.money && !hasConfirm ? "A shielded ZEC payment to this order has already been seen on the network. Do NOT pay again; watch it with status instead." : "This Coinbase link already has a funded Rozo order (it may have been paid elsewhere). Do NOT pay again \u2014 escalate for manual reconciliation.",
       moneyDetected: true,
-      evidence: { ...evidence, receipt: signal.receipt, receiptUnparsable: signal.unparsable }
+      evidence: { ...evidence, receipt: signal.receipt, receiptUnparsable: signal.unparsable, ...zecSeen ? { zec: zecStatusOf(source) } : {} }
     };
   }
   if (payment?.status !== UNPAID_STATUS) {
@@ -1941,7 +1950,7 @@ async function main(argv) {
     prior = null;
   }
   const zecStatus = zec ? zecStatusOf(source) : null;
-  const quoteExpiresAt = zec ? zecStatus?.quoteExpiresAt ?? created?.quoteExpiresAt ?? null : priceLockFor({
+  const quoteExpiresAt = zec ? zecStatus?.quoteExpiresAt ?? null : priceLockFor({
     native,
     payment,
     others: [created?.quoteExpiresAt, prior?.quoteExpiresAt, prior?.confirmation?.quoteExpiresAt]

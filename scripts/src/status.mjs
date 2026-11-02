@@ -24,7 +24,7 @@ import { parseArgs, emit, fail, usage, EXIT_UNCONFIRMED, EXIT_ERROR, publicHash 
 import { isRozoPaymentId, maskAddress } from './lib/ids.mjs';
 import { invoiceStatus, getPayment } from './lib/api.mjs';
 import { chainName, formatAmount, isNativeSource } from './lib/amounts.mjs';
-import { isZecSource, zecStatusOf } from './lib/zec.mjs';
+import { isZecSource, zecStatusOf, zecMoneySeen } from './lib/zec.mjs';
 import { classifyStatus, checkPayable } from './lib/guards.mjs';
 import { SUPPORT } from './lib/support.mjs';
 import { formatRemaining, checkExpiry, lightningWatchMs, DEFAULT_WATCH_MS, priceLockFor } from './lib/expiry.mjs';
@@ -197,6 +197,9 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
   let detail = verdict.detail;
   // Shielded ZEC: the pay-in is reported before any amountReceived is filled
   // in (a mempool sighting, then confirmations). Say so instead of "waiting".
+  // It is money (the reuse guard says the same), so the result must never
+  // suggest paying again or open a send window.
+  const zecMoney = Boolean(zec && zecMoneySeen(zec));
   if (zec && state === 'awaiting_deposit' && (zec.payinState === 'seen' || zec.payinState === 'confirming')) {
     state = 'payin_detected';
     detail = `Shielded pay-in ${zec.payinState}: ${zec.confirmations ?? 0} of ${zec.requiredConfirmations ?? '?'} confirmations.`;
@@ -233,7 +236,7 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
     linkId: linkId || status?.pl_id || null,
     state,
     unknown: verdict.unknown,
-    moneyDetected: verdict.moneyDetected,
+    moneyDetected: verdict.moneyDetected || zecMoney,
     terminal,
     escalate: verdict.escalate,
     detail,

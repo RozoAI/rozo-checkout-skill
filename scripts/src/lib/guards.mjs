@@ -14,7 +14,7 @@
  */
 
 import { comparePayment, sourceAtomic, chainFamily, isNativeSource } from './amounts.mjs';
-import { isZecSource, zecStatusOf, validateShieldedDeposit } from './zec.mjs';
+import { isZecSource, zecStatusOf, validateShieldedDeposit, zecMoneySeen } from './zec.mjs';
 
 /** Statuses that mean "nothing has been funded yet". */
 export const UNPAID_STATUS = 'payment_unpaid';
@@ -179,17 +179,24 @@ export function reuseGuard({ payment, requested, reused = false }) {
   const signal = receiptSignal(source);
   const hasConfirm =
     source.confirmedAt !== null && source.confirmedAt !== undefined && source.confirmedAt !== '';
-  if (hasTx || signal.money || hasConfirm) {
+  // Zcash custody orders report the pay-in in source.zec first (a mempool
+  // sighting, then confirmations), before txHash / amountReceived are filled
+  // in. That is money too, and it outranks everything below.
+  const zecSeen = isZecSource(source.chainId, source.tokenSymbol) && zecMoneySeen(zecStatusOf(source));
+  if (hasTx || signal.money || hasConfirm || zecSeen) {
     return {
       ok: false,
       code: 'ORDER_ALREADY_FUNDED',
       reason: signal.unparsable
         ? 'This order reports an amountReceived that cannot be read. It is treated as funded ' +
           'until a human confirms otherwise — do NOT pay again.'
-        : 'This Coinbase link already has a funded Rozo order (it may have been paid ' +
-          'elsewhere). Do NOT pay again — escalate for manual reconciliation.',
+        : zecSeen && !hasTx && !signal.money && !hasConfirm
+          ? 'A shielded ZEC payment to this order has already been seen on the network. Do NOT pay again; ' +
+            'watch it with status instead.'
+          : 'This Coinbase link already has a funded Rozo order (it may have been paid ' +
+            'elsewhere). Do NOT pay again — escalate for manual reconciliation.',
       moneyDetected: true,
-      evidence: { ...evidence, receipt: signal.receipt, receiptUnparsable: signal.unparsable },
+      evidence: { ...evidence, receipt: signal.receipt, receiptUnparsable: signal.unparsable, ...(zecSeen ? { zec: zecStatusOf(source) } : {}) },
     };
   }
 

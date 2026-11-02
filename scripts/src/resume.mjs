@@ -212,8 +212,9 @@ async function main(argv) {
   // Shielded ZEC: same exact-out rules, lock in source.zec.quoteExpiresAt.
   const zecStatus = isZecSource(source.chainId, source.tokenSymbol) ? zecStatusOf(source) : null;
   const zec = Boolean(zecStatus && zecStatus.receive === 'shielded');
+  // Shielded ZEC: only the live lock counts; a snapshot is never a substitute.
   const quoteExpiresAt = zec
-    ? (zecStatus.quoteExpiresAt ?? snap.expiry?.quoteExpiresAt ?? null)
+    ? (zecStatus.quoteExpiresAt ?? null)
     : priceLockFor({ native, payment, others: [snap.expiry?.quoteExpiresAt] });
   const finalWindow = checkExpiry({
     now: Date.now(),

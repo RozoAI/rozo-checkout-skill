@@ -199,8 +199,20 @@ test('deposit validation and reuse guard understand shielded orders', () => {
   assert.equal(reuseGuard({ payment: zecPayment(), requested: { chainId: '9133', tokenSymbol: 'ZEC' } }).code, 'ZEC_RECEIVE_MODE_MISMATCH');
   // an expired, unfunded quote is not payable
   assert.equal(reuseGuard({ payment: zecPayment({ payinState: 'expired' }), requested: want }).code, 'ZEC_QUOTE_EXPIRED');
-  // money outranks everything
+  // money outranks everything, and for ZEC a sighting in source.zec IS money
   assert.equal(reuseGuard({ payment: zecPayment({ amountReceived: AMOUNT }), requested: want }).code, 'ORDER_ALREADY_FUNDED');
+  for (const payinState of ['seen', 'confirming', 'eligible']) {
+    const g = reuseGuard({ payment: zecPayment({ payinState }), requested: want });
+    assert.equal(g.code, 'ORDER_ALREADY_FUNDED', payinState);
+    assert.equal(g.moneyDetected, true);
+  }
+  const zatOnly = zecPayment();
+  zatOnly.source.zec.receivedZat = '1';
+  assert.equal(reuseGuard({ payment: zatOnly, requested: want }).moneyDetected, true);
+  // an unreadable custody block fails closed
+  const noState = zecPayment();
+  delete noState.source.zec.payinState;
+  assert.equal(reuseGuard({ payment: noState, requested: want }).code, 'ORDER_ALREADY_FUNDED');
 });
 
 test('cli args: --with zec needs --shielded; --shielded is ZEC only; --send is refused; the picker row is offered per invoice', () => {
@@ -349,12 +361,28 @@ test('create: router refusals surface by code; an offer the quote does not make 
       assert.ok(!JSON.stringify(payload).includes('amount=0.009'));
     },
   );
-  // a missing price lock is a refusal, like a native coin
+  // a shielded order whose pay-in was already seen is never shown as payable again
+  const seen = zecPayment({ payinState: 'seen' });
+  await withHttp(
+    [
+      ['/quote-invoice', () => json(quoteBody())],
+      ['/create-invoice', () => json(createBody(seen, { reused: true }))],
+      [`/payments/${ID}`, () => json(seen)],
+    ],
+    async () => {
+      const { payload, exitCode } = await capture(() => runCreateOrder(createArgs('--confirm')));
+      assert.equal(exitCode, 1);
+      assert.equal(payload.error.code, 'ORDER_ALREADY_FUNDED');
+      assert.equal(payload.moneyDetected, true);
+      assert.ok(!JSON.stringify(payload).includes(URI));
+    },
+  );
+  // a missing LIVE price lock is a refusal even when the create response carried one
   const noLock = zecPayment({ quoteExpiresAt: null });
   await withHttp(
     [
       ['/quote-invoice', () => json(quoteBody())],
-      ['/create-invoice', () => json({ ...createBody(noLock), quoteExpiresAt: undefined })],
+      ['/create-invoice', () => json({ ...createBody(noLock), quoteExpiresAt: inMin(30) })],
       [`/payments/${ID}`, () => json(noLock)],
     ],
     async () => {
@@ -375,6 +403,8 @@ test('status: shielded pay-in states and confirmations are surfaced; a seen pay-
     async () => {
       const { payload } = await capture(() => runStatus(['--rozo-payment-id', ID]));
       assert.equal(payload.state, 'payin_detected');
+      assert.equal(payload.moneyDetected, true);
+      assert.equal(payload.sendWindow, null);
       assert.deepEqual([payload.payin.zec.payinState, payload.payin.zec.confirmations, payload.payin.zec.requiredConfirmations], ['seen', 0, 1]);
       assert.equal(payload.expiry.quoteExpiresAt, seen.source.zec.quoteExpiresAt);
     },

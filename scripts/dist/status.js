@@ -509,7 +509,15 @@ function zecStatusOf(source) {
   const confirmations = Number.isInteger(z.confirmations) && z.confirmations >= 0 ? z.confirmations : null;
   const requiredConfirmations = z.requiredConfirmations === 1 || z.requiredConfirmations === 2 ? z.requiredConfirmations : null;
   const quoteExpiresAt = typeof z.quoteExpiresAt === "string" && z.quoteExpiresAt ? z.quoteExpiresAt : null;
-  return { receive, payinState, confirmations, requiredConfirmations, quoteExpiresAt };
+  const receivedZat = typeof z.receivedZat === "string" && /^\d+$/.test(z.receivedZat) ? z.receivedZat : null;
+  return { receive, payinState, confirmations, requiredConfirmations, quoteExpiresAt, receivedZat };
+}
+function zecMoneySeen(zec) {
+  if (!zec) return false;
+  if (zec.payinState === "seen" || zec.payinState === "confirming" || zec.payinState === "eligible") return true;
+  if (zec.receivedZat !== null && zec.receivedZat !== "0") return true;
+  if (zec.payinState === null) return true;
+  return false;
 }
 
 // scripts/src/lib/guards.mjs
@@ -1163,6 +1171,7 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   let state = verdict.state;
   let terminal = verdict.terminal;
   let detail = verdict.detail;
+  const zecMoney = Boolean(zec && zecMoneySeen(zec));
   if (zec && state === "awaiting_deposit" && (zec.payinState === "seen" || zec.payinState === "confirming")) {
     state = "payin_detected";
     detail = `Shielded pay-in ${zec.payinState}: ${zec.confirmations ?? 0} of ${zec.requiredConfirmations ?? "?"} confirmations.`;
@@ -1196,7 +1205,7 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
     linkId: linkId || status?.pl_id || null,
     state,
     unknown: verdict.unknown,
-    moneyDetected: verdict.moneyDetected,
+    moneyDetected: verdict.moneyDetected || zecMoney,
     terminal,
     escalate: verdict.escalate,
     detail,

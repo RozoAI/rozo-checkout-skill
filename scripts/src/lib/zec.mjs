@@ -111,7 +111,22 @@ export function zecStatusOf(source) {
   const confirmations = Number.isInteger(z.confirmations) && z.confirmations >= 0 ? z.confirmations : null;
   const requiredConfirmations = z.requiredConfirmations === 1 || z.requiredConfirmations === 2 ? z.requiredConfirmations : null;
   const quoteExpiresAt = typeof z.quoteExpiresAt === 'string' && z.quoteExpiresAt ? z.quoteExpiresAt : null;
-  return { receive, payinState, confirmations, requiredConfirmations, quoteExpiresAt };
+  const receivedZat = typeof z.receivedZat === 'string' && /^\d+$/.test(z.receivedZat) ? z.receivedZat : null;
+  return { receive, payinState, confirmations, requiredConfirmations, quoteExpiresAt, receivedZat };
+}
+
+/**
+ * Money-detected rule for a ZEC custody order: the rail reports a pay-in in
+ * `source.zec` before (and independently of) `amountReceived` / `txHash`. A
+ * sighting (`seen`), a confirming or settled pay-in, or any received zatoshi
+ * is money, and nobody may be told to pay again. Unknown state fails closed.
+ */
+export function zecMoneySeen(zec) {
+  if (!zec) return false;
+  if (zec.payinState === 'seen' || zec.payinState === 'confirming' || zec.payinState === 'eligible') return true;
+  if (zec.receivedZat !== null && zec.receivedZat !== '0') return true;
+  if (zec.payinState === null) return true;
+  return false;
 }
 
 /**
