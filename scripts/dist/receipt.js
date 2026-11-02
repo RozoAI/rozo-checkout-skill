@@ -1240,7 +1240,7 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   } catch {
     localState = null;
   }
-  const quoteExpiresAt = zec ? zec.quoteExpiresAt ?? localState?.quoteExpiresAt ?? null : priceLockFor({
+  const quoteExpiresAt = zec ? zec.quoteExpiresAt ?? null : priceLockFor({
     native,
     payment: payment || status?.rozoPayment || null,
     others: [localState?.confirmation?.quoteExpiresAt, localState?.quoteExpiresAt]

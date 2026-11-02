@@ -181,8 +181,10 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
   }
   // Native orders: the price lock (earliest of the live one and any this
   // machine recorded). undefined for every other coin.
+  // Shielded ZEC: only the live lock; a missing one fails closed (null, not
+  // undefined, so the send window treats it as an unparsable deadline).
   const quoteExpiresAt = zec
-    ? (zec.quoteExpiresAt ?? localState?.quoteExpiresAt ?? null)
+    ? (zec.quoteExpiresAt ?? null)
     : priceLockFor({
         native,
         payment: payment || status?.rozoPayment || null,

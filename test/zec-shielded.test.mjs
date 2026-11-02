@@ -421,6 +421,21 @@ test('status: shielded pay-in states and confirmations are surfaced; a seen pay-
       assert.equal(payload.payin.zec.receive, 'shielded');
     },
   );
+  // a missing live price lock closes the send window, whatever a local record says
+  const noLock = zecPayment({ quoteExpiresAt: null });
+  await withHttp(
+    [
+      ['/invoice-status', () => json(invoiceStatusBody(noLock))],
+      [`/payments/${ID}`, () => json(noLock)],
+    ],
+    async () => {
+      const { payload } = await capture(() => runStatus(['--rozo-payment-id', ID]));
+      assert.equal(payload.state, 'awaiting_deposit');
+      assert.equal(payload.expiry.quoteExpiresAt, null);
+      assert.equal(payload.sendWindow.ok, false);
+      assert.equal(payload.sendWindow.code, 'EXPIRY_UNPARSABLE');
+    },
+  );
   // the generic classifier is untouched for a settled order
   const done = { ...zecPayment({ payinState: 'eligible', confirmations: 2, amountReceived: AMOUNT }), status: 'payment_payout_completed' };
   assert.equal(classifyStatus({ payment: done, routerState: { status: 'paid' }, coinbase: null }).state, 'settled');
