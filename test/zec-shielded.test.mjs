@@ -438,6 +438,23 @@ test('status: shielded pay-in states and confirmations are surfaced; a seen pay-
       },
     );
   }
+  // a pay-in seen after the order's own expiry is never "expired unfunded"
+  const late = zecPayment({ payinState: 'seen' });
+  late.expiresAt = new Date(Date.now() - MINUTE).toISOString();
+  await withHttp(
+    [
+      ['/invoice-status', () => json(invoiceStatusBody(late))],
+      [`/payments/${ID}`, () => json(late)],
+    ],
+    async () => {
+      const { payload } = await capture(() => runStatus(['--rozo-payment-id', ID]));
+      assert.equal(payload.state, 'stuck_after_payment');
+      assert.equal(payload.escalate, true);
+      assert.equal(payload.moneyDetected, true);
+      assert.equal(payload.sendWindow, null);
+      assert.ok(!/re-run the same pay/i.test(payload.guidance));
+    },
+  );
   // a missing live price lock closes the send window, whatever a local record says
   const noLock = zecPayment({ quoteExpiresAt: null });
   await withHttp(

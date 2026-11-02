@@ -203,7 +203,14 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
   // It is money (the reuse guard says the same), so the result must never
   // suggest paying again or open a send window.
   const zecMoney = Boolean(zec && zecMoneySeen(zec));
-  if (zecMoney && state === 'awaiting_deposit') {
+  let escalate = verdict.escalate;
+  if (zecMoney && state === 'expired_unfunded') {
+    // Money after the order's own expiry: never "expired unfunded", never a retry path.
+    state = 'stuck_after_payment';
+    terminal = false;
+    escalate = true;
+    detail = 'The order expired but the custody rail reports a ZEC pay-in. Do not pay again; escalate for manual reconciliation.';
+  } else if (zecMoney && state === 'awaiting_deposit') {
     state = 'payin_detected';
     detail = zec.payinState === 'seen' || zec.payinState === 'confirming'
       ? `Shielded pay-in ${zec.payinState}: ${zec.confirmations ?? 0} of ${zec.requiredConfirmations ?? '?'} confirmations.`
@@ -243,7 +250,7 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
     unknown: verdict.unknown,
     moneyDetected: verdict.moneyDetected || zecMoney,
     terminal,
-    escalate: verdict.escalate,
+    escalate,
     detail,
     backend: {
       paymentStatus: payment?.status ?? status?.rozoPayment?.status ?? null,

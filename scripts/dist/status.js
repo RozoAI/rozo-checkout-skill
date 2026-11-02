@@ -1173,7 +1173,13 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   let terminal = verdict.terminal;
   let detail = verdict.detail;
   const zecMoney = Boolean(zec && zecMoneySeen(zec));
-  if (zecMoney && state === "awaiting_deposit") {
+  let escalate = verdict.escalate;
+  if (zecMoney && state === "expired_unfunded") {
+    state = "stuck_after_payment";
+    terminal = false;
+    escalate = true;
+    detail = "The order expired but the custody rail reports a ZEC pay-in. Do not pay again; escalate for manual reconciliation.";
+  } else if (zecMoney && state === "awaiting_deposit") {
     state = "payin_detected";
     detail = zec.payinState === "seen" || zec.payinState === "confirming" ? `Shielded pay-in ${zec.payinState}: ${zec.confirmations ?? 0} of ${zec.requiredConfirmations ?? "?"} confirmations.` : `The custody rail reports a ZEC pay-in (${zec.payinState ?? "state unreadable"}). Do not pay again.`;
   }
@@ -1208,7 +1214,7 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
     unknown: verdict.unknown,
     moneyDetected: verdict.moneyDetected || zecMoney,
     terminal,
-    escalate: verdict.escalate,
+    escalate,
     detail,
     backend: {
       paymentStatus: payment?.status ?? status?.rozoPayment?.status ?? null,
