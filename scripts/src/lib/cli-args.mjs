@@ -7,6 +7,7 @@
  */
 
 import { SUPPORTED_SOURCES, isSupportedSource, isNativeSource, chainName } from './amounts.mjs';
+import { isZecSource } from './zec.mjs';
 import { normalizeUtmSource } from './utm.mjs';
 import { normalizeContactEmail } from './support.mjs';
 import { isRozoPaymentId } from './ids.mjs';
@@ -39,6 +40,8 @@ export const CHAIN_ALIASES = {
   ln: 'lightning',
   bitcoin: 'lightning',
   btc: 'lightning',
+  zcash: '9133',
+  zec: '9133',
 };
 
 /** Chain key used when a preset name is printed back to the user. */
@@ -51,6 +54,7 @@ const PRESET_CHAIN = {
   '42161': 'arbitrum',
   '1500': 'stellar',
   lightning: 'lightning',
+  '9133': 'zcash',
 };
 
 /**
@@ -62,6 +66,7 @@ export const PRESET_SHORTCUTS = Object.freeze({
   bnb: 'bnb-bnb',
   sol: 'sol-solana',
   pol: 'pol-polygon',
+  zec: 'zec-zcash',
 });
 
 /**
@@ -93,13 +98,18 @@ const PICKER_ROWS = [
   { group: 'Native coins', token: 'BNB', chain: 'BNB Chain', chainId: '56' },
   { group: 'Native coins', token: 'SOL', chain: 'Solana', chainId: '900' },
   { group: 'Native coins', token: 'POL', chain: 'Polygon', chainId: '137' },
+  // Shielded only; shown when the router offers shielded ZEC for this invoice.
+  { group: 'Zcash (Beta)', token: 'ZEC', chain: 'Zcash', chainId: '9133' },
 ].map((o) => ({
   ...o,
   tokenSymbol: o.token,
   native: isNativeSource(o.chainId, o.token),
+  zec: isZecSource(o.chainId, o.token),
   // What a row says after its number. Native rows name the coin, since the
   // group heading does not.
-  label: isNativeSource(o.chainId, o.token) ? `${o.token} on ${o.chain}` : o.chain,
+  label: isZecSource(o.chainId, o.token)
+    ? 'ZEC from a shielded balance'
+    : isNativeSource(o.chainId, o.token) ? `${o.token} on ${o.chain}` : o.chain,
   // The flag a user could have typed instead, echoed back so they learn it.
   preset: `${o.token.toLowerCase()}-${PRESET_CHAIN[o.chainId]}`,
 }));
@@ -119,7 +129,7 @@ export const PICKER_OPTIONS = numbered(PICKER_ROWS);
  */
 export function pickerOptionsFor(isOffered = null) {
   return numbered(
-    PICKER_ROWS.filter((o) => !o.native || (typeof isOffered === 'function' && isOffered(o.chainId, o.tokenSymbol))),
+    PICKER_ROWS.filter((o) => (!o.native && !o.zec) || (typeof isOffered === 'function' && isOffered(o.chainId, o.tokenSymbol))),
   );
 }
 
@@ -213,6 +223,7 @@ export function resolvePreset(preset) {
 }
 
 const BOOLEAN_FLAGS = new Set([
+  'shielded',
   'send',
   'yes',
   'json',
@@ -463,6 +474,25 @@ export function parseCliArgs(argv) {
     source = null;
   }
 
+  // Zcash: this CLI creates shielded orders only. `--shielded` is required
+  // with ZEC so nobody gets a transparent order they did not ask for, and
+  // it is meaningless with any other coin.
+  const shielded = flags.shielded === true;
+  if (source && isZecSource(source.chainId, source.tokenSymbol)) {
+    if (!shielded && !bitrefill) {
+      throw new CliError(
+        'ZEC_SHIELDED_REQUIRED',
+        'ZEC orders from this CLI pay from a shielded balance: add --shielded (rozo-checkout pay <link> --with zec --shielded). ' +
+          'For transparent ZEC use https://checkout.rozo.ai/zec.',
+      );
+    }
+    if (flags.send === true) {
+      throw new CliError('CONFLICTING_FLAGS', '--send is not available for ZEC: the payer pays from their own shielded wallet.');
+    }
+  } else if (shielded) {
+    throw new CliError('CONFLICTING_FLAGS', '--shielded only applies to ZEC (--with zec).');
+  }
+
   // Optional contact email. Never required; a bad value is an error (not a
   // silent drop) so the user learns before an order exists.
   let email = null;
@@ -486,7 +516,8 @@ export function parseCliArgs(argv) {
     target: target ?? null,
     bitrefill,
     json,
-    source,
+    source: source && shielded ? { ...source, shielded: true } : source,
+    shielded,
     send: flags.send === true,
     yes: flags.yes === true,
     dryRun: flags['dry-run'] === true,
@@ -505,7 +536,8 @@ export function parseCliArgs(argv) {
 
 export const HELP = `rozo-checkout — pay a Coinbase Payment Link or a Bitrefill invoice
 (USDC on Base) with BTC Lightning, USDT/USDC on Solana, BNB Chain, Ethereum, Polygon,
-Arbitrum, Base or Stellar, or a native coin: ETH (Ethereum, Base, Arbitrum), BNB, SOL, POL.
+Arbitrum, Base or Stellar, a native coin: ETH (Ethereum, Base, Arbitrum), BNB, SOL, POL,
+or ZEC from a shielded balance.
 
 USAGE
   npx @rozoai/checkout pay <coinbase-link>              (pick a coin from a list)
@@ -524,6 +556,8 @@ COINS (--with)
   btc-lightning
   native coins: eth-ethereum  eth-base  eth-arbitrum  bnb-bnb (or bnb)
                 sol-solana (or sol)  pol-polygon (or pol)
+  shielded ZEC: --with zec --shielded   (prints the address, amount and payment
+                URI to scan with a shielded wallet; never sends; limits apply)
   or give them raw:  --chain 900 --token USDT
 
 NATIVE COINS

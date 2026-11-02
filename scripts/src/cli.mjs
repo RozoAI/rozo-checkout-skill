@@ -516,6 +516,8 @@ async function cmdPay(opts) {
     }
     invoiceUsd = Number(q.payload.invoice?.amount);
     const offered = new Set((q.payload.nativeOffered ?? []).map((n) => `${n.chainId}:${n.tokenSymbol}`));
+    // Shielded ZEC (Beta) is offered per invoice, like a native coin.
+    if (q.payload.zecShielded?.offered === true) offered.add('9133:ZEC');
     isOffered = (chainId, tokenSymbol) => offered.has(`${chainId}:${String(tokenSymbol).toUpperCase()}`);
   }
 
@@ -531,7 +533,10 @@ async function cmdPay(opts) {
       );
     }
     const picked = await pickSource({ invoiceUsd, saved, fresh: opts.fresh, isOffered });
-    opts.source = { chainId: picked.chainId, tokenSymbol: picked.tokenSymbol };
+    // The ZEC row is the shielded one; this CLI makes no transparent ZEC orders.
+    const pickedZec = String(picked.chainId) === '9133';
+    opts.source = { chainId: picked.chainId, tokenSymbol: picked.tokenSymbol, ...(pickedZec ? { shielded: true } : {}) };
+    if (pickedZec) opts.shielded = true;
     chosenPreset = picked.preset;
     payer = picked.payer;
   } else if (opts.payer) {
@@ -612,7 +617,7 @@ async function cmdPay(opts) {
         '--token', tokenSymbol,
         ...utmArgs,
       ]
-    : ['--url', opts.target, '--chain', chainId, '--token', tokenSymbol, ...utmArgs];
+    : ['--url', opts.target, '--chain', chainId, '--token', tokenSymbol, ...(opts.shielded ? ['--shielded'] : []), ...utmArgs];
 
   // --- 0. Mode B preflight: can this machine actually sign? ----------------
   // Resolving the key source is local and cheap, but it used to happen inside
@@ -676,13 +681,17 @@ async function cmdPay(opts) {
     if (p.provider === 'bitrefill') {
       out(`  Bitrefill ${p.bitrefill?.invoiceId} ${dim(`→ ${p.bitrefill?.amount} USDC on Base to ${p.bitrefill?.addressMasked}`)}`);
     }
-    out(`  You send  ${bold(p.display?.amount)} on ${bold(p.display?.chain)}`);
+    out(`  You send  ${bold(p.display?.amount)} on ${bold(p.display?.chain)}${p.display?.shielded ? dim(' (from a shielded balance, Beta)') : ''}`);
     out(`  To        ${p.display?.payToMasked} ${dim('(full address shown after you confirm)')}`);
     if (p.display?.hasMemo) {
       out(`  Memo      ${p.display.receiverMemoMasked} ${dim(`(${p.display.memoType})`)}`);
     }
     const deadline = formatDeadline(p.expiry?.effectiveDeadlineIso);
-    if (p.display?.native) {
+    if (p.display?.shielded) {
+      out(`  Price     ${bold(`locked ${deadline ?? `for ${p.expiry?.expiresIn ?? '?'}`}`)}`);
+      out(`  ${dim('Pay the exact amount in one transaction before then. Underpayments are not refunded automatically.')}`);
+      out(`  ${dim(`Merchant is paid after ${p.display.requiredConfirmations ?? 1} confirmation${p.display.requiredConfirmations === 2 ? 's' : ''} (about 75 s each).`)}`);
+    } else if (p.display?.native) {
       // Native coins are exact-out: the deadline that matters is the price lock.
       out(`  Price     ${bold(`locked ${deadline ?? `for ${p.expiry?.expiresIn ?? '?'}`}`)}`);
       out(`  ${dim('Send exactly this amount before then. After that, do not send it: start a new order.')}`);
@@ -914,6 +923,19 @@ function printDeposit(deposit, opts) {
     if (validMin !== null) {
       out(`    Valid    ${bold(validMin < 1 ? 'under 1 more minute' : `${validMin} more minutes`)}`);
     }
+  } else if (deposit.shielded) {
+    // Shielded ZEC: the payment URI IS the QR content. Printed verbatim so a
+    // wallet can scan or paste it; address and amount are repeated for a
+    // manual send. No memo line: it travels inside the URI.
+    out(`    Amount   ${bold(`${deposit.amount} ${deposit.tokenSymbol}`)}  ${dim('(exact, one transaction)')}`);
+    out(`    Chain    ${bold(`${deposit.chain}, shielded (Beta)`)}`);
+    out(`    Address  ${bold(deposit.receiverAddress)}`);
+    out(`    URI      ${deposit.paymentUri}`);
+    out(`             ${dim('(scan or paste this in Zashi or another shielded wallet; it carries the memo)')}`);
+    if (deposit.expiresIn) out(`    Price    locked for ${bold(deposit.expiresIn)} more`);
+    const lock = formatDeadline(deposit.quoteExpiresAt);
+    if (lock) out(`             ${dim(`(${lock})`)}`);
+    out(`    Settles  after ${bold(`${deposit.requiredConfirmations ?? 1} confirmation${deposit.requiredConfirmations === 2 ? 's' : ''}`)} ${dim('(about 75 s each)')}`);
   } else {
     out(`    Amount   ${bold(`${deposit.amount} ${deposit.tokenSymbol}`)}`);
     out(`    Chain    ${bold(deposit.chain)}`);
@@ -942,6 +964,10 @@ function printDeposit(deposit, opts) {
     `  Make sure the wallet you pay from holds at least ` +
       `${bold(`${deposit.amount} ${unit}`)} ${where}.`,
   );
+  if (deposit.shielded) {
+    out(dim('  Pay from a shielded balance, exactly this amount, in one transaction. Underpayments are'));
+    out(dim('  not refunded automatically. After the price lock ends, do not send: start a new order.'));
+  }
   if (deposit.native) {
     out(dim(`  Plus a little ${deposit.tokenSymbol} for the network fee. The amount that arrives must be`));
     out(dim('  exactly the amount above: from an exchange, check its withdrawal fee is not taken from it.'));

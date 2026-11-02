@@ -23,6 +23,7 @@ import {
   chainName,
 } from './lib/amounts.mjs';
 import { parseDeadline } from './lib/expiry.mjs';
+import { ZEC_BETA_PARAM, ZEC_SHIELDED_MAX_USD, isZecSource, zecShieldedOfferFor } from './lib/zec.mjs';
 import { normalizeDecimal } from './lib/guards.mjs';
 
 function derivePayable(snapshot, now) {
@@ -95,7 +96,9 @@ async function main(argv) {
   }
 
   const now = Date.now();
-  const quote = await quoteInvoice({ url: String(url) });
+  // The beta opt-in is read-only here: it only makes the router SAY whether
+  // shielded ZEC is on offer. create-order sends it again, only for ZEC.
+  const quote = await quoteInvoice({ url: String(url), beta: ZEC_BETA_PARAM });
   const snapshot = snapshotFromQuote(quote);
   const payability = derivePayable(snapshot, now);
 
@@ -116,6 +119,22 @@ async function main(argv) {
     }))
     .filter((c) => c.offer.ok)
     .map((c) => ({ chainId: c.chainId, tokenSymbol: c.tokenSymbol, chain: c.chain, minUsd: c.offer.minUsd }));
+  // Shielded ZEC on offer for THIS invoice (Beta): the router must list ZEC,
+  // flag shielded as available, and the invoice must sit inside the beta bounds.
+  const zecOffer = zecShieldedOfferFor({
+    supportedSources: quote?.supportedSources,
+    sourceMeta: quote?.sourceMeta,
+    callerPaysUsd: snapshot.callerPays ?? snapshot.original,
+  });
+  const zecShielded = {
+    offered: zecOffer.ok,
+    code: zecOffer.code,
+    reason: zecOffer.reason,
+    requiredConfirmations: zecOffer.requiredConfirmations,
+    maxUsd: ZEC_SHIELDED_MAX_USD,
+    note: 'ZEC (Beta) is paid from a shielded wallet, exact amount in one transaction; the CLI shows the address, amount and payment URI and never sends. Underpayments are not refunded automatically.',
+  };
+  const zecRequested = chosenSource && isZecSource(chosenSource.chainId, chosenSource.tokenSymbol) ? zecOffer : null;
   const nativeRequested = chosenSource && isNativeSource(chosenSource.chainId, chosenSource.tokenSymbol)
     ? nativeOfferFor({
         ...chosenSource,
@@ -148,6 +167,7 @@ async function main(argv) {
     routerSupportedSources:
       quote?.supportedSources && typeof quote.supportedSources === 'object' ? quote.supportedSources : null,
     nativeOffered,
+    zecShielded,
     nativeNote:
       'Native coins are exact-out: the coin amount is fixed at order creation and its price is ' +
       'locked only until quoteExpiresAt. Up to $3,500 per invoice; native ETH on Ethereum needs $1.',
@@ -171,6 +191,13 @@ async function main(argv) {
     payload.error = { code: nativeRequested.code, message: nativeRequested.reason };
     emit(payload, EXIT_ERROR);
   }
+  if (zecRequested && !zecRequested.ok) {
+    payload.success = false;
+    payload.nextStep = null;
+    payload.error = { code: zecRequested.code, message: zecRequested.reason };
+    emit(payload, EXIT_ERROR);
+  }
+  if (zecRequested) payload.nextStep = 'create-order.js --url <url> --chain 9133 --token ZEC --shielded';
 
   // Compare as money, not as text: "5.00" and "5.000000" are the same amount.
   if (

@@ -90,7 +90,12 @@ be the full amount: check that the withdrawal fee is not taken out of it.
 `--send` pays native coins too, as a plain transfer of the exact amount.
 
 On-chain BTC and Tron are not supported.
-ZEC on Zcash (Beta): use https://checkout.rozo.ai/zec, this CLI does not create ZEC orders.
+
+ZEC from a shielded balance (Beta): `pay <link> --with zec --shielded` prints the
+Unified Address, the exact amount and a ZIP-321 payment URI to scan with a shielded
+wallet such as Zashi. The CLI never sends ZEC. Pay the exact amount in one
+transaction; underpayments are not refunded automatically. Beta limit $1,200 per
+payment, minimum $5. Transparent ZEC: use https://checkout.rozo.ai/zec.
 
 ## Which wallet do I need?
 

@@ -14,6 +14,7 @@
  */
 
 import { comparePayment, sourceAtomic, chainFamily, isNativeSource } from './amounts.mjs';
+import { isZecSource, zecStatusOf, validateShieldedDeposit } from './zec.mjs';
 
 /** Statuses that mean "nothing has been funded yet". */
 export const UNPAID_STATUS = 'payment_unpaid';
@@ -109,6 +110,15 @@ export function validateDepositInstructions(source) {
       code: 'DEPOSIT_NOT_LIVE',
       reason: 'The live payments response returned no deposit address.',
     };
+  }
+
+  // Shielded ZEC: the address must be a Unified Address and the ZIP-321
+  // payment URI (what the payer scans) must name exactly this address and
+  // amount. The URI is shown verbatim, so it is checked, never rebuilt.
+  if (family === 'zcash' && zecStatusOf(source)?.receive === 'shielded') {
+    const zec = validateShieldedDeposit(source);
+    if (!zec.ok) return { ok: false, code: zec.code, reason: zec.reason };
+    return { ok: true, code: null, reason: null, family, amountAtomic, payTo: zec.address, memo: null, paymentUri: zec.paymentUri };
   }
 
   if (family === 'stellar' && !memo) {
@@ -213,6 +223,35 @@ export function reuseGuard({ payment, requested, reused = false }) {
       moneyDetected: false,
       evidence,
     };
+  }
+
+  // 3b. Zcash: the order's receive mode must be the one asked for (a shielded
+  //     request must never be handed a transparent address, or vice versa),
+  //     and a quote that already expired unfunded is not payable: the router
+  //     replaces such an order on the next create.
+  if (isZecSource(gotChain, gotToken)) {
+    const zec = zecStatusOf(source);
+    const wantReceive = requested?.shielded === true ? 'shielded' : 'transparent';
+    if (!zec || zec.receive !== wantReceive) {
+      return {
+        ok: false,
+        code: 'ZEC_RECEIVE_MODE_MISMATCH',
+        reason:
+          `This link already has a ZEC order that is paid ${zec?.receive ?? 'in an unknown way'}, but you asked for ` +
+          `${wantReceive}. Nothing new was created. Pay that order the way it was made, or wait for it to expire unfunded.`,
+        moneyDetected: false,
+        evidence: { ...evidence, zec },
+      };
+    }
+    if (zec.payinState === 'expired' || zec.payinState === 'reorged') {
+      return {
+        ok: false,
+        code: 'ZEC_QUOTE_EXPIRED',
+        reason: `The ZEC price lock on this order has ${zec.payinState === 'reorged' ? 'been disturbed by a reorg' : 'expired'} with nothing received. Do not pay it; re-run pay to get a fresh order.`,
+        moneyDetected: false,
+        evidence: { ...evidence, zec },
+      };
+    }
   }
 
   // 4. The deposit instructions must be complete and payable as they stand.

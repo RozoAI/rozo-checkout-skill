@@ -70,9 +70,21 @@ export const INTENTS_BASE =
  * Step 1-2. Returns the upstream quote spread + `quoteReceipt`.
  * NOTE: quoteReceipt TTL is 60 seconds — create-invoice must follow promptly.
  */
-export async function quoteInvoice({ url, linkId }) {
+export async function quoteInvoice({ url, linkId, beta }) {
   const body = url ? { url } : { payment_id: linkId };
-  return postJson(`${MPP_BASE}/quote-invoice`, body);
+  return postJson(withBeta(`${MPP_BASE}/quote-invoice`, beta), body);
+}
+
+/**
+ * Router opt-in for beta sources (ZEC: `zec,zec_shielded`). Both the quote
+ * and the create must carry the same value: the router only offers a beta
+ * coin to a caller who asked for it on that very call.
+ */
+export function withBeta(url, beta) {
+  if (!beta) return url;
+  const u = new URL(url);
+  u.searchParams.set('beta', beta);
+  return u.toString();
 }
 
 /**
@@ -84,10 +96,16 @@ export async function quoteInvoice({ url, linkId }) {
 export const QUOTE_RECEIPT_RETRY_BUDGET_MS = 20_000;
 
 /** Step 4. Creates (or reuses) the Rozo intent for this Coinbase link. */
-export async function createInvoice({ url, linkId, source, quoteReceipt, utmSource, email }) {
+export async function createInvoice({ url, linkId, source, quoteReceipt, utmSource, email, beta }) {
   const body = {
     ...(url ? { url } : { payment_id: linkId }),
-    source: { chainId: String(source.chainId), tokenSymbol: source.tokenSymbol },
+    source: {
+      chainId: String(source.chainId),
+      tokenSymbol: source.tokenSymbol,
+      // Shielded ZEC: the router passes this to intents, which hands out a
+      // pool Unified Address instead of a transparent one. Never sent otherwise.
+      ...(source.shielded === true ? { shielded: true } : {}),
+    },
     ...(quoteReceipt ? { quoteReceipt } : {}),
     client: CLIENT_LABEL,
     attribution: buildAttribution({ utmSource }),
@@ -96,7 +114,7 @@ export async function createInvoice({ url, linkId, source, quoteReceipt, utmSour
     ...(email ? { email } : {}),
   };
   return postJson(
-    `${MPP_BASE}/create-invoice`,
+    withBeta(`${MPP_BASE}/create-invoice`, beta),
     body,
     quoteReceipt ? { maxTotalWaitMs: QUOTE_RECEIPT_RETRY_BUDGET_MS } : undefined,
   );
