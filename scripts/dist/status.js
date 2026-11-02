@@ -361,7 +361,8 @@ var CHAIN_NAMES = {
   42161: "Arbitrum",
   900: "Solana",
   1500: "Stellar",
-  lightning: "Bitcoin Lightning"
+  lightning: "Bitcoin Lightning",
+  9133: "Zcash"
 };
 var NATIVE_COINS = Object.freeze({
   "1:ETH": { chainId: "1", symbol: "ETH", decimals: 18 },
@@ -394,7 +395,9 @@ var DECIMALS = {
   "42161:ETH": 18,
   "56:BNB": 18,
   "137:POL": 18,
-  "900:SOL": 9
+  "900:SOL": 9,
+  // Zcash: zatoshi.
+  "9133:ZEC": 8
 };
 var AmountError = class extends Error {
   constructor(code, message) {
@@ -489,6 +492,32 @@ function chainName(chainId) {
 }
 function isNativeSource(chainId, tokenSymbol) {
   return Object.prototype.hasOwnProperty.call(NATIVE_COINS, decimalsKey(chainId, tokenSymbol));
+}
+
+// scripts/src/lib/zec.mjs
+var ZEC_CHAIN_ID = "9133";
+var ZEC_SYMBOL = "ZEC";
+var ZEC_PAYIN_STATES = /* @__PURE__ */ new Set(["awaiting", "seen", "confirming", "eligible", "expired", "reorged"]);
+function isZecSource(chainId, tokenSymbol) {
+  return String(chainId ?? "").trim() === ZEC_CHAIN_ID && String(tokenSymbol ?? "").trim().toUpperCase() === ZEC_SYMBOL;
+}
+function zecStatusOf(source) {
+  const z = source?.zec;
+  if (!z || typeof z !== "object") return null;
+  const receive = z.receive === "shielded" || z.receive === "transparent" ? z.receive : null;
+  const payinState = ZEC_PAYIN_STATES.has(z.payinState) ? z.payinState : null;
+  const confirmations = Number.isInteger(z.confirmations) && z.confirmations >= 0 ? z.confirmations : null;
+  const requiredConfirmations = z.requiredConfirmations === 1 || z.requiredConfirmations === 2 ? z.requiredConfirmations : null;
+  const quoteExpiresAt = typeof z.quoteExpiresAt === "string" && z.quoteExpiresAt ? z.quoteExpiresAt : null;
+  const receivedZat = typeof z.receivedZat === "string" && /^\d+$/.test(z.receivedZat) ? z.receivedZat : null;
+  return { receive, payinState, confirmations, requiredConfirmations, quoteExpiresAt, receivedZat };
+}
+function zecMoneySeen(zec) {
+  if (!zec) return false;
+  if (zec.payinState === "seen" || zec.payinState === "confirming" || zec.payinState === "eligible") return true;
+  if (zec.receivedZat !== null && zec.receivedZat !== "0") return true;
+  if (zec.payinState === null) return true;
+  return false;
 }
 
 // scripts/src/lib/guards.mjs
@@ -713,7 +742,9 @@ var MARGINS_MS = {
   42161: 10 * MINUTE,
   900: 5 * MINUTE,
   1500: 10 * MINUTE,
-  lightning: 10 * MINUTE
+  lightning: 10 * MINUTE,
+  // Zcash: 75 s blocks, 1 to 2 confirmations, then the hub advances the merchant.
+  9133: 10 * MINUTE
 };
 var BOLT11_MIN_VALIDITY_MS = 10 * MINUTE;
 var DEFAULT_MARGIN_MS = 10 * MINUTE;
@@ -1124,13 +1155,15 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   });
   const source = payment?.source || status?.rozoPayment?.source || {};
   const native = isNativeSource(source.chainId, source.tokenSymbol);
+  const isZec = isZecSource(source.chainId, source.tokenSymbol);
+  const zec = isZec ? zecStatusOf(source) : null;
   let localState = null;
   try {
     localState = id && isRozoPaymentId(id) ? readState(id) : null;
   } catch {
     localState = null;
   }
-  const quoteExpiresAt = priceLockFor({
+  const quoteExpiresAt = isZec ? zec?.quoteExpiresAt ?? null : priceLockFor({
     native,
     payment: payment || status?.rozoPayment || null,
     others: [localState?.confirmation?.quoteExpiresAt, localState?.quoteExpiresAt]
@@ -1139,6 +1172,17 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   let state = verdict.state;
   let terminal = verdict.terminal;
   let detail = verdict.detail;
+  const zecMoney = Boolean(zec && zecMoneySeen(zec));
+  let escalate = verdict.escalate;
+  if (zecMoney && state === "expired_unfunded") {
+    state = "stuck_after_payment";
+    terminal = false;
+    escalate = true;
+    detail = "The order expired but the custody rail reports a ZEC pay-in. Do not pay again; escalate for manual reconciliation.";
+  } else if (zecMoney && state === "awaiting_deposit") {
+    state = "payin_detected";
+    detail = zec.payinState === "seen" || zec.payinState === "confirming" ? `Shielded pay-in ${zec.payinState}: ${zec.confirmations ?? 0} of ${zec.requiredConfirmations ?? "?"} confirmations.` : `The custody rail reports a ZEC pay-in (${zec.payinState ?? "state unreadable"}). Do not pay again.`;
+  }
   if (provider === "bitrefill") {
     let local = null;
     try {
@@ -1168,9 +1212,9 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
     linkId: linkId || status?.pl_id || null,
     state,
     unknown: verdict.unknown,
-    moneyDetected: verdict.moneyDetected,
+    moneyDetected: verdict.moneyDetected || zecMoney,
     terminal,
-    escalate: verdict.escalate,
+    escalate,
     detail,
     backend: {
       paymentStatus: payment?.status ?? status?.rozoPayment?.status ?? null,
@@ -1185,7 +1229,9 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       txHash: publicHash(source.txHash ?? null),
       confirmedAt: source.confirmedAt ?? null,
       senderAddressMasked: source.senderAddress ? maskAddress(source.senderAddress) : null,
-      chain: source.chainId ? chainName(source.chainId) : null
+      chain: source.chainId ? chainName(source.chainId) : null,
+      // Shielded ZEC only: the custody rail's own view of the pay-in.
+      ...zec ? { zec } : {}
     },
     expiry: (() => {
       if (provider === "bitrefill" && !bitrefillExpiry) {
@@ -1201,7 +1247,7 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
         msRemaining: Number.isFinite(ms) ? ms : null,
         // Native orders: the order stays open after the price lock, but a
         // payment after it is valued at the arrival price. Pay before this.
-        ...native ? {
+        ...native || isZec ? {
           quoteExpiresAt: quoteExpiresAt ?? null,
           priceLockExpiresIn: Number.isFinite(lockMs) ? formatRemaining(lockMs) : null
         } : {}
@@ -1212,7 +1258,8 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       confirmedAt: payment?.destination?.confirmedAt ?? status?.rozoPayment?.destination?.confirmedAt ?? null
     },
     localSend: localSendFor(id),
-    sendWindow: state === "awaiting_deposit" ? sendWindowFor({ provider, chainId: source.chainId, payment, status, bitrefillExpiry, quoteExpiresAt }) : null,
+    // Never a send window once the custody rail has seen a ZEC pay-in.
+    sendWindow: state === "awaiting_deposit" && !zecMoney ? sendWindowFor({ provider, chainId: source.chainId, payment, status, bitrefillExpiry, quoteExpiresAt }) : null,
     errors: [statusError, paymentError].filter(Boolean)
   };
 }

@@ -33,6 +33,8 @@ export const MARGINS_MS = {
   900: 5 * MINUTE,
   1500: 10 * MINUTE,
   lightning: 10 * MINUTE,
+  // Zcash: 75 s blocks, 1 to 2 confirmations, then the hub advances the merchant.
+  9133: 10 * MINUTE,
 };
 
 /** Minimum BOLT11 validity we are willing to hand to a payer. */

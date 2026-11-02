@@ -23,6 +23,7 @@ import { parseArgs, emit, usage, EXIT_OK, EXIT_ERROR, SkillError, publicPayPage 
 import { isRozoPaymentId, maskAddress, maskMemo } from './lib/ids.mjs';
 import { getPayment } from './lib/api.mjs';
 import { chainName, chainFamily, formatAmount, isSatsUnit, isNativeSource, STELLAR_MEMO_TYPE } from './lib/amounts.mjs';
+import { isZecSource, zecStatusOf } from './lib/zec.mjs';
 import { reuseGuard } from './lib/guards.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
 import { formatRemaining, checkExpiry, priceLockFor } from './lib/expiry.mjs';
@@ -176,7 +177,13 @@ async function main(argv) {
   // completeness, not the user's coin choice (which the order already fixes).
   const payment = await getPayment(id);
   const source = payment?.source || {};
-  const guard = reuseGuard({ payment, requested: { chainId: source.chainId, tokenSymbol: source.tokenSymbol }, reused: true });
+  // Zcash: the live order's own receive mode is what we are resuming.
+  const resumedShielded = isZecSource(source.chainId, source.tokenSymbol) && zecStatusOf(source)?.receive === 'shielded';
+  const guard = reuseGuard({
+    payment,
+    requested: { chainId: source.chainId, tokenSymbol: source.tokenSymbol, ...(resumedShielded ? { shielded: true } : {}) },
+    reused: true,
+  });
   if (!guard.ok) {
     emit(
       {
@@ -202,13 +209,21 @@ async function main(argv) {
   // deadline (Coinbase / Bitrefill) still bounds it.
   // Native coins: the price lock, from this fresh read and the snapshot's.
   const native = isNativeSource(source.chainId, source.tokenSymbol);
-  const quoteExpiresAt = priceLockFor({ native, payment, others: [snap.expiry?.quoteExpiresAt] });
+  // Shielded ZEC: same exact-out rules, lock in source.zec.quoteExpiresAt.
+  const isZec = isZecSource(source.chainId, source.tokenSymbol);
+  const zecStatus = isZec ? zecStatusOf(source) : null;
+  const zec = Boolean(zecStatus && zecStatus.receive === 'shielded');
+  // Any ZEC order: only the live lock counts; a missing block or lock fails
+  // closed (null, never undefined), and a snapshot is never a substitute.
+  const quoteExpiresAt = isZec
+    ? (zecStatus?.quoteExpiresAt ?? null)
+    : priceLockFor({ native, payment, others: [snap.expiry?.quoteExpiresAt] });
   const finalWindow = checkExpiry({
     now: Date.now(),
     chainId: source.chainId,
     intentExpiresAt: payment?.expiresAt ?? snap.sendWindow?.deadlineMs,
     coinbaseExpiry: snap.sendWindow?.deadlineMs,
-    ...(native ? { quoteExpiresAt } : {}),
+    ...(native || isZec ? { quoteExpiresAt } : {}),
   });
   if (!finalWindow.ok) {
     emit(
@@ -292,8 +307,16 @@ async function main(argv) {
           expiresAt,
           expiresIn,
           native,
-          exactOut: native || lightning,
-          quoteExpiresAt: native ? quoteExpiresAt : null,
+          exactOut: native || lightning || zec,
+          quoteExpiresAt: native || zec ? quoteExpiresAt : null,
+          ...(zec
+            ? {
+                shielded: true,
+                paymentUri: guard.deposit.paymentUri,
+                requiredConfirmations: zecStatus.requiredConfirmations,
+                payinState: zecStatus.payinState,
+              }
+            : {}),
         }
       : null,
     depositWithheld: !confirmed,
@@ -307,12 +330,13 @@ async function main(argv) {
       hasMemo: Boolean(source.receiverMemo),
       memoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
       native,
-      priceLockedUntil: native ? quoteExpiresAt : null,
+      priceLockedUntil: native || zec ? quoteExpiresAt : null,
+      ...(zec ? { shielded: true } : {}),
     },
     expiry: {
       expiresAt,
       expiresIn,
-      ...(native ? { quoteExpiresAt } : {}),
+      ...(native || zec ? { quoteExpiresAt } : {}),
       minutesOfSlack: snap.sendWindow?.minutesOfSlack ?? null,
     },
     note: confirmed

@@ -58,6 +58,7 @@ import {
 } from './lib/amounts.mjs';
 import { checkExpiry, formatRemaining, priceLockFor } from './lib/expiry.mjs';
 import { nativeDepositWarnings } from './lib/native.mjs';
+import { ZEC_BETA_PARAM, isZecSource, zecShieldedOfferFor, zecStatusOf, zecDepositWarnings } from './lib/zec.mjs';
 import {
   reuseGuard,
   verifyCreateAgainstQuote,
@@ -92,7 +93,21 @@ async function main(argv) {
       { supported: SUPPORTED_SOURCES },
     );
   }
-  const requested = { chainId, tokenSymbol };
+  // Zcash (Beta): this script creates SHIELDED orders only. The payer pays
+  // from their own shielded wallet; nothing here signs or sends.
+  const zec = isZecSource(chainId, tokenSymbol);
+  const shielded = Boolean(args.shielded);
+  if (zec && !shielded) {
+    throw new SkillError(
+      'ZEC_SHIELDED_REQUIRED',
+      'ZEC orders from this CLI pay from a shielded balance: add --shielded. For transparent ZEC use https://checkout.rozo.ai/zec.',
+    );
+  }
+  if (shielded && !zec) {
+    throw new SkillError('CONFLICTING_FLAGS', '--shielded only applies to ZEC (--chain 9133 --token ZEC).');
+  }
+  const requested = zec ? { chainId, tokenSymbol, shielded: true } : { chainId, tokenSymbol };
+  const beta = zec ? ZEC_BETA_PARAM : undefined;
   const confirmed = Boolean(args.confirm);
   // Optional; validated before any network call so a typo creates nothing.
   const email = contactEmailFromArgs(args);
@@ -112,7 +127,7 @@ async function main(argv) {
   const { linkId: parsedLinkId } = extractLinkId(String(url));
 
   // --- 1. fresh quote -----------------------------------------------------
-  const quote = await quoteInvoice({ url: String(url) });
+  const quote = await quoteInvoice({ url: String(url), beta });
   const snapshot = snapshotFromQuote(quote);
   const quoteReceipt = quote?.quoteReceipt ?? null;
 
@@ -141,11 +156,34 @@ async function main(argv) {
     }
   }
 
+  // --- 1c. shielded ZEC: offered for THIS invoice, inside the beta bounds ---
+  let zecOffer = null;
+  if (zec) {
+    zecOffer = zecShieldedOfferFor({
+      supportedSources: quote?.supportedSources,
+      sourceMeta: quote?.sourceMeta,
+      callerPaysUsd: snapshot.callerPays ?? snapshot.original,
+    });
+    if (!zecOffer.ok) {
+      emit(
+        {
+          success: false,
+          step: 'zec-offer',
+          error: { code: zecOffer.code, message: zecOffer.reason },
+          linkId: snapshot.linkId ?? parsedLinkId,
+          guidance: 'Nothing was created. Choose USDC or USDT, or another coin the quote lists.',
+        },
+        EXIT_ERROR,
+      );
+    }
+  }
+
   // --- 2. create ----------------------------------------------------------
   const created = await createInvoice({
     url: String(url),
     source: requested,
     quoteReceipt,
+    beta,
     utmSource: typeof args['utm-source'] === 'string' ? args['utm-source'] : undefined,
     email,
   });
@@ -155,6 +193,41 @@ async function main(argv) {
     });
   }
   const rozoPaymentId = assertRozoPaymentId(created.rozoPaymentId);
+
+  // --- 2b. Zcash: the router answers a mode clash with the EXISTING order and
+  // a flag, not an error. Same chain and token, so the drift check below would
+  // not catch it; say so before anything else is read.
+  if (zec && (created.sourceMismatch === true || created.sourceMismatchCode === 'ZEC_RECEIVE_MODE_MISMATCH')) {
+    const remainingMs = created.expiresAt ? Date.parse(created.expiresAt) - Date.now() : NaN;
+    emit(
+      {
+        success: false,
+        step: 'reuse-source-mismatch',
+        error: {
+          code: 'ZEC_RECEIVE_MODE_MISMATCH',
+          message:
+            'This link already has an unpaid ZEC order of the other kind (transparent or shielded). Only one ' +
+            'order exists per link at a time, so nothing new was created.',
+        },
+        linkId: created.linkId ?? parsedLinkId,
+        rozoPaymentId,
+        paymentLink: created.paymentLink ?? null,
+        existingOrder: {
+          rozoPaymentId,
+          chainId: created.source?.chainId ?? null,
+          tokenSymbol: created.source?.tokenSymbol ?? null,
+          receive: created.source?.zec?.receive ?? null,
+          expiresAt: created.expiresAt ?? null,
+          expiresIn: Number.isFinite(remainingMs) ? formatRemaining(remainingMs) : null,
+        },
+        nextAction: { type: 'choose_method', canRetryQuery: true, canCreateOrder: false, canSend: false, switchPossibleAfter: created.expiresAt ?? null },
+        guidance:
+          'Pay the existing order on https://checkout.rozo.ai/zec with the mode it was made for, or wait for its ' +
+          'price lock to expire unfunded (about 30 minutes) and run pay again: an expired, unfunded ZEC order is replaced.',
+      },
+      EXIT_ERROR,
+    );
+  }
 
   // --- 3. post-create verification ---------------------------------------
   const verify = verifyCreateAgainstQuote({ snapshot, created, requested });
@@ -265,11 +338,17 @@ async function main(argv) {
   } catch {
     prior = null;
   }
-  const quoteExpiresAt = priceLockFor({
-    native,
-    payment,
-    others: [created?.quoteExpiresAt, prior?.quoteExpiresAt, prior?.confirmation?.quoteExpiresAt],
-  });
+  // Shielded ZEC: the lock is the LIVE source.zec.quoteExpiresAt and nothing
+  // else; a create response or a local record is never a substitute. A missing
+  // lock is a refusal (checkExpiry gets null, not undefined).
+  const zecStatus = zec ? zecStatusOf(source) : null;
+  const quoteExpiresAt = zec
+    ? (zecStatus?.quoteExpiresAt ?? null)
+    : priceLockFor({
+        native,
+        payment,
+        others: [created?.quoteExpiresAt, prior?.quoteExpiresAt, prior?.confirmation?.quoteExpiresAt],
+      });
   const expiry = checkExpiry({
     now: Date.now(),
     chainId: source.chainId ?? chainId,
@@ -279,7 +358,7 @@ async function main(argv) {
     // separate expiry if the backend exposes one; otherwise the intent expiry
     // governs and we still require the 10-minute floor via the margin.
     ...(lightning ? { bolt11ExpiresAt: payment?.expiresAt } : {}),
-    ...(native ? { quoteExpiresAt } : {}),
+    ...(native || zec ? { quoteExpiresAt } : {}),
   });
   if (!expiry.ok) {
     emit(
@@ -351,13 +430,13 @@ async function main(argv) {
     paymentLink: created.paymentLink ?? null,
     merchant: created.merchant ?? snapshot.merchant,
     invoiceAmount: created.original ?? snapshot.original,
-    source: { chainId: source.chainId, tokenSymbol: source.tokenSymbol },
+    source: { chainId: source.chainId, tokenSymbol: source.tokenSymbol, ...(zec ? { receive: 'shielded' } : {}) },
     receiverAddress: source.receiverAddress,
     receiverMemo: source.receiverMemo ?? null,
     amount: source.amount,
     amountUnit: source.amountUnit ?? null,
     expiresAt: payment?.expiresAt ?? null,
-    ...(native ? { quoteExpiresAt } : {}),
+    ...(native || zec ? { quoteExpiresAt } : {}),
   });
 
   const usd = created.original ?? snapshot.original;
@@ -373,13 +452,15 @@ async function main(argv) {
       source,
       invoiceAmount: usd,
       tier,
-      ...(native ? { quoteExpiresAt } : {}),
+      ...(native || zec ? { quoteExpiresAt } : {}),
     });
   }
 
   const memoRequirement = lightning
     ? 'Lightning invoices carry their own routing data; there is no separate memo.'
-    : source.receiverMemo
+    : zec
+      ? 'The order memo is inside the payment URI; scanning it fills the memo for you. Do not type one.'
+      : source.receiverMemo
       ? 'This deposit REQUIRES the memo/tag below. Sending without it will very likely lose the funds.'
       : family === 'stellar'
         ? 'A Stellar deposit always requires a memo.'
@@ -435,8 +516,18 @@ async function main(argv) {
           // Native coins are exact-out like Lightning: this exact coin amount,
           // at a price locked only until quoteExpiresAt.
           native,
-          exactOut: native || lightning,
-          quoteExpiresAt: native ? quoteExpiresAt : null,
+          exactOut: native || lightning || zec,
+          quoteExpiresAt: native || zec ? quoteExpiresAt : null,
+          // Shielded ZEC: what the payer scans. The QR content is the URI,
+          // shown verbatim; it carries the address, the amount and the memo.
+          ...(zec
+            ? {
+                shielded: true,
+                paymentUri: depositInfo.paymentUri,
+                requiredConfirmations: zecStatus?.requiredConfirmations ?? zecOffer?.requiredConfirmations ?? null,
+                payinState: zecStatus?.payinState ?? null,
+              }
+            : {}),
         }
       : null,
     depositWithheld: !confirmed,
@@ -453,15 +544,16 @@ async function main(argv) {
       memoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
       memoRequirement,
       native,
-      priceLockedUntil: native ? quoteExpiresAt : null,
+      priceLockedUntil: native || zec ? quoteExpiresAt : null,
       // The bare decimal amount (not secret), for balance comparisons.
       coinAmount: isSatsUnit(source.amountUnit) ? null : String(source.amount ?? ''),
+      ...(zec ? { shielded: true, requiredConfirmations: zecStatus?.requiredConfirmations ?? zecOffer?.requiredConfirmations ?? null } : {}),
     },
 
     expiry: {
       intentExpiresAt: payment?.expiresAt ?? null,
       coinbaseExpiry: snapshot?.coinbase?.preApprovalExpiry ?? null,
-      quoteExpiresAt: native ? quoteExpiresAt : null,
+      quoteExpiresAt: native || zec ? quoteExpiresAt : null,
       effectiveDeadlineIso: new Date(expiry.effectiveDeadlineMs).toISOString(),
       // A duration, not just a timestamp: this is what a payer actually needs.
       expiresIn: formatRemaining(expiry.msRemaining),
@@ -484,6 +576,7 @@ async function main(argv) {
         'Send exactly once. A second send to the same one-time address is not guaranteed to be credited.',
         'The deposit amount can exceed the invoice: it includes the bridge and network fees.',
         ...(native ? nativeDepositWarnings({ tokenSymbol: source.tokenSymbol, chainId: source.chainId }) : []),
+        ...(zec ? zecDepositWarnings({ requiredConfirmations: zecStatus?.requiredConfirmations ?? zecOffer?.requiredConfirmations ?? null }) : []),
       ],
     },
 
@@ -501,7 +594,9 @@ async function main(argv) {
               ? `send-evm.js --rozo-payment-id ${rozoPaymentId} --send  (requires ROZO_CHECKOUT_EVM_KEY)`
               : family === 'solana'
                 ? `send-sol.js --rozo-payment-id ${rozoPaymentId} --send  (requires ROZO_CHECKOUT_SOL_KEY)`
-                : 'not available for this chain — pay from a wallet (Mode A)',
+                : zec
+                  ? 'not available: scan deposit.paymentUri with a shielded Zcash wallet (Mode A)'
+                  : 'not available for this chain — pay from a wallet (Mode A)',
         }
       : {
           confirm: 'Re-run this exact command with --confirm once the user has said yes.',

@@ -74,10 +74,31 @@ caller pay one with something else:
 | BTC | Lightning (BOLT11) — any wallet that pays an invoice works, including Cashu/ecash wallets that melt to Lightning |
 | ETH (native) | Ethereum, Base, Arbitrum |
 | BNB, SOL, POL (native) | BNB Chain, Solana, Polygon |
+| ZEC from a shielded balance (Beta) | Zcash, `--with zec --shielded` |
 
 Say exactly which one: "USDT **on** Solana" and "SOL" (the native coin) are
 different orders. On-chain BTC and Tron are **not** supported.
-ZEC on Zcash (Beta): send the user to https://checkout.rozo.ai/zec, this CLI does not create ZEC orders.
+
+**Shielded ZEC (Beta).** `pay <link> --with zec --shielded` creates a shielded
+ZEC order and prints the pool Unified Address (`u1...`), the exact ZEC amount
+and the ZIP-321 payment URI (`deposit.paymentUri`, the QR content). The CLI
+holds no Zcash wallet and never sends: the user scans or pastes the URI in a
+shielded wallet such as Zashi and pays from their shielded balance. Offer it
+only when the quote says so (`quote.js` reports `zecShielded.offered`;
+`create-order.js` refuses otherwise with `ZEC_NOT_OFFERED`,
+`ZEC_SHIELDED_NOT_AVAILABLE`, `ZEC_AMOUNT_TOO_HIGH` or `ZEC_AMOUNT_TOO_LOW`
+before any order exists). Rules to tell the user: pay the exact amount in ONE
+transaction (an exact-out order with a price lock, `deposit.quoteExpiresAt`,
+about 30 minutes); underpayments are not refunded automatically and are held
+for support; the beta limit is $1,200 per payment and the minimum is $5; the
+merchant is paid after 1 confirmation under $110 and 2 from $110 (about 75
+seconds each). The order memo travels inside the URI, so never ask for a memo
+and never ask for a refund address. `--send` is not available for ZEC.
+Transparent ZEC is not created by this CLI: use https://checkout.rozo.ai/zec.
+A link that already holds an unpaid ZEC order of the other kind answers
+`ZEC_RECEIVE_MODE_MISMATCH`; once that order's price lock expires unfunded,
+re-running pay replaces it. `status` shows `payin.zec.payinState`
+(awaiting, seen, confirming, eligible) and the confirmation count.
 
 **Native coins have extra rules.** Offer one only when the quote lists it for
 this invoice (`quote.js` reports `nativeOffered`; `create-order.js` refuses

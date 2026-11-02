@@ -20,6 +20,7 @@ export const CHAIN_IDS = {
   solana: '900',
   stellar: '1500',
   lightning: 'lightning',
+  zcash: '9133',
 };
 
 export const CHAIN_NAMES = {
@@ -31,6 +32,7 @@ export const CHAIN_NAMES = {
   900: 'Solana',
   1500: 'Stellar',
   lightning: 'Bitcoin Lightning',
+  9133: 'Zcash',
 };
 
 /** Chain families drive address normalization and signing backends. */
@@ -43,6 +45,8 @@ export const CHAIN_FAMILY = {
   900: 'solana',
   1500: 'stellar',
   lightning: 'lightning',
+  // Zcash: the CLI creates shielded orders only (pool Unified Address); it never signs.
+  9133: 'zcash',
 };
 
 /**
@@ -63,6 +67,8 @@ export const SUPPORTED_SOURCES = [
   { chainId: '42161', chain: 'Arbitrum', tokens: ['USDC', 'USDT', 'ETH'] },
   { chainId: '1500', chain: 'Stellar', tokens: ['USDC'] },
   { chainId: 'lightning', chain: 'Bitcoin Lightning', tokens: ['BTC'] },
+  // ZEC (Beta): shielded orders only, offered per invoice by the router (see lib/zec.mjs).
+  { chainId: '9133', chain: 'Zcash', tokens: ['ZEC'] },
 ];
 
 /**
@@ -113,6 +119,8 @@ const DECIMALS = {
   '56:BNB': 18,
   '137:POL': 18,
   '900:SOL': 9,
+  // Zcash: zatoshi.
+  '9133:ZEC': 8,
 };
 
 export class AmountError extends Error {

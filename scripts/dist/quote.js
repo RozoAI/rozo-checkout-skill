@@ -301,9 +301,15 @@ var MPP_BASE = process.env.ROZO_CHECKOUT_MPP_BASE || "https://apiserver.mpproute
 var CLIENT_LABEL = `rozo-checkout-cli/${PKG_VERSION}`;
 var ATTRIBUTION_CLIENT = `rozo-checkout-skill/${PKG_VERSION}`;
 var INTENTS_BASE = process.env.ROZO_CHECKOUT_INTENTS_BASE || "https://intentapiv4.rozo.ai/functions/v1/payment-api";
-async function quoteInvoice({ url, linkId }) {
+async function quoteInvoice({ url, linkId, beta }) {
   const body = url ? { url } : { payment_id: linkId };
-  return postJson(`${MPP_BASE}/quote-invoice`, body);
+  return postJson(withBeta(`${MPP_BASE}/quote-invoice`, beta), body);
+}
+function withBeta(url, beta) {
+  if (!beta) return url;
+  const u = new URL(url);
+  u.searchParams.set("beta", beta);
+  return u.toString();
 }
 function snapshotFromQuote(quote) {
   const cb = quote?.coinbasePayment || quote?.paymentLink || null;
@@ -333,7 +339,8 @@ var CHAIN_NAMES = {
   42161: "Arbitrum",
   900: "Solana",
   1500: "Stellar",
-  lightning: "Bitcoin Lightning"
+  lightning: "Bitcoin Lightning",
+  9133: "Zcash"
 };
 var SUPPORTED_SOURCES = [
   { chainId: "1", chain: "Ethereum", tokens: ["USDC", "USDT", "ETH"] },
@@ -343,7 +350,9 @@ var SUPPORTED_SOURCES = [
   { chainId: "8453", chain: "Base", tokens: ["USDC", "ETH"] },
   { chainId: "42161", chain: "Arbitrum", tokens: ["USDC", "USDT", "ETH"] },
   { chainId: "1500", chain: "Stellar", tokens: ["USDC"] },
-  { chainId: "lightning", chain: "Bitcoin Lightning", tokens: ["BTC"] }
+  { chainId: "lightning", chain: "Bitcoin Lightning", tokens: ["BTC"] },
+  // ZEC (Beta): shielded orders only, offered per invoice by the router (see lib/zec.mjs).
+  { chainId: "9133", chain: "Zcash", tokens: ["ZEC"] }
 ];
 var NATIVE_COINS = Object.freeze({
   "1:ETH": { chainId: "1", symbol: "ETH", decimals: 18 },
@@ -434,7 +443,9 @@ var MARGINS_MS = {
   42161: 10 * MINUTE,
   900: 5 * MINUTE,
   1500: 10 * MINUTE,
-  lightning: 10 * MINUTE
+  lightning: 10 * MINUTE,
+  // Zcash: 75 s blocks, 1 to 2 confirmations, then the hub advances the merchant.
+  9133: 10 * MINUTE
 };
 var BOLT11_MIN_VALIDITY_MS = 10 * MINUTE;
 var DEFAULT_MARGIN_MS = 10 * MINUTE;
@@ -452,6 +463,69 @@ function parseDeadline(value) {
   }
   const t = Date.parse(s);
   return Number.isFinite(t) ? t : null;
+}
+
+// scripts/src/lib/zec.mjs
+var ZEC_CHAIN_ID = "9133";
+var ZEC_SYMBOL = "ZEC";
+var ZEC_SOURCE_META_KEY = "ZEC@9133";
+var ZEC_BETA_PARAM = "zec,zec_shielded";
+var ZEC_SHIELDED_MAX_USD = 1200;
+var ZEC_MIN_USD = 5;
+var ZEC_TWO_CONF_FROM_USD = 110;
+function isZecSource(chainId, tokenSymbol) {
+  return String(chainId ?? "").trim() === ZEC_CHAIN_ID && String(tokenSymbol ?? "").trim().toUpperCase() === ZEC_SYMBOL;
+}
+function zecRequiredConfirmations(usd) {
+  const n = Number(usd);
+  return Number.isFinite(n) && n >= ZEC_TWO_CONF_FROM_USD ? 2 : 1;
+}
+function zecShieldedOfferFor({ supportedSources, sourceMeta, callerPaysUsd }) {
+  const list = supportedSources && typeof supportedSources === "object" ? supportedSources[ZEC_CHAIN_ID] : null;
+  if (!Array.isArray(list) || !list.map((t) => String(t).toUpperCase()).includes(ZEC_SYMBOL)) {
+    return {
+      ok: false,
+      code: "ZEC_NOT_OFFERED",
+      reason: "ZEC is not offered for this invoice. Pay with USDC or USDT instead.",
+      requiredConfirmations: null
+    };
+  }
+  const meta = sourceMeta && typeof sourceMeta === "object" ? sourceMeta[ZEC_SOURCE_META_KEY] : null;
+  const available = meta && typeof meta === "object" && (meta.shieldedAvailable === true || meta.shielded_available === true);
+  if (!available) {
+    return {
+      ok: false,
+      code: "ZEC_SHIELDED_NOT_AVAILABLE",
+      reason: "Paying from a shielded balance is not available for this invoice right now.",
+      requiredConfirmations: null
+    };
+  }
+  const usd = Number(callerPaysUsd);
+  if (!Number.isFinite(usd) || usd <= 0) {
+    return {
+      ok: false,
+      code: "ZEC_AMOUNT_UNKNOWN",
+      reason: "The quote carries no USD amount, so the shielded ZEC limits cannot be checked. Pay with USDC or USDT instead.",
+      requiredConfirmations: null
+    };
+  }
+  if (usd > ZEC_SHIELDED_MAX_USD) {
+    return {
+      ok: false,
+      code: "ZEC_AMOUNT_TOO_HIGH",
+      reason: `Shielded ZEC is limited to $${ZEC_SHIELDED_MAX_USD} per payment during the beta; this invoice is $${usd}. Pay with USDC or USDT instead.`,
+      requiredConfirmations: null
+    };
+  }
+  if (usd < ZEC_MIN_USD) {
+    return {
+      ok: false,
+      code: "ZEC_AMOUNT_TOO_LOW",
+      reason: `ZEC payments need an invoice of at least $${ZEC_MIN_USD}; this one is $${usd}. Pay with another coin.`,
+      requiredConfirmations: null
+    };
+  }
+  return { ok: true, code: null, reason: null, requiredConfirmations: zecRequiredConfirmations(usd) };
 }
 
 // scripts/src/lib/guards.mjs
@@ -529,7 +603,7 @@ async function main(argv) {
     chosenSource = { chainId, tokenSymbol };
   }
   const now = Date.now();
-  const quote = await quoteInvoice({ url: String(url) });
+  const quote = await quoteInvoice({ url: String(url), beta: ZEC_BETA_PARAM });
   const snapshot = snapshotFromQuote(quote);
   const payability = derivePayable(snapshot, now);
   const nativeOffered = Object.values(NATIVE_COINS).map((c) => ({
@@ -544,6 +618,20 @@ async function main(argv) {
       callerPaysUsd: snapshot.callerPays ?? snapshot.original
     })
   })).filter((c) => c.offer.ok).map((c) => ({ chainId: c.chainId, tokenSymbol: c.tokenSymbol, chain: c.chain, minUsd: c.offer.minUsd }));
+  const zecOffer = zecShieldedOfferFor({
+    supportedSources: quote?.supportedSources,
+    sourceMeta: quote?.sourceMeta,
+    callerPaysUsd: snapshot.callerPays ?? snapshot.original
+  });
+  const zecShielded = {
+    offered: zecOffer.ok,
+    code: zecOffer.code,
+    reason: zecOffer.reason,
+    requiredConfirmations: zecOffer.requiredConfirmations,
+    maxUsd: ZEC_SHIELDED_MAX_USD,
+    note: "ZEC (Beta) is paid from a shielded wallet, exact amount in one transaction; the CLI shows the address, amount and payment URI and never sends. Underpayments are not refunded automatically."
+  };
+  const zecRequested = chosenSource && isZecSource(chosenSource.chainId, chosenSource.tokenSymbol) ? zecOffer : null;
   const nativeRequested = chosenSource && isNativeSource(chosenSource.chainId, chosenSource.tokenSymbol) ? nativeOfferFor({
     ...chosenSource,
     supportedSources: quote?.supportedSources,
@@ -572,6 +660,7 @@ async function main(argv) {
     // and the native coins it makes payable for this invoice.
     routerSupportedSources: quote?.supportedSources && typeof quote.supportedSources === "object" ? quote.supportedSources : null,
     nativeOffered,
+    zecShielded,
     nativeNote: "Native coins are exact-out: the coin amount is fixed at order creation and its price is locked only until quoteExpiresAt. Up to $3,500 per invoice; native ETH on Ethereum needs $1.",
     quoteReceipt: quote?.quoteReceipt ?? null,
     quoteReceiptTtlSeconds: 60,
@@ -589,6 +678,13 @@ async function main(argv) {
     payload.error = { code: nativeRequested.code, message: nativeRequested.reason };
     emit(payload, EXIT_ERROR);
   }
+  if (zecRequested && !zecRequested.ok) {
+    payload.success = false;
+    payload.nextStep = null;
+    payload.error = { code: zecRequested.code, message: zecRequested.reason };
+    emit(payload, EXIT_ERROR);
+  }
+  if (zecRequested) payload.nextStep = "create-order.js --url <url> --chain 9133 --token ZEC --shielded";
   if (snapshot.callerPays && snapshot.original && normalizeDecimal(snapshot.callerPays) !== normalizeDecimal(snapshot.original)) {
     payload.warnings = [
       `callerPays (${snapshot.callerPays}) differs from the invoice amount (${snapshot.original}). This flow is supposed to charge the full invoice \u2014 do not proceed until that is explained.`

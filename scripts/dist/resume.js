@@ -382,7 +382,8 @@ var CHAIN_NAMES = {
   42161: "Arbitrum",
   900: "Solana",
   1500: "Stellar",
-  lightning: "Bitcoin Lightning"
+  lightning: "Bitcoin Lightning",
+  9133: "Zcash"
 };
 var CHAIN_FAMILY = {
   1: "evm",
@@ -392,7 +393,9 @@ var CHAIN_FAMILY = {
   42161: "evm",
   900: "solana",
   1500: "stellar",
-  lightning: "lightning"
+  lightning: "lightning",
+  // Zcash: the CLI creates shielded orders only (pool Unified Address); it never signs.
+  9133: "zcash"
 };
 var NATIVE_COINS = Object.freeze({
   "1:ETH": { chainId: "1", symbol: "ETH", decimals: 18 },
@@ -425,7 +428,9 @@ var DECIMALS = {
   "42161:ETH": 18,
   "56:BNB": 18,
   "137:POL": 18,
-  "900:SOL": 9
+  "900:SOL": 9,
+  // Zcash: zatoshi.
+  "9133:ZEC": 8
 };
 var AmountError = class extends Error {
   constructor(code, message) {
@@ -526,6 +531,96 @@ function isNativeSource(chainId, tokenSymbol) {
   return Object.prototype.hasOwnProperty.call(NATIVE_COINS, decimalsKey(chainId, tokenSymbol));
 }
 
+// scripts/src/lib/zec.mjs
+var ZEC_CHAIN_ID = "9133";
+var ZEC_SYMBOL = "ZEC";
+var ZEC_PAYIN_STATES = /* @__PURE__ */ new Set(["awaiting", "seen", "confirming", "eligible", "expired", "reorged"]);
+var UA_RE = /^u1[02-9ac-hj-np-z]{100,400}$/;
+function isZecSource(chainId, tokenSymbol) {
+  return String(chainId ?? "").trim() === ZEC_CHAIN_ID && String(tokenSymbol ?? "").trim().toUpperCase() === ZEC_SYMBOL;
+}
+function isUnifiedAddress(value) {
+  return typeof value === "string" && UA_RE.test(value.trim());
+}
+function zecStatusOf(source) {
+  const z = source?.zec;
+  if (!z || typeof z !== "object") return null;
+  const receive = z.receive === "shielded" || z.receive === "transparent" ? z.receive : null;
+  const payinState = ZEC_PAYIN_STATES.has(z.payinState) ? z.payinState : null;
+  const confirmations = Number.isInteger(z.confirmations) && z.confirmations >= 0 ? z.confirmations : null;
+  const requiredConfirmations = z.requiredConfirmations === 1 || z.requiredConfirmations === 2 ? z.requiredConfirmations : null;
+  const quoteExpiresAt = typeof z.quoteExpiresAt === "string" && z.quoteExpiresAt ? z.quoteExpiresAt : null;
+  const receivedZat = typeof z.receivedZat === "string" && /^\d+$/.test(z.receivedZat) ? z.receivedZat : null;
+  return { receive, payinState, confirmations, requiredConfirmations, quoteExpiresAt, receivedZat };
+}
+function zecMoneySeen(zec) {
+  if (!zec) return false;
+  if (zec.payinState === "seen" || zec.payinState === "confirming" || zec.payinState === "eligible") return true;
+  if (zec.receivedZat !== null && zec.receivedZat !== "0") return true;
+  if (zec.payinState === null) return true;
+  return false;
+}
+function parsePaymentUri(uri) {
+  if (typeof uri !== "string") return null;
+  const m = /^zcash:([0-9a-z]+)\?([^#]*)$/i.exec(uri.trim());
+  if (!m) return null;
+  const address = m[1];
+  const out = { address, amount: null, memo: null };
+  const seen = /* @__PURE__ */ new Set();
+  for (const part of m[2].split("&")) {
+    if (!part) return null;
+    const eq = part.indexOf("=");
+    if (eq <= 0) return null;
+    const key = part.slice(0, eq);
+    const value = part.slice(eq + 1);
+    if (seen.has(key)) return null;
+    seen.add(key);
+    if (key === "amount") {
+      if (!/^\d+(\.\d{1,8})?$/.test(value)) return null;
+      out.amount = value;
+    } else if (key === "memo") {
+      if (!/^[A-Za-z0-9_-]{1,684}$/.test(value)) return null;
+      out.memo = value;
+    } else {
+      return null;
+    }
+  }
+  if (out.amount === null) return null;
+  return out;
+}
+function sameDecimal(a, b) {
+  const norm = (v) => {
+    const s = String(v ?? "").trim();
+    if (!/^\d+(\.\d+)?$/.test(s)) return null;
+    const [w, f = ""] = s.split(".");
+    const frac = f.replace(/0+$/, "");
+    return `${w.replace(/^0+(?=\d)/, "")}${frac ? `.${frac}` : ""}`;
+  };
+  const na = norm(a);
+  return na !== null && na === norm(b);
+}
+function validateShieldedDeposit(source) {
+  const address = typeof source?.receiverAddress === "string" ? source.receiverAddress.trim() : "";
+  if (!isUnifiedAddress(address)) {
+    return { ok: false, code: "ZEC_ADDRESS_INVALID", reason: "The order did not return a mainnet Unified Address (u1...). Refusing to show it as payable." };
+  }
+  const uri = typeof source?.paymentUri === "string" ? source.paymentUri.trim() : "";
+  if (!uri) {
+    return { ok: false, code: "ZEC_PAYMENT_URI_MISSING", reason: "The order carries no payment URI yet. Nothing is payable until it appears." };
+  }
+  const parsed = parsePaymentUri(uri);
+  if (!parsed) {
+    return { ok: false, code: "ZEC_PAYMENT_URI_INVALID", reason: "The payment URI is not a single-payment ZIP-321 URI. Refusing to show it." };
+  }
+  if (parsed.address !== address) {
+    return { ok: false, code: "ZEC_PAYMENT_URI_MISMATCH", reason: "The payment URI names a different address than the order. Refusing to show it." };
+  }
+  if (!sameDecimal(parsed.amount, source?.amount)) {
+    return { ok: false, code: "ZEC_PAYMENT_URI_MISMATCH", reason: "The payment URI amount differs from the order amount. Refusing to show it." };
+  }
+  return { ok: true, code: null, reason: null, address, paymentUri: uri, memo: parsed.memo };
+}
+
 // scripts/src/lib/guards.mjs
 var UNPAID_STATUS = "payment_unpaid";
 var NATIVE_PROGRESS_STATUSES = /* @__PURE__ */ new Set([
@@ -586,6 +681,11 @@ function validateDepositInstructions(source) {
       reason: "The live payments response returned no deposit address."
     };
   }
+  if (family === "zcash" && zecStatusOf(source)?.receive === "shielded") {
+    const zec = validateShieldedDeposit(source);
+    if (!zec.ok) return { ok: false, code: zec.code, reason: zec.reason };
+    return { ok: true, code: null, reason: null, family, amountAtomic, payTo: zec.address, memo: null, paymentUri: zec.paymentUri };
+  }
   if (family === "stellar" && !memo) {
     return {
       ok: false,
@@ -618,13 +718,14 @@ function reuseGuard({ payment, requested, reused = false }) {
   const hasTx = source.txHash !== null && source.txHash !== void 0 && source.txHash !== "";
   const signal = receiptSignal(source);
   const hasConfirm = source.confirmedAt !== null && source.confirmedAt !== void 0 && source.confirmedAt !== "";
-  if (hasTx || signal.money || hasConfirm) {
+  const zecSeen = isZecSource(source.chainId, source.tokenSymbol) && zecMoneySeen(zecStatusOf(source));
+  if (hasTx || signal.money || hasConfirm || zecSeen) {
     return {
       ok: false,
       code: "ORDER_ALREADY_FUNDED",
-      reason: signal.unparsable ? "This order reports an amountReceived that cannot be read. It is treated as funded until a human confirms otherwise \u2014 do NOT pay again." : "This Coinbase link already has a funded Rozo order (it may have been paid elsewhere). Do NOT pay again \u2014 escalate for manual reconciliation.",
+      reason: signal.unparsable ? "This order reports an amountReceived that cannot be read. It is treated as funded until a human confirms otherwise \u2014 do NOT pay again." : zecSeen && !hasTx && !signal.money && !hasConfirm ? "A shielded ZEC payment to this order has already been seen on the network. Do NOT pay again; watch it with status instead." : "This Coinbase link already has a funded Rozo order (it may have been paid elsewhere). Do NOT pay again \u2014 escalate for manual reconciliation.",
       moneyDetected: true,
-      evidence: { ...evidence, receipt: signal.receipt, receiptUnparsable: signal.unparsable }
+      evidence: { ...evidence, receipt: signal.receipt, receiptUnparsable: signal.unparsable, ...zecSeen ? { zec: zecStatusOf(source) } : {} }
     };
   }
   if (payment?.status !== UNPAID_STATUS) {
@@ -651,6 +752,28 @@ function reuseGuard({ payment, requested, reused = false }) {
       moneyDetected: false,
       evidence
     };
+  }
+  if (isZecSource(gotChain, gotToken)) {
+    const zec = zecStatusOf(source);
+    const wantReceive = requested?.shielded === true ? "shielded" : "transparent";
+    if (!zec || zec.receive !== wantReceive) {
+      return {
+        ok: false,
+        code: "ZEC_RECEIVE_MODE_MISMATCH",
+        reason: `This link already has a ZEC order that is paid ${zec?.receive ?? "in an unknown way"}, but you asked for ${wantReceive}. Nothing new was created. Pay that order the way it was made, or wait for it to expire unfunded.`,
+        moneyDetected: false,
+        evidence: { ...evidence, zec }
+      };
+    }
+    if (zec.payinState === "expired" || zec.payinState === "reorged") {
+      return {
+        ok: false,
+        code: "ZEC_QUOTE_EXPIRED",
+        reason: `The ZEC price lock on this order has ${zec.payinState === "reorged" ? "been disturbed by a reorg" : "expired"} with nothing received. Do not pay it; re-run pay to get a fresh order.`,
+        moneyDetected: false,
+        evidence: { ...evidence, zec }
+      };
+    }
   }
   const deposit = validateDepositInstructions(source);
   if (!deposit.ok) {
@@ -989,7 +1112,9 @@ var MARGINS_MS = {
   42161: 10 * MINUTE,
   900: 5 * MINUTE,
   1500: 10 * MINUTE,
-  lightning: 10 * MINUTE
+  lightning: 10 * MINUTE,
+  // Zcash: 75 s blocks, 1 to 2 confirmations, then the hub advances the merchant.
+  9133: 10 * MINUTE
 };
 var BOLT11_MIN_VALIDITY_MS = 10 * MINUTE;
 var DEFAULT_MARGIN_MS = 10 * MINUTE;
@@ -1276,13 +1401,15 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   });
   const source = payment?.source || status?.rozoPayment?.source || {};
   const native = isNativeSource(source.chainId, source.tokenSymbol);
+  const isZec = isZecSource(source.chainId, source.tokenSymbol);
+  const zec = isZec ? zecStatusOf(source) : null;
   let localState = null;
   try {
     localState = id && isRozoPaymentId(id) ? readState(id) : null;
   } catch {
     localState = null;
   }
-  const quoteExpiresAt = priceLockFor({
+  const quoteExpiresAt = isZec ? zec?.quoteExpiresAt ?? null : priceLockFor({
     native,
     payment: payment || status?.rozoPayment || null,
     others: [localState?.confirmation?.quoteExpiresAt, localState?.quoteExpiresAt]
@@ -1291,6 +1418,17 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   let state = verdict.state;
   let terminal = verdict.terminal;
   let detail = verdict.detail;
+  const zecMoney = Boolean(zec && zecMoneySeen(zec));
+  let escalate = verdict.escalate;
+  if (zecMoney && state === "expired_unfunded") {
+    state = "stuck_after_payment";
+    terminal = false;
+    escalate = true;
+    detail = "The order expired but the custody rail reports a ZEC pay-in. Do not pay again; escalate for manual reconciliation.";
+  } else if (zecMoney && state === "awaiting_deposit") {
+    state = "payin_detected";
+    detail = zec.payinState === "seen" || zec.payinState === "confirming" ? `Shielded pay-in ${zec.payinState}: ${zec.confirmations ?? 0} of ${zec.requiredConfirmations ?? "?"} confirmations.` : `The custody rail reports a ZEC pay-in (${zec.payinState ?? "state unreadable"}). Do not pay again.`;
+  }
   if (provider === "bitrefill") {
     let local = null;
     try {
@@ -1320,9 +1458,9 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
     linkId: linkId || status?.pl_id || null,
     state,
     unknown: verdict.unknown,
-    moneyDetected: verdict.moneyDetected,
+    moneyDetected: verdict.moneyDetected || zecMoney,
     terminal,
-    escalate: verdict.escalate,
+    escalate,
     detail,
     backend: {
       paymentStatus: payment?.status ?? status?.rozoPayment?.status ?? null,
@@ -1337,7 +1475,9 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       txHash: publicHash(source.txHash ?? null),
       confirmedAt: source.confirmedAt ?? null,
       senderAddressMasked: source.senderAddress ? maskAddress(source.senderAddress) : null,
-      chain: source.chainId ? chainName(source.chainId) : null
+      chain: source.chainId ? chainName(source.chainId) : null,
+      // Shielded ZEC only: the custody rail's own view of the pay-in.
+      ...zec ? { zec } : {}
     },
     expiry: (() => {
       if (provider === "bitrefill" && !bitrefillExpiry) {
@@ -1353,7 +1493,7 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
         msRemaining: Number.isFinite(ms) ? ms : null,
         // Native orders: the order stays open after the price lock, but a
         // payment after it is valued at the arrival price. Pay before this.
-        ...native ? {
+        ...native || isZec ? {
           quoteExpiresAt: quoteExpiresAt ?? null,
           priceLockExpiresIn: Number.isFinite(lockMs) ? formatRemaining(lockMs) : null
         } : {}
@@ -1364,7 +1504,8 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       confirmedAt: payment?.destination?.confirmedAt ?? status?.rozoPayment?.destination?.confirmedAt ?? null
     },
     localSend: localSendFor(id),
-    sendWindow: state === "awaiting_deposit" ? sendWindowFor({ provider, chainId: source.chainId, payment, status, bitrefillExpiry, quoteExpiresAt }) : null,
+    // Never a send window once the custody rail has seen a ZEC pay-in.
+    sendWindow: state === "awaiting_deposit" && !zecMoney ? sendWindowFor({ provider, chainId: source.chainId, payment, status, bitrefillExpiry, quoteExpiresAt }) : null,
     errors: [statusError, paymentError].filter(Boolean)
   };
 }
@@ -1506,7 +1647,12 @@ async function main(argv) {
   }
   const payment = await getPayment(id);
   const source = payment?.source || {};
-  const guard = reuseGuard({ payment, requested: { chainId: source.chainId, tokenSymbol: source.tokenSymbol }, reused: true });
+  const resumedShielded = isZecSource(source.chainId, source.tokenSymbol) && zecStatusOf(source)?.receive === "shielded";
+  const guard = reuseGuard({
+    payment,
+    requested: { chainId: source.chainId, tokenSymbol: source.tokenSymbol, ...resumedShielded ? { shielded: true } : {} },
+    reused: true
+  });
   if (!guard.ok) {
     emit(
       {
@@ -1524,13 +1670,16 @@ async function main(argv) {
     );
   }
   const native = isNativeSource(source.chainId, source.tokenSymbol);
-  const quoteExpiresAt = priceLockFor({ native, payment, others: [snap.expiry?.quoteExpiresAt] });
+  const isZec = isZecSource(source.chainId, source.tokenSymbol);
+  const zecStatus = isZec ? zecStatusOf(source) : null;
+  const zec = Boolean(zecStatus && zecStatus.receive === "shielded");
+  const quoteExpiresAt = isZec ? zecStatus?.quoteExpiresAt ?? null : priceLockFor({ native, payment, others: [snap.expiry?.quoteExpiresAt] });
   const finalWindow = checkExpiry({
     now: Date.now(),
     chainId: source.chainId,
     intentExpiresAt: payment?.expiresAt ?? snap.sendWindow?.deadlineMs,
     coinbaseExpiry: snap.sendWindow?.deadlineMs,
-    ...native ? { quoteExpiresAt } : {}
+    ...native || isZec ? { quoteExpiresAt } : {}
   });
   if (!finalWindow.ok) {
     emit(
@@ -1605,8 +1754,14 @@ async function main(argv) {
       expiresAt,
       expiresIn,
       native,
-      exactOut: native || lightning,
-      quoteExpiresAt: native ? quoteExpiresAt : null
+      exactOut: native || lightning || zec,
+      quoteExpiresAt: native || zec ? quoteExpiresAt : null,
+      ...zec ? {
+        shielded: true,
+        paymentUri: guard.deposit.paymentUri,
+        requiredConfirmations: zecStatus.requiredConfirmations,
+        payinState: zecStatus.payinState
+      } : {}
     } : null,
     depositWithheld: !confirmed,
     display: {
@@ -1619,12 +1774,13 @@ async function main(argv) {
       hasMemo: Boolean(source.receiverMemo),
       memoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
       native,
-      priceLockedUntil: native ? quoteExpiresAt : null
+      priceLockedUntil: native || zec ? quoteExpiresAt : null,
+      ...zec ? { shielded: true } : {}
     },
     expiry: {
       expiresAt,
       expiresIn,
-      ...native ? { quoteExpiresAt } : {},
+      ...native || zec ? { quoteExpiresAt } : {},
       minutesOfSlack: snap.sendWindow?.minutesOfSlack ?? null
     },
     note: confirmed ? "Send exactly once, exactly this amount, on this chain. Then: rozo-checkout status <id> --watch" : "Deposit address withheld. Confirm the chain, token and amount with the payer, then re-run with --confirm, or open paymentLink."

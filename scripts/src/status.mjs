@@ -24,6 +24,7 @@ import { parseArgs, emit, fail, usage, EXIT_UNCONFIRMED, EXIT_ERROR, publicHash 
 import { isRozoPaymentId, maskAddress } from './lib/ids.mjs';
 import { invoiceStatus, getPayment } from './lib/api.mjs';
 import { chainName, formatAmount, isNativeSource } from './lib/amounts.mjs';
+import { isZecSource, zecStatusOf, zecMoneySeen } from './lib/zec.mjs';
 import { classifyStatus, checkPayable } from './lib/guards.mjs';
 import { SUPPORT } from './lib/support.mjs';
 import { formatRemaining, checkExpiry, lightningWatchMs, DEFAULT_WATCH_MS, priceLockFor } from './lib/expiry.mjs';
@@ -169,6 +170,10 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
 
   const source = payment?.source || status?.rozoPayment?.source || {};
   const native = isNativeSource(source.chainId, source.tokenSymbol);
+  // Shielded ZEC: exact-out like a native coin, with its own price lock in
+  // source.zec.quoteExpiresAt and a pay-in state machine worth surfacing.
+  const isZec = isZecSource(source.chainId, source.tokenSymbol);
+  const zec = isZec ? zecStatusOf(source) : null;
   let localState = null;
   try {
     localState = id && isRozoPaymentId(id) ? readState(id) : null;
@@ -177,11 +182,15 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
   }
   // Native orders: the price lock (earliest of the live one and any this
   // machine recorded). undefined for every other coin.
-  const quoteExpiresAt = priceLockFor({
-    native,
-    payment: payment || status?.rozoPayment || null,
-    others: [localState?.confirmation?.quoteExpiresAt, localState?.quoteExpiresAt],
-  });
+  // Shielded ZEC: only the live lock; a missing one fails closed (null, not
+  // undefined, so the send window treats it as an unparsable deadline).
+  const quoteExpiresAt = isZec
+    ? (zec?.quoteExpiresAt ?? null)
+    : priceLockFor({
+        native,
+        payment: payment || status?.rozoPayment || null,
+        others: [localState?.confirmation?.quoteExpiresAt, localState?.quoteExpiresAt],
+      });
 
   // Bitrefill: the invoice deadline is the only clock. Unknown → never call
   // the order payable; past → invoice_expired (unless money already moved).
@@ -189,6 +198,24 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
   let state = verdict.state;
   let terminal = verdict.terminal;
   let detail = verdict.detail;
+  // Shielded ZEC: the pay-in is reported before any amountReceived is filled
+  // in (a mempool sighting, then confirmations). Say so instead of "waiting".
+  // It is money (the reuse guard says the same), so the result must never
+  // suggest paying again or open a send window.
+  const zecMoney = Boolean(zec && zecMoneySeen(zec));
+  let escalate = verdict.escalate;
+  if (zecMoney && state === 'expired_unfunded') {
+    // Money after the order's own expiry: never "expired unfunded", never a retry path.
+    state = 'stuck_after_payment';
+    terminal = false;
+    escalate = true;
+    detail = 'The order expired but the custody rail reports a ZEC pay-in. Do not pay again; escalate for manual reconciliation.';
+  } else if (zecMoney && state === 'awaiting_deposit') {
+    state = 'payin_detected';
+    detail = zec.payinState === 'seen' || zec.payinState === 'confirming'
+      ? `Shielded pay-in ${zec.payinState}: ${zec.confirmations ?? 0} of ${zec.requiredConfirmations ?? '?'} confirmations.`
+      : `The custody rail reports a ZEC pay-in (${zec.payinState ?? 'state unreadable'}). Do not pay again.`;
+  }
   if (provider === 'bitrefill') {
     let local = null;
     try {
@@ -221,9 +248,9 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
     linkId: linkId || status?.pl_id || null,
     state,
     unknown: verdict.unknown,
-    moneyDetected: verdict.moneyDetected,
+    moneyDetected: verdict.moneyDetected || zecMoney,
     terminal,
-    escalate: verdict.escalate,
+    escalate,
     detail,
     backend: {
       paymentStatus: payment?.status ?? status?.rozoPayment?.status ?? null,
@@ -239,6 +266,8 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
       confirmedAt: source.confirmedAt ?? null,
       senderAddressMasked: source.senderAddress ? maskAddress(source.senderAddress) : null,
       chain: source.chainId ? chainName(source.chainId) : null,
+      // Shielded ZEC only: the custody rail's own view of the pay-in.
+      ...(zec ? { zec } : {}),
     },
     expiry: (() => {
       if (provider === 'bitrefill' && !bitrefillExpiry) {
@@ -257,7 +286,7 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
         msRemaining: Number.isFinite(ms) ? ms : null,
         // Native orders: the order stays open after the price lock, but a
         // payment after it is valued at the arrival price. Pay before this.
-        ...(native
+        ...(native || isZec
           ? {
               quoteExpiresAt: quoteExpiresAt ?? null,
               priceLockExpiresIn: Number.isFinite(lockMs) ? formatRemaining(lockMs) : null,
@@ -271,8 +300,9 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
         payment?.destination?.confirmedAt ?? status?.rozoPayment?.destination?.confirmedAt ?? null,
     },
     localSend: localSendFor(id),
+    // Never a send window once the custody rail has seen a ZEC pay-in.
     sendWindow:
-      state === 'awaiting_deposit'
+      state === 'awaiting_deposit' && !zecMoney
         ? sendWindowFor({ provider, chainId: source.chainId, payment, status, bitrefillExpiry, quoteExpiresAt })
         : null,
     errors: [statusError, paymentError].filter(Boolean),

@@ -104,7 +104,15 @@ chainId "1" Ethereum (USDC, USDT, native ETH) · "56" BNB Chain (USDC, USDT;
 native SOL) · "1500" Stellar (USDC; deposit memo REQUIRED) · "lightning" (BTC;
 BOLT11 invoice, amounts in integer satoshis via source.amountUnit=="sats").
 USDT is not accepted on Base or Stellar. On-chain BTC and Tron are NOT supported.
-ZEC on Zcash (Beta): use https://checkout.rozo.ai/zec, this CLI does not create ZEC orders.
+"9133" Zcash (ZEC, Beta, SHIELDED orders only via --shielded / source.shielded=true on
+create-invoice with ?beta=zec,zec_shielded): the live payment carries source.receiverAddress
+(u1 Unified Address), source.amount (ZEC, 8 decimals, exact-out), source.paymentUri (ZIP-321,
+show verbatim as the QR content) and source.zec {receive, payinState, confirmations,
+requiredConfirmations, quoteExpiresAt}. Offer only when quote-invoice lists ZEC in
+supportedSources["9133"] and sourceMeta["ZEC@9133"].shieldedAvailable is true. Beta limit
+$1,200 per payment, minimum $5; 1 confirmation under $110, else 2. Pay the exact amount in
+one transaction; underpayments are not refunded automatically. The CLI never sends ZEC.
+Transparent ZEC is not created here: use https://checkout.rozo.ai/zec.
 Native coins (tokenSymbol "ETH", "BNB", "SOL" or "POL" on the chains above; ETH, BNB
 and POL have 18 decimals, SOL 9): offer one only when quote-invoice lists it in
 supportedSources for that invoice ({"<chainId>": ["USDC", "ETH", ...]}). A native

@@ -14,6 +14,7 @@
  */
 
 import { comparePayment, sourceAtomic, chainFamily, isNativeSource } from './amounts.mjs';
+import { isZecSource, zecStatusOf, validateShieldedDeposit, zecMoneySeen } from './zec.mjs';
 
 /** Statuses that mean "nothing has been funded yet". */
 export const UNPAID_STATUS = 'payment_unpaid';
@@ -111,6 +112,15 @@ export function validateDepositInstructions(source) {
     };
   }
 
+  // Shielded ZEC: the address must be a Unified Address and the ZIP-321
+  // payment URI (what the payer scans) must name exactly this address and
+  // amount. The URI is shown verbatim, so it is checked, never rebuilt.
+  if (family === 'zcash' && zecStatusOf(source)?.receive === 'shielded') {
+    const zec = validateShieldedDeposit(source);
+    if (!zec.ok) return { ok: false, code: zec.code, reason: zec.reason };
+    return { ok: true, code: null, reason: null, family, amountAtomic, payTo: zec.address, memo: null, paymentUri: zec.paymentUri };
+  }
+
   if (family === 'stellar' && !memo) {
     return {
       ok: false,
@@ -169,17 +179,24 @@ export function reuseGuard({ payment, requested, reused = false }) {
   const signal = receiptSignal(source);
   const hasConfirm =
     source.confirmedAt !== null && source.confirmedAt !== undefined && source.confirmedAt !== '';
-  if (hasTx || signal.money || hasConfirm) {
+  // Zcash custody orders report the pay-in in source.zec first (a mempool
+  // sighting, then confirmations), before txHash / amountReceived are filled
+  // in. That is money too, and it outranks everything below.
+  const zecSeen = isZecSource(source.chainId, source.tokenSymbol) && zecMoneySeen(zecStatusOf(source));
+  if (hasTx || signal.money || hasConfirm || zecSeen) {
     return {
       ok: false,
       code: 'ORDER_ALREADY_FUNDED',
       reason: signal.unparsable
         ? 'This order reports an amountReceived that cannot be read. It is treated as funded ' +
           'until a human confirms otherwise — do NOT pay again.'
-        : 'This Coinbase link already has a funded Rozo order (it may have been paid ' +
-          'elsewhere). Do NOT pay again — escalate for manual reconciliation.',
+        : zecSeen && !hasTx && !signal.money && !hasConfirm
+          ? 'A shielded ZEC payment to this order has already been seen on the network. Do NOT pay again; ' +
+            'watch it with status instead.'
+          : 'This Coinbase link already has a funded Rozo order (it may have been paid ' +
+            'elsewhere). Do NOT pay again — escalate for manual reconciliation.',
       moneyDetected: true,
-      evidence: { ...evidence, receipt: signal.receipt, receiptUnparsable: signal.unparsable },
+      evidence: { ...evidence, receipt: signal.receipt, receiptUnparsable: signal.unparsable, ...(zecSeen ? { zec: zecStatusOf(source) } : {}) },
     };
   }
 
@@ -213,6 +230,35 @@ export function reuseGuard({ payment, requested, reused = false }) {
       moneyDetected: false,
       evidence,
     };
+  }
+
+  // 3b. Zcash: the order's receive mode must be the one asked for (a shielded
+  //     request must never be handed a transparent address, or vice versa),
+  //     and a quote that already expired unfunded is not payable: the router
+  //     replaces such an order on the next create.
+  if (isZecSource(gotChain, gotToken)) {
+    const zec = zecStatusOf(source);
+    const wantReceive = requested?.shielded === true ? 'shielded' : 'transparent';
+    if (!zec || zec.receive !== wantReceive) {
+      return {
+        ok: false,
+        code: 'ZEC_RECEIVE_MODE_MISMATCH',
+        reason:
+          `This link already has a ZEC order that is paid ${zec?.receive ?? 'in an unknown way'}, but you asked for ` +
+          `${wantReceive}. Nothing new was created. Pay that order the way it was made, or wait for it to expire unfunded.`,
+        moneyDetected: false,
+        evidence: { ...evidence, zec },
+      };
+    }
+    if (zec.payinState === 'expired' || zec.payinState === 'reorged') {
+      return {
+        ok: false,
+        code: 'ZEC_QUOTE_EXPIRED',
+        reason: `The ZEC price lock on this order has ${zec.payinState === 'reorged' ? 'been disturbed by a reorg' : 'expired'} with nothing received. Do not pay it; re-run pay to get a fresh order.`,
+        moneyDetected: false,
+        evidence: { ...evidence, zec },
+      };
+    }
   }
 
   // 4. The deposit instructions must be complete and payable as they stand.

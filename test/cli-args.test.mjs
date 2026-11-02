@@ -119,7 +119,7 @@ test('unsupported and malformed presets are refused, never guessed', () => {
 test('every alias points at a chain the amounts table knows', () => {
   for (const [alias, chainId] of Object.entries(CHAIN_ALIASES)) {
     assert.ok(
-      ['1', '56', '137', '8453', '42161', '900', '1500', 'lightning'].includes(chainId),
+      ['1', '56', '137', '8453', '42161', '900', '1500', 'lightning', '9133'].includes(chainId),
       `alias ${alias} -> ${chainId}`,
     );
   }
@@ -227,7 +227,7 @@ test('picker: the menu covers every supported combo exactly once', () => {
     PICKER_OPTIONS.map((_, i) => i + 1),
   );
   // Grouped: USDT block, then USDC, then BTC, then the native coins.
-  assert.deepEqual([...new Set(PICKER_OPTIONS.map((o) => o.group))], ['USDT', 'USDC', 'BTC', 'Native coins']);
+  assert.deepEqual([...new Set(PICKER_OPTIONS.map((o) => o.group))], ['USDT', 'USDC', 'BTC', 'Native coins', 'Zcash (Beta)']);
   // Native rows are flagged and name their coin.
   for (const o of PICKER_OPTIONS) {
     assert.equal(o.native, o.group === 'Native coins', o.preset);
@@ -256,6 +256,7 @@ test('picker: numbers map to the right chain and token (full menu)', () => {
     17: { chainId: '56', tokenSymbol: 'BNB', preset: 'bnb-bnb' },
     18: { chainId: '900', tokenSymbol: 'SOL', preset: 'sol-solana' },
     19: { chainId: '137', tokenSymbol: 'POL', preset: 'pol-polygon' },
+    20: { chainId: '9133', tokenSymbol: 'ZEC', preset: 'zec-zcash' },
   };
   assert.equal(Object.keys(expected).length, PICKER_OPTIONS.length);
   for (const [n, want] of Object.entries(expected)) {
@@ -285,11 +286,11 @@ test('picker: native coins show only when the quote offers them, numbers stay co
 });
 
 test('picker: out-of-range and junk input are refused, never guessed', () => {
-  for (const bad of ['0', '20', '99', '-1', '', '   ', null, undefined]) {
+  for (const bad of ['0', '21', '99', '-1', '', '   ', null, undefined]) {
     assert.throws(() => resolvePickerChoice(bad), CliError, JSON.stringify(bad));
   }
   assert.throws(() => resolvePickerChoice('0'), (e) => e.code === 'BAD_CHOICE');
-  assert.throws(() => resolvePickerChoice('20'), (e) => e.code === 'BAD_CHOICE');
+  assert.throws(() => resolvePickerChoice('21'), (e) => e.code === 'BAD_CHOICE');
   // A typed preset name still works, for anyone who knows it already.
   assert.deepEqual(resolvePickerChoice('usdt-solana'), {
     chainId: '900',
