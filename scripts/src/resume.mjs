@@ -210,18 +210,20 @@ async function main(argv) {
   // Native coins: the price lock, from this fresh read and the snapshot's.
   const native = isNativeSource(source.chainId, source.tokenSymbol);
   // Shielded ZEC: same exact-out rules, lock in source.zec.quoteExpiresAt.
-  const zecStatus = isZecSource(source.chainId, source.tokenSymbol) ? zecStatusOf(source) : null;
+  const isZec = isZecSource(source.chainId, source.tokenSymbol);
+  const zecStatus = isZec ? zecStatusOf(source) : null;
   const zec = Boolean(zecStatus && zecStatus.receive === 'shielded');
-  // Shielded ZEC: only the live lock counts; a snapshot is never a substitute.
-  const quoteExpiresAt = zec
-    ? (zecStatus.quoteExpiresAt ?? null)
+  // Any ZEC order: only the live lock counts; a missing block or lock fails
+  // closed (null, never undefined), and a snapshot is never a substitute.
+  const quoteExpiresAt = isZec
+    ? (zecStatus?.quoteExpiresAt ?? null)
     : priceLockFor({ native, payment, others: [snap.expiry?.quoteExpiresAt] });
   const finalWindow = checkExpiry({
     now: Date.now(),
     chainId: source.chainId,
     intentExpiresAt: payment?.expiresAt ?? snap.sendWindow?.deadlineMs,
     coinbaseExpiry: snap.sendWindow?.deadlineMs,
-    ...(native || zec ? { quoteExpiresAt } : {}),
+    ...(native || isZec ? { quoteExpiresAt } : {}),
   });
   if (!finalWindow.ok) {
     emit(

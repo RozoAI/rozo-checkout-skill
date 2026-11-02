@@ -57357,14 +57357,15 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   });
   const source = payment?.source || status?.rozoPayment?.source || {};
   const native = isNativeSource(source.chainId, source.tokenSymbol);
-  const zec = isZecSource(source.chainId, source.tokenSymbol) ? zecStatusOf(source) : null;
+  const isZec = isZecSource(source.chainId, source.tokenSymbol);
+  const zec = isZec ? zecStatusOf(source) : null;
   let localState = null;
   try {
     localState = id && isRozoPaymentId(id) ? readState(id) : null;
   } catch {
     localState = null;
   }
-  const quoteExpiresAt = zec ? zec.quoteExpiresAt ?? null : priceLockFor({
+  const quoteExpiresAt = isZec ? zec?.quoteExpiresAt ?? null : priceLockFor({
     native,
     payment: payment || status?.rozoPayment || null,
     others: [localState?.confirmation?.quoteExpiresAt, localState?.quoteExpiresAt]
@@ -57442,7 +57443,7 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
         msRemaining: Number.isFinite(ms) ? ms : null,
         // Native orders: the order stays open after the price lock, but a
         // payment after it is valued at the arrival price. Pay before this.
-        ...native || zec ? {
+        ...native || isZec ? {
           quoteExpiresAt: quoteExpiresAt ?? null,
           priceLockExpiresIn: Number.isFinite(lockMs) ? formatRemaining(lockMs) : null
         } : {}
@@ -57717,15 +57718,16 @@ async function main6(argv) {
     );
   }
   const native = isNativeSource(source.chainId, source.tokenSymbol);
-  const zecStatus = isZecSource(source.chainId, source.tokenSymbol) ? zecStatusOf(source) : null;
+  const isZec = isZecSource(source.chainId, source.tokenSymbol);
+  const zecStatus = isZec ? zecStatusOf(source) : null;
   const zec = Boolean(zecStatus && zecStatus.receive === "shielded");
-  const quoteExpiresAt = zec ? zecStatus.quoteExpiresAt ?? null : priceLockFor({ native, payment, others: [snap.expiry?.quoteExpiresAt] });
+  const quoteExpiresAt = isZec ? zecStatus?.quoteExpiresAt ?? null : priceLockFor({ native, payment, others: [snap.expiry?.quoteExpiresAt] });
   const finalWindow = checkExpiry({
     now: Date.now(),
     chainId: source.chainId,
     intentExpiresAt: payment?.expiresAt ?? snap.sendWindow?.deadlineMs,
     coinbaseExpiry: snap.sendWindow?.deadlineMs,
-    ...native || zec ? { quoteExpiresAt } : {}
+    ...native || isZec ? { quoteExpiresAt } : {}
   });
   if (!finalWindow.ok) {
     emit(

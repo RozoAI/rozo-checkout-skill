@@ -172,7 +172,8 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
   const native = isNativeSource(source.chainId, source.tokenSymbol);
   // Shielded ZEC: exact-out like a native coin, with its own price lock in
   // source.zec.quoteExpiresAt and a pay-in state machine worth surfacing.
-  const zec = isZecSource(source.chainId, source.tokenSymbol) ? zecStatusOf(source) : null;
+  const isZec = isZecSource(source.chainId, source.tokenSymbol);
+  const zec = isZec ? zecStatusOf(source) : null;
   let localState = null;
   try {
     localState = id && isRozoPaymentId(id) ? readState(id) : null;
@@ -183,8 +184,8 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
   // machine recorded). undefined for every other coin.
   // Shielded ZEC: only the live lock; a missing one fails closed (null, not
   // undefined, so the send window treats it as an unparsable deadline).
-  const quoteExpiresAt = zec
-    ? (zec.quoteExpiresAt ?? null)
+  const quoteExpiresAt = isZec
+    ? (zec?.quoteExpiresAt ?? null)
     : priceLockFor({
         native,
         payment: payment || status?.rozoPayment || null,
@@ -276,7 +277,7 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
         msRemaining: Number.isFinite(ms) ? ms : null,
         // Native orders: the order stays open after the price lock, but a
         // payment after it is valued at the arrival price. Pay before this.
-        ...(native || zec
+        ...(native || isZec
           ? {
               quoteExpiresAt: quoteExpiresAt ?? null,
               priceLockExpiresIn: Number.isFinite(lockMs) ? formatRemaining(lockMs) : null,

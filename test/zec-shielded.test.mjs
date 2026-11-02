@@ -436,6 +436,20 @@ test('status: shielded pay-in states and confirmations are surfaced; a seen pay-
       assert.equal(payload.sendWindow.code, 'EXPIRY_UNPARSABLE');
     },
   );
+  // a ZEC order with no custody block at all fails closed too
+  const noBlock = zecPayment();
+  delete noBlock.source.zec;
+  await withHttp(
+    [
+      ['/invoice-status', () => json(invoiceStatusBody(noBlock))],
+      [`/payments/${ID}`, () => json(noBlock)],
+    ],
+    async () => {
+      const { payload } = await capture(() => runStatus(['--rozo-payment-id', ID]));
+      assert.equal(payload.sendWindow.ok, false);
+      assert.equal(payload.sendWindow.code, 'EXPIRY_UNPARSABLE');
+    },
+  );
   // the generic classifier is untouched for a settled order
   const done = { ...zecPayment({ payinState: 'eligible', confirmations: 2, amountReceived: AMOUNT }), status: 'payment_payout_completed' };
   assert.equal(classifyStatus({ payment: done, routerState: { status: 'paid' }, coinbase: null }).state, 'settled');
