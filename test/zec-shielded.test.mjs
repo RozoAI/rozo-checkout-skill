@@ -421,6 +421,23 @@ test('status: shielded pay-in states and confirmations are surfaced; a seen pay-
       assert.equal(payload.payin.zec.receive, 'shielded');
     },
   );
+  // eligible (settled by the verifier) on a still-unpaid row, or an unreadable state: money, no send window
+  for (const payinState of ['eligible', 'bogus']) {
+    const p = zecPayment({ payinState });
+    if (payinState === 'bogus') p.source.zec.payinState = 'bogus';
+    await withHttp(
+      [
+        ['/invoice-status', () => json(invoiceStatusBody(p))],
+        [`/payments/${ID}`, () => json(p)],
+      ],
+      async () => {
+        const { payload } = await capture(() => runStatus(['--rozo-payment-id', ID]));
+        assert.equal(payload.state, 'payin_detected', payinState);
+        assert.equal(payload.moneyDetected, true);
+        assert.equal(payload.sendWindow, null);
+      },
+    );
+  }
   // a missing live price lock closes the send window, whatever a local record says
   const noLock = zecPayment({ quoteExpiresAt: null });
   await withHttp(

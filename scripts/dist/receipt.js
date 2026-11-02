@@ -1251,9 +1251,9 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   let terminal = verdict.terminal;
   let detail = verdict.detail;
   const zecMoney = Boolean(zec && zecMoneySeen(zec));
-  if (zec && state === "awaiting_deposit" && (zec.payinState === "seen" || zec.payinState === "confirming")) {
+  if (zecMoney && state === "awaiting_deposit") {
     state = "payin_detected";
-    detail = `Shielded pay-in ${zec.payinState}: ${zec.confirmations ?? 0} of ${zec.requiredConfirmations ?? "?"} confirmations.`;
+    detail = zec.payinState === "seen" || zec.payinState === "confirming" ? `Shielded pay-in ${zec.payinState}: ${zec.confirmations ?? 0} of ${zec.requiredConfirmations ?? "?"} confirmations.` : `The custody rail reports a ZEC pay-in (${zec.payinState ?? "state unreadable"}). Do not pay again.`;
   }
   if (provider === "bitrefill") {
     let local = null;
@@ -1330,7 +1330,8 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       confirmedAt: payment?.destination?.confirmedAt ?? status?.rozoPayment?.destination?.confirmedAt ?? null
     },
     localSend: localSendFor(id),
-    sendWindow: state === "awaiting_deposit" ? sendWindowFor({ provider, chainId: source.chainId, payment, status, bitrefillExpiry, quoteExpiresAt }) : null,
+    // Never a send window once the custody rail has seen a ZEC pay-in.
+    sendWindow: state === "awaiting_deposit" && !zecMoney ? sendWindowFor({ provider, chainId: source.chainId, payment, status, bitrefillExpiry, quoteExpiresAt }) : null,
     errors: [statusError, paymentError].filter(Boolean)
   };
 }
