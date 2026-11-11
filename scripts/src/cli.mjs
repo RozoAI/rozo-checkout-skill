@@ -429,6 +429,11 @@ async function cmdResume(opts) {
   if (payload.resumable && !opts.json) {
     out();
     out(`  Order     ${payload.rozoPaymentId}  ${dim('(unpaid)')}`);
+    if (payload.provider === 'bitrefill' && payload.callerPays !== undefined) {
+      out(`  Invoice   ${bold(`${payload.original} USDC`)} ${dim('(Bitrefill receives)')}`);
+      printFeeLines(payload, 'USDC');
+      if (payload.latePaymentPolicy) out(`  ${dim(payload.latePaymentPolicy)}`);
+    }
     out(`  You send  ${bold(payload.display?.amount)} on ${bold(payload.display?.chain)}`);
     out(`  To        ${payload.display?.payToMasked} ${dim('(full address shown after you confirm)')}`);
     if (payload.display?.hasMemo) {

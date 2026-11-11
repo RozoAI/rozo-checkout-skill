@@ -973,3 +973,32 @@ test('resume (funder): binding and fee checks run on the fresh read before any d
     });
   }
 });
+
+test('create flow: a pre-fee local record never accepts a fee-bearing live order', async () => {
+  await withEnv(
+    [
+      ['/create-invoice', () => json({ ok: false, error: 'DUPLICATE_INVOICE', message: 'exists', rozoPaymentId: ID, original: '204.37', serviceFee: '2.05', feeBps: 100, callerPays: '206.42', callerPaysAtomicUsdc: '206420000' }, 409)],
+      [`/payments/${ID}`, () => json(funderOrder())],
+    ],
+    async () => {
+      const { createOrderRecord } = await import('../scripts/src/lib/state.mjs');
+      createOrderRecord({
+        rozoPaymentId: ID,
+        provider: 'bitrefill',
+        bitrefill: { invoiceId: UUID.toUpperCase(), address: ADDR, amount: '204.37', expiresAt: inMin(20) },
+        linkId: `bitrefill:${UUID.toUpperCase()}`,
+        merchant: 'Bitrefill',
+        invoiceAmount: '204.37',
+        source: { chainId: '1500', tokenSymbol: 'USDC' },
+        receiverAddress: funderOrder().source.receiverAddress,
+        receiverMemo: funderOrder().source.receiverMemo,
+        amount: funderOrder().source.amount,
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      });
+      const { payload, exitCode } = await capture(() => runBitrefill([...FARGS(), '--confirm']));
+      assert.notEqual(exitCode, 0);
+      assert.equal(payload.error.code, 'BITREFILL_FEE_MISMATCH');
+      assert.equal(payload.deposit, undefined);
+    },
+  );
+});

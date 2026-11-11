@@ -200,8 +200,9 @@ async function main(argv) {
     }, 'Do not fund this order. Let it expire unfunded.');
   }
   const pricing = fee.pricing;
-  // A resumed order must still charge what this machine recorded for it.
-  if (local?.bitrefill?.pricing) {
+  // A resumed order must still charge what this machine recorded for it. A
+  // record without pricing predates the fee and only ever confirmed zero.
+  if (local?.bitrefill) {
     const drift = bitrefillPricingDrift(local.bitrefill.pricing, pricing);
     if (drift.length) {
       abort('fee-guard', 'BITREFILL_FEE_MISMATCH', 'The live order charges a different fee than the one recorded for it earlier.', {

@@ -57263,7 +57263,7 @@ async function main3(argv) {
     }, "Do not fund this order. Let it expire unfunded.");
   }
   const pricing = fee.pricing;
-  if (local?.bitrefill?.pricing) {
+  if (local?.bitrefill) {
     const drift = bitrefillPricingDrift(local.bitrefill.pricing, pricing);
     if (drift.length) {
       abort("fee-guard", "BITREFILL_FEE_MISMATCH", "The live order charges a different fee than the one recorded for it earlier.", {
@@ -60760,6 +60760,11 @@ async function cmdResume(opts) {
   if (payload.resumable && !opts.json) {
     out();
     out(`  Order     ${payload.rozoPaymentId}  ${dim("(unpaid)")}`);
+    if (payload.provider === "bitrefill" && payload.callerPays !== void 0) {
+      out(`  Invoice   ${bold(`${payload.original} USDC`)} ${dim("(Bitrefill receives)")}`);
+      printFeeLines(payload, "USDC");
+      if (payload.latePaymentPolicy) out(`  ${dim(payload.latePaymentPolicy)}`);
+    }
     out(`  You send  ${bold(payload.display?.amount)} on ${bold(payload.display?.chain)}`);
     out(`  To        ${payload.display?.payToMasked} ${dim("(full address shown after you confirm)")}`);
     if (payload.display?.hasMemo) {
