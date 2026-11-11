@@ -75,9 +75,19 @@ test('bad address, amount and id are refused locally', () => {
     [{ invoiceId: '' }, 'BAD_BITREFILL_INVOICE'],
     [{ invoiceId: 'a b' }, 'BAD_BITREFILL_INVOICE'],
     [{ expiresAt: undefined }, 'INVOICE_EXPIRY_REQUIRED'],
-    [{ expiresAt: inMin(45) }, 'INVOICE_EXPIRING'],
+    [{ expiresAt: inMin(4) }, 'INVOICE_EXPIRING'],
+    [{ expiresAt: inMin(61.5) }, 'INVOICE_EXPIRING'],
+    [{ expiresAt: inMin(90) }, 'INVOICE_EXPIRING'],
   ]) {
     assert.throws(() => validateBitrefillInput({ ...base, ...patch }), (e) => e.code === code, JSON.stringify(patch));
+  }
+});
+
+test('a freshly created Bitrefill invoice (up to 60 minutes left) is accepted', () => {
+  const base = { invoiceId: 'bfr-1', address: ADDR, amount: '7.90' };
+  for (const m of [6, 30, 45, 59, 60]) {
+    const out = validateBitrefillInput({ ...base, expiresAt: inMin(m) });
+    assert.equal(typeof out.expiresAt, 'string', String(m));
   }
 });
 
