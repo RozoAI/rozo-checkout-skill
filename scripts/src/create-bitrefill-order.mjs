@@ -145,7 +145,7 @@ async function main(argv) {
     if (!existing) throw explainRouterError(err);
     rozoPaymentId = assertRozoPaymentId(existing);
     resumed = true;
-    routerPricing = err?.details?.body ?? null;
+    routerPricing = err?.details?.body && typeof err.details.body === 'object' ? err.details.body : {};
   }
 
   // --- 4. the router must echo the invoice -------------------------------
@@ -248,7 +248,7 @@ async function main(argv) {
     payment,
     others: [created?.quoteExpiresAt, local?.quoteExpiresAt, local?.confirmation?.quoteExpiresAt],
   });
-  const expiry = checkBitrefillExpiry(invoiceExpiry, Date.now(), BITREFILL_MIN_PAY_WINDOW_MS, native ? { quoteExpiresAt } : {});
+  const expiry = checkBitrefillExpiry(invoiceExpiry, Date.now(), BITREFILL_MIN_PAY_WINDOW_MS, native ? { quoteExpiresAt, chainId: source.chainId } : {});
   if (!expiry.ok) {
     abort('expiry-guard', expiry.code, expiry.reason, {
       details: expiry,

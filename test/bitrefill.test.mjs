@@ -897,3 +897,79 @@ test('presend (funder): the confirmed fee must still be the live fee; a pre-fee 
   assert.deepEqual(bitrefillPricingDrift({ serviceFee: '2.05', feeBps: 100, callerPays: '206.42' }, { serviceFee: '2.05', feeBps: 100, callerPays: '206.42' }), []);
   assert.ok(bitrefillPricingDrift({ serviceFee: '2.05', feeBps: 100, callerPays: '206.42' }, { serviceFee: '2.06', feeBps: 100, callerPays: '206.43' }).length > 0);
 });
+
+// --- review round 1 -------------------------------------------------------------
+
+test('funder facts must carry a readable expiry and a binding', () => {
+  for (const mutate of [
+    (p) => { delete p.metadata.bitrefill.expiresAt; },
+    (p) => { p.metadata.bitrefill.expiresAt = 'soon'; },
+    (p) => { delete p.metadata.bitrefill.binding; },
+    (p) => { p.metadata.bitrefill.binding = 'xyz'; },
+  ]) {
+    const p = funderOrder();
+    mutate(p);
+    assert.equal(verifyBitrefillDestination({ requested: requestedFor(), payment: p }).ok, false);
+  }
+});
+
+test('native price lock keeps the per-chain margin (10 min on EVM), the invoice keeps 2 min', async () => {
+  const { checkBitrefillExpiry } = await import('../scripts/src/lib/bitrefill.mjs');
+  const now = Date.now();
+  const inv = new Date(now + 30 * 60_000).toISOString();
+  assert.equal(checkBitrefillExpiry(inv, now, undefined, { quoteExpiresAt: new Date(now + 5 * 60_000).toISOString(), chainId: '8453' }).code, 'QUOTE_EXPIRY_MARGIN');
+  assert.equal(checkBitrefillExpiry(inv, now, undefined, { quoteExpiresAt: new Date(now + 15 * 60_000).toISOString(), chainId: '8453' }).ok, true);
+  assert.equal(checkBitrefillExpiry(inv, now, undefined, { quoteExpiresAt: new Date(now + 6 * 60_000).toISOString(), chainId: '900' }).ok, true);
+  assert.equal(checkBitrefillExpiry(inv, now, undefined, { quoteExpiresAt: null, chainId: '8453' }).code, 'EXPIRY_UNPARSABLE');
+  assert.equal(checkBitrefillExpiry(new Date(now + 60_000).toISOString(), now, undefined, { quoteExpiresAt: new Date(now + 20 * 60_000).toISOString(), chainId: '8453' }).code, 'INVOICE_EXPIRING');
+  assert.equal(checkBitrefillExpiry(inv, now).ok, true);
+});
+
+test('status (funder): late money still bridging escalates too', async () => {
+  const o = funderOrder({ expiresAt: '2020-01-01T00:00:00Z' });
+  o.status = 'payment_bridging';
+  o.source.txHash = 'abc';
+  o.source.amountReceived = o.source.amount;
+  o.source.confirmedAt = '2026-10-01T00:00:00Z';
+  await withEnv([[`/payments/${ID}`, () => json(o)]], async () => {
+    const { payload } = await capture(() => runStatus(['--rozo-payment-id', ID]));
+    assert.equal(payload.state, 'stuck_after_payment');
+    assert.equal(payload.escalate, true);
+  });
+});
+
+test('receipt (funder): settlement evidence is the delivered stamp, never the funder payout tx', async () => {
+  const { buildReceipt } = await import('../scripts/src/lib/receipt.mjs');
+  const r = buildReceipt({ provider: 'bitrefill', bitrefillModel: 'funder', state: 'settled', merchantDeliveredAt: '2026-10-01T00:01:00Z', payout: { txHash: '0xfunderpayout', confirmedAt: '2026-10-01T00:00:30Z' }, authoritativeView: true });
+  assert.equal(r.merchantSettlement.status, 'confirmed');
+  assert.equal(r.merchantSettlement.evidence, 'rozo-delivered');
+  assert.equal(r.merchantSettlement.txHash, null);
+  assert.equal(r.merchantSettlement.confirmedAt, '2026-10-01T00:01:00Z');
+});
+
+test('resume (funder): binding and fee checks run on the fresh read before any deposit', async () => {
+  const { run: runResume } = await import('../scripts/src/resume.mjs');
+  const good = funderOrder();
+  await withEnv([[`/payments/${ID}`, () => json(good)]], async () => {
+    const { payload, exitCode } = await capture(() => runResume([ID, '--confirm']));
+    assert.equal(exitCode, 0, JSON.stringify(payload));
+    assert.equal(payload.callerPays, '206.42');
+    assert.equal(payload.serviceFee, '2.05');
+    assert.match(payload.latePaymentPolicy, /not forwarded to Bitrefill/);
+    assert.ok(payload.deposit);
+  });
+  for (const mutate of [
+    (p) => { p.destination.amount = '204.37'; },
+    (p) => { p.destination.receiverAddress = ADDR; },
+    (p) => { p.metadata.bitrefill.serviceFeeAtomic = '2040000'; },
+  ]) {
+    const bad = funderOrder();
+    mutate(bad);
+    await withEnv([[`/payments/${ID}`, () => json(bad)]], async () => {
+      const { payload, exitCode } = await capture(() => runResume([ID, '--confirm']));
+      assert.notEqual(exitCode, 0);
+      assert.equal(payload.deposit, undefined);
+      assert.match(payload.error.code, /BITREFILL_(ECHO|FEE)_MISMATCH/);
+    });
+  }
+});

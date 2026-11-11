@@ -256,8 +256,11 @@ function merchantSettlementLayer(result) {
       // delivered stamp after the funder paid the invoice address.
       evidence: proved ? (result?.bitrefillModel === 'funder' ? 'rozo-delivered' : 'rozo-payout') : null,
       provider: 'bitrefill',
-      txHash: result?.payout?.txHash ?? null,
-      confirmedAt: result?.payout?.confirmedAt ?? null,
+      // Funder model: the payout tx is Rozo paying its funder, not the
+      // invoice; the funder's own tx is not exposed, so only the delivered
+      // stamp is reported.
+      txHash: result?.bitrefillModel === 'funder' ? null : (result?.payout?.txHash ?? null),
+      confirmedAt: result?.bitrefillModel === 'funder' ? (result?.merchantDeliveredAt ?? null) : (result?.payout?.confirmedAt ?? null),
     };
   }
   const backend = result?.backend || {};

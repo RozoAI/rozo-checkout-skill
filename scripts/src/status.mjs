@@ -236,7 +236,17 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
     // Funder model: money reached Rozo but the funder has not (visibly) paid
     // the invoice, and the invoice is past its deadline. A late payment is not
     // forwarded to Bitrefill; it is refunded by hand on request.
-    if (verdict.state === 'paying_merchant' && bitrefillExpiry && Date.parse(bitrefillExpiry) <= Date.now()) {
+    // Any stage after money arrived counts, not only after the payout.
+    const lateStates = new Set(['payin_detected', 'payin_confirmed', 'bridging', 'paying_merchant']);
+    if (
+      payment &&
+      isBitrefillFunderOrder(payment) &&
+      !payment.merchantDeliveredAt &&
+      (verdict.moneyDetected || verdict.state === 'paying_merchant') &&
+      lateStates.has(verdict.state) &&
+      bitrefillExpiry &&
+      Date.parse(bitrefillExpiry) <= Date.now()
+    ) {
       state = 'stuck_after_payment';
       terminal = false;
       escalate = true;
@@ -259,7 +269,12 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
 
   return {
     provider,
-    ...(provider === 'bitrefill' ? { bitrefillModel: payment ? (isBitrefillFunderOrder(payment) ? 'funder' : 'direct') : null } : {}),
+    ...(provider === 'bitrefill'
+      ? {
+          bitrefillModel: payment ? (isBitrefillFunderOrder(payment) ? 'funder' : 'direct') : null,
+          merchantDeliveredAt: payment?.merchantDeliveredAt ?? null,
+        }
+      : {}),
     rozoPaymentId: id,
     rozoPaymentIdSource: idSource,
     // Without the authoritative payment object we are reading a partial view.

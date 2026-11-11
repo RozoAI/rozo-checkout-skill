@@ -1115,8 +1115,11 @@ function merchantSettlementLayer(result) {
       // delivered stamp after the funder paid the invoice address.
       evidence: proved ? result?.bitrefillModel === "funder" ? "rozo-delivered" : "rozo-payout" : null,
       provider: "bitrefill",
-      txHash: result?.payout?.txHash ?? null,
-      confirmedAt: result?.payout?.confirmedAt ?? null
+      // Funder model: the payout tx is Rozo paying its funder, not the
+      // invoice; the funder's own tx is not exposed, so only the delivered
+      // stamp is reported.
+      txHash: result?.bitrefillModel === "funder" ? null : result?.payout?.txHash ?? null,
+      confirmedAt: result?.bitrefillModel === "funder" ? result?.merchantDeliveredAt ?? null : result?.payout?.confirmedAt ?? null
     };
   }
   const backend = result?.backend || {};
@@ -1308,7 +1311,8 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       local = null;
     }
     bitrefillExpiry = earliestExpiry(local?.bitrefill?.expiresAt, intentBitrefillExpiry(payment));
-    if (verdict.state === "paying_merchant" && bitrefillExpiry && Date.parse(bitrefillExpiry) <= Date.now()) {
+    const lateStates = /* @__PURE__ */ new Set(["payin_detected", "payin_confirmed", "bridging", "paying_merchant"]);
+    if (payment && isBitrefillFunderOrder(payment) && !payment.merchantDeliveredAt && (verdict.moneyDetected || verdict.state === "paying_merchant") && lateStates.has(verdict.state) && bitrefillExpiry && Date.parse(bitrefillExpiry) <= Date.now()) {
       state = "stuck_after_payment";
       terminal = false;
       escalate = true;
@@ -1328,7 +1332,10 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   }
   return {
     provider,
-    ...provider === "bitrefill" ? { bitrefillModel: payment ? isBitrefillFunderOrder(payment) ? "funder" : "direct" : null } : {},
+    ...provider === "bitrefill" ? {
+      bitrefillModel: payment ? isBitrefillFunderOrder(payment) ? "funder" : "direct" : null,
+      merchantDeliveredAt: payment?.merchantDeliveredAt ?? null
+    } : {},
     rozoPaymentId: id,
     rozoPaymentIdSource: idSource,
     // Without the authoritative payment object we are reading a partial view.

@@ -21,7 +21,7 @@
 
 import { SkillError } from './output.mjs';
 import { normalizeDecimal, checkPricing, serviceFeeAtomicFor } from './guards.mjs';
-import { parseDeadline } from './expiry.mjs';
+import { parseDeadline, marginFor } from './expiry.mjs';
 import { toAtomic } from './amounts.mjs';
 import { BITREFILL_FUNDER, BITREFILL_FEE_BPS, isBitrefillFunderOrder } from './bitrefill-model.mjs';
 
@@ -86,7 +86,12 @@ export function explainRouterError(err) {
  * Expiry for a Bitrefill order comes from the invoice ONLY — never from the
  * Rozo intent's own expiresAt. Shape mirrors checkExpiry for the callers.
  */
-export function checkBitrefillExpiry(expiresAt, now = Date.now(), minMs = BITREFILL_MIN_PAY_WINDOW_MS, { quoteExpiresAt = undefined } = {}) {
+export function checkBitrefillExpiry(
+  expiresAt,
+  now = Date.now(),
+  minMs = BITREFILL_MIN_PAY_WINDOW_MS,
+  { quoteExpiresAt = undefined, chainId = null } = {},
+) {
   const ms = parseDeadline(expiresAt);
   // Native coins: the price lock is a second deadline (undefined = not native,
   // null = native without a lock, which is refused like an unreadable expiry).
@@ -106,19 +111,32 @@ export function checkBitrefillExpiry(expiresAt, now = Date.now(), minMs = BITREF
       reason: 'This native coin order carries no price lock (quoteExpiresAt), so the coin amount cannot be trusted. Refusing to treat it as payable.',
     };
   }
-  if (native && quoteMs < ms) {
-    const qRemaining = quoteMs - now;
-    const q = { ...base, effectiveDeadlineMs: quoteMs, msRemaining: qRemaining, msOfSlack: qRemaining - minMs };
-    if (qRemaining <= 0) {
-      return { ...q, ok: false, code: 'QUOTE_EXPIRED', reason: 'The coin price lock for this order has passed. Do not send it; let the order expire unfunded and start again.' };
-    }
-    if (qRemaining < minMs) {
-      return { ...q, ok: false, code: 'QUOTE_EXPIRY_MARGIN', reason: `Only ${Math.floor(qRemaining / 1000)}s left on the coin price lock; at least ${Math.round(minMs / 60000)} min is required.` };
-    }
-    return { ...q, ok: true, code: null, reason: null };
-  }
+  // Invoice window (2 min). For a native coin also the price lock, with the
+  // OpenRouter line's per-chain safety margin (checkExpiry / marginFor).
   const msRemaining = ms - now;
-  const out = { ...base, effectiveDeadlineMs: ms, msRemaining, msOfSlack: msRemaining - minMs };
+  const quoteMarginMs = native ? Math.max(minMs, marginFor(chainId)) : null;
+  const lockFirst = native && quoteMs < ms;
+  const out = {
+    ...base,
+    marginMs: lockFirst ? quoteMarginMs : minMs,
+    effectiveDeadlineMs: lockFirst ? quoteMs : ms,
+    msRemaining: lockFirst ? quoteMs - now : msRemaining,
+    msOfSlack: native ? Math.min(quoteMs - now - quoteMarginMs, msRemaining - minMs) : msRemaining - minMs,
+  };
+  if (native) {
+    const qRemaining = quoteMs - now;
+    if (qRemaining <= 0) {
+      return { ...out, ok: false, code: 'QUOTE_EXPIRED', reason: 'The coin price lock for this order has passed. Do not send it; let the order expire unfunded and start again.' };
+    }
+    if (qRemaining < quoteMarginMs) {
+      return {
+        ...out,
+        ok: false,
+        code: 'QUOTE_EXPIRY_MARGIN',
+        reason: `Only ${Math.floor(qRemaining / 1000)}s left on the coin price lock; this chain needs a ${Math.round(quoteMarginMs / 60000)} min safety margin.`,
+      };
+    }
+  }
   if (msRemaining <= 0) return { ...out, ok: false, code: 'EXPIRED', reason: 'The Bitrefill invoice has expired.' };
   if (msRemaining < minMs) {
     return {
@@ -308,6 +326,15 @@ export function verifyBitrefillDestination({ requested, payment }) {
       drift.push({ field: 'metadata.bitrefill', requested: 'frozen invoice facts', live: null });
     } else {
       if (Number(facts.v) !== 1) drift.push({ field: 'metadata.bitrefill.v', requested: 1, live: facts.v ?? null });
+      // The funder pays only against a complete, bound fact set: the expiry
+      // must be readable and the binding present (its HMAC is checked by the
+      // funder; this CLI cannot, and does not need to, verify it).
+      if (parseDeadline(facts.expiresAt) === null) {
+        drift.push({ field: 'metadata.bitrefill.expiresAt', requested: 'ISO timestamp', live: facts.expiresAt ?? null });
+      }
+      if (typeof facts.binding !== 'string' || !/^[0-9a-f]{64}$/i.test(facts.binding)) {
+        drift.push({ field: 'metadata.bitrefill.binding', requested: 'hex HMAC-SHA256', live: facts.binding ?? null });
+      }
       if (!sameInvoiceId(facts.invoiceId, requested.invoiceId)) {
         drift.push({ field: 'metadata.bitrefill.invoiceId', requested: requested.invoiceId, live: facts.invoiceId ?? null });
       }
@@ -390,10 +417,14 @@ export function checkBitrefillPricing({ invoiceAmount, routerPricing = null, liv
   const bad = (reason, details = {}) => ({ ok: false, code: 'BITREFILL_FEE_MISMATCH', reason, details });
   if (!live?.ok || !live.livePricing) return bad('The live order could not be priced; refusing to show a deposit.');
   const lp = live.livePricing;
+  // routerPricing === null: no router view at all (resume from the order id).
+  // The live order alone then decides, and its own checks above already ran.
   const r = routerPricing && typeof routerPricing === 'object' ? routerPricing : {};
   const present = ROUTER_FEE_FIELDS.filter((k) => given(r[k]));
 
-  if (present.length === 0) {
+  if (routerPricing === null) {
+    // nothing to compare
+  } else if (present.length === 0) {
     // Current production router (direct model): no fee fields, no fee.
     if (live.model !== 'direct' || lp.feeBps !== 0) {
       return bad('The router stated no service fee, but the live order charges one. Refusing to continue.', { model: live.model });
@@ -449,6 +480,23 @@ function fmt18(n) {
   const w = n / 10n ** 18n;
   const f = (n % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, '');
   return f ? `${w}.${f}` : `${w}`;
+}
+
+/**
+ * The invoice an order says it pays, for a resume with no local record:
+ * the frozen facts of a funder-model order, or the direct order's own
+ * destination. Verifying an order against this proves its internal
+ * consistency (funder, fee math), not that it is the invoice the user meant.
+ */
+export function bitrefillRequestedFromOrder(payment) {
+  const meta = payment?.metadata || {};
+  if (isBitrefillFunderOrder(payment)) {
+    const f = meta.bitrefill && typeof meta.bitrefill === 'object' ? meta.bitrefill : {};
+    const a = atomicField(f.amountAtomic);
+    return { invoiceId: f.invoiceId ?? null, address: f.address ?? null, amount: a === null ? null : atomicToUsdc(a) };
+  }
+  const dest = payment?.destination || {};
+  return { invoiceId: meta.bitrefillInvoiceId ?? null, address: dest.receiverAddress ?? dest.address ?? null, amount: dest.amount ?? null };
 }
 
 /**

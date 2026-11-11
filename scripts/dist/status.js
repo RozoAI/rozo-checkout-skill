@@ -1228,7 +1228,8 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       local = null;
     }
     bitrefillExpiry = earliestExpiry(local?.bitrefill?.expiresAt, intentBitrefillExpiry(payment));
-    if (verdict.state === "paying_merchant" && bitrefillExpiry && Date.parse(bitrefillExpiry) <= Date.now()) {
+    const lateStates = /* @__PURE__ */ new Set(["payin_detected", "payin_confirmed", "bridging", "paying_merchant"]);
+    if (payment && isBitrefillFunderOrder(payment) && !payment.merchantDeliveredAt && (verdict.moneyDetected || verdict.state === "paying_merchant") && lateStates.has(verdict.state) && bitrefillExpiry && Date.parse(bitrefillExpiry) <= Date.now()) {
       state = "stuck_after_payment";
       terminal = false;
       escalate = true;
@@ -1248,7 +1249,10 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   }
   return {
     provider,
-    ...provider === "bitrefill" ? { bitrefillModel: payment ? isBitrefillFunderOrder(payment) ? "funder" : "direct" : null } : {},
+    ...provider === "bitrefill" ? {
+      bitrefillModel: payment ? isBitrefillFunderOrder(payment) ? "funder" : "direct" : null,
+      merchantDeliveredAt: payment?.merchantDeliveredAt ?? null
+    } : {},
     rozoPaymentId: id,
     rozoPaymentIdSource: idSource,
     // Without the authoritative payment object we are reading a partial view.

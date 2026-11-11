@@ -30,6 +30,13 @@ import { formatRemaining, checkExpiry, priceLockFor } from './lib/expiry.mjs';
 import { readState } from './lib/state.mjs';
 import { SUPPORT } from './lib/support.mjs';
 import { snapshot, statusGuidance, EXPIRED_UNFUNDED_GUIDANCE } from './status.mjs';
+import {
+  verifyBitrefillDestination,
+  checkBitrefillPricing,
+  bitrefillPricingDrift,
+  bitrefillRequestedFromOrder,
+  BITREFILL_LATE_PAYMENT_POLICY,
+} from './lib/bitrefill.mjs';
 
 const PAID_STATES = new Set([
   'payin_detected',
@@ -204,6 +211,48 @@ async function main(argv) {
     );
   }
 
+  // Bitrefill: the same invoice binding and fee checks as pay, on this fresh
+  // read, before any deposit detail is released. Against the local record
+  // when there is one (and its confirmed fee), else against what the order
+  // itself freezes.
+  let bitrefillPricing = null;
+  if (snap.provider === 'bitrefill') {
+    let local = null;
+    try {
+      local = readState(id);
+    } catch {
+      local = null;
+    }
+    const requested = local?.bitrefill ?? bitrefillRequestedFromOrder(payment);
+    const live = verifyBitrefillDestination({ requested, payment });
+    const fee = live.ok ? checkBitrefillPricing({ invoiceAmount: requested.amount, routerPricing: null, live, source }) : null;
+    const drift = fee?.ok && local?.bitrefill ? bitrefillPricingDrift(local.bitrefill.pricing ?? null, fee.pricing) : [];
+    const failure = !live.ok
+      ? { code: live.code, message: live.reason, details: { drift: live.drift } }
+      : !fee.ok
+        ? { code: fee.code, message: fee.reason, details: fee.details }
+        : drift.length
+          ? { code: 'BITREFILL_FEE_MISMATCH', message: 'The live order charges a different fee than the one recorded for it.', details: { drift } }
+          : null;
+    if (failure) {
+      emit(
+        {
+          success: false,
+          step: 'resume',
+          resumable: false,
+          outcome: 'not_payable',
+          rozoPaymentId: id,
+          moneyDetected: false,
+          error: failure,
+          guidance: 'This order could not be proved to pay the Bitrefill invoice at the stated fee. Do not fund it; let it expire unfunded.',
+          support: SUPPORT,
+        },
+        EXIT_ERROR,
+      );
+    }
+    bitrefillPricing = fee.pricing;
+  }
+
   // The send window was judged on the snapshot. Re-judge it now against the
   // payment we are about to show: its deadline may be earlier, or the clock
   // may have crossed the safety margin in between. The earlier snapshot
@@ -291,6 +340,16 @@ async function main(argv) {
     // Shown in full only for Rozo's own pay-page hosts; anything else is
     // reduced to its host by the normal output redaction.
     paymentLink: publicPayPage(paymentLink),
+    ...(bitrefillPricing
+      ? {
+          original: bitrefillPricing.original,
+          serviceFee: bitrefillPricing.serviceFee,
+          feeBps: bitrefillPricing.feeBps,
+          callerPays: bitrefillPricing.callerPays,
+          pricing: bitrefillPricing,
+          latePaymentPolicy: BITREFILL_LATE_PAYMENT_POLICY,
+        }
+      : {}),
     deposit: confirmed
       ? {
           chainId: source.chainId,

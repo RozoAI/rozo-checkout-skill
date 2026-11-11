@@ -36,6 +36,8 @@ import {
   verifyBitrefillDestination,
   checkBitrefillExpiry,
   bitrefillPricingDrift,
+  earliestExpiry,
+  intentBitrefillExpiry,
   BITREFILL_MIN_PAY_WINDOW_MS,
 } from './bitrefill.mjs';
 
@@ -55,11 +57,12 @@ function assertBitrefillLive(state, payment) {
     throw new SkillError('BITREFILL_FEE_MISMATCH', 'The live order charges a different fee than the one confirmed. Refusing to send.', { drift });
   }
   const quoteExpiresAt = sendPriceLock(payment, state);
+  // The live order's own frozen deadline can only shorten the recorded one.
   const expiry = checkBitrefillExpiry(
-    state.bitrefill.expiresAt,
+    earliestExpiry(state.bitrefill.expiresAt, intentBitrefillExpiry(payment)),
     Date.now(),
     BITREFILL_MIN_PAY_WINDOW_MS,
-    quoteExpiresAt !== undefined ? { quoteExpiresAt } : {},
+    quoteExpiresAt !== undefined ? { quoteExpiresAt, chainId: payment?.source?.chainId } : {},
   );
   if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
   return expiry;

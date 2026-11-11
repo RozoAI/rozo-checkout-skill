@@ -34034,7 +34034,7 @@ var BITREFILL_MIN_PAY_WINDOW_MS = 2 * 60 * 1e3;
 var BITREFILL_MAX_EXPIRY_AHEAD_MS = 61 * 60 * 1e3;
 var BITREFILL_LATE_PAYMENT_POLICY = "Funds that arrive after the Bitrefill invoice expires are not forwarded to Bitrefill; they are refunded manually on request: contact hi@rozo.ai with the invoice id and rozoPaymentId.";
 var BITREFILL_LATE_PAYMENT_DETAIL = "Your payment reached Rozo, but Rozo has not confirmed paying the Bitrefill invoice and the invoice has expired. Check the invoice on Bitrefill's page first; it is the source of truth. Do not pay again. " + BITREFILL_LATE_PAYMENT_POLICY;
-function checkBitrefillExpiry(expiresAt, now = Date.now(), minMs = BITREFILL_MIN_PAY_WINDOW_MS, { quoteExpiresAt = void 0 } = {}) {
+function checkBitrefillExpiry(expiresAt, now = Date.now(), minMs = BITREFILL_MIN_PAY_WINDOW_MS, { quoteExpiresAt = void 0, chainId = null } = {}) {
   const ms = parseDeadline(expiresAt);
   const native = quoteExpiresAt !== void 0;
   const quoteMs = native ? parseDeadline(quoteExpiresAt) : null;
@@ -34052,19 +34052,30 @@ function checkBitrefillExpiry(expiresAt, now = Date.now(), minMs = BITREFILL_MIN
       reason: "This native coin order carries no price lock (quoteExpiresAt), so the coin amount cannot be trusted. Refusing to treat it as payable."
     };
   }
-  if (native && quoteMs < ms) {
-    const qRemaining = quoteMs - now;
-    const q = { ...base, effectiveDeadlineMs: quoteMs, msRemaining: qRemaining, msOfSlack: qRemaining - minMs };
-    if (qRemaining <= 0) {
-      return { ...q, ok: false, code: "QUOTE_EXPIRED", reason: "The coin price lock for this order has passed. Do not send it; let the order expire unfunded and start again." };
-    }
-    if (qRemaining < minMs) {
-      return { ...q, ok: false, code: "QUOTE_EXPIRY_MARGIN", reason: `Only ${Math.floor(qRemaining / 1e3)}s left on the coin price lock; at least ${Math.round(minMs / 6e4)} min is required.` };
-    }
-    return { ...q, ok: true, code: null, reason: null };
-  }
   const msRemaining = ms - now;
-  const out = { ...base, effectiveDeadlineMs: ms, msRemaining, msOfSlack: msRemaining - minMs };
+  const quoteMarginMs = native ? Math.max(minMs, marginFor(chainId)) : null;
+  const lockFirst = native && quoteMs < ms;
+  const out = {
+    ...base,
+    marginMs: lockFirst ? quoteMarginMs : minMs,
+    effectiveDeadlineMs: lockFirst ? quoteMs : ms,
+    msRemaining: lockFirst ? quoteMs - now : msRemaining,
+    msOfSlack: native ? Math.min(quoteMs - now - quoteMarginMs, msRemaining - minMs) : msRemaining - minMs
+  };
+  if (native) {
+    const qRemaining = quoteMs - now;
+    if (qRemaining <= 0) {
+      return { ...out, ok: false, code: "QUOTE_EXPIRED", reason: "The coin price lock for this order has passed. Do not send it; let the order expire unfunded and start again." };
+    }
+    if (qRemaining < quoteMarginMs) {
+      return {
+        ...out,
+        ok: false,
+        code: "QUOTE_EXPIRY_MARGIN",
+        reason: `Only ${Math.floor(qRemaining / 1e3)}s left on the coin price lock; this chain needs a ${Math.round(quoteMarginMs / 6e4)} min safety margin.`
+      };
+    }
+  }
   if (msRemaining <= 0) return { ...out, ok: false, code: "EXPIRED", reason: "The Bitrefill invoice has expired." };
   if (msRemaining < minMs) {
     return {
@@ -34130,6 +34141,12 @@ function verifyBitrefillDestination({ requested, payment }) {
       drift.push({ field: "metadata.bitrefill", requested: "frozen invoice facts", live: null });
     } else {
       if (Number(facts.v) !== 1) drift.push({ field: "metadata.bitrefill.v", requested: 1, live: facts.v ?? null });
+      if (parseDeadline(facts.expiresAt) === null) {
+        drift.push({ field: "metadata.bitrefill.expiresAt", requested: "ISO timestamp", live: facts.expiresAt ?? null });
+      }
+      if (typeof facts.binding !== "string" || !/^[0-9a-f]{64}$/i.test(facts.binding)) {
+        drift.push({ field: "metadata.bitrefill.binding", requested: "hex HMAC-SHA256", live: facts.binding ?? null });
+      }
       if (!sameInvoiceId(facts.invoiceId, requested.invoiceId)) {
         drift.push({ field: "metadata.bitrefill.invoiceId", requested: requested.invoiceId, live: facts.invoiceId ?? null });
       }
@@ -34191,6 +34208,13 @@ function bitrefillPricingDrift(recorded, livePricing) {
   }
   return drift;
 }
+function earliestExpiry(...values) {
+  const ms = values.map((v) => parseDeadline(v)).filter((v) => v !== null);
+  return ms.length ? new Date(Math.min(...ms)).toISOString() : null;
+}
+function intentBitrefillExpiry(payment) {
+  return earliestExpiry(payment?.metadata?.bitrefillExpiresAt, payment?.metadata?.bitrefill?.expiresAt);
+}
 
 // scripts/src/lib/presend.mjs
 function assertBitrefillLive(state, payment) {
@@ -34205,10 +34229,10 @@ function assertBitrefillLive(state, payment) {
   }
   const quoteExpiresAt = sendPriceLock(payment, state);
   const expiry = checkBitrefillExpiry(
-    state.bitrefill.expiresAt,
+    earliestExpiry(state.bitrefill.expiresAt, intentBitrefillExpiry(payment)),
     Date.now(),
     BITREFILL_MIN_PAY_WINDOW_MS,
-    quoteExpiresAt !== void 0 ? { quoteExpiresAt } : {}
+    quoteExpiresAt !== void 0 ? { quoteExpiresAt, chainId: payment?.source?.chainId } : {}
   );
   if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
   return expiry;
