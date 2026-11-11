@@ -12,8 +12,12 @@ reviewing or extending the code.
   send scripts refuse without both `--send` and a confirmation whose digest
   still matches the live data, so neither an accidental invocation nor a
   swapped deposit address can move funds.
-- **Full invoice, always.** `callerPays` must equal the invoice amount and
-  `discount` must be `"0"`; anything else aborts with `NO_DISCOUNT_VIOLATION`.
+- **Full invoice plus a stated fee, nothing else.** `discount` must be `"0"`
+  (else `NO_DISCOUNT_VIOLATION`), and `callerPays` must equal the invoice amount
+  plus the service fee the router states in `serviceFee` and `feeBps`. The fee
+  must come with its rate, be at most 100 bps, equal the fee that rate produces
+  (rounded up to a whole cent) and be the same in the quote and the created
+  order; anything else aborts with `PRICING_VIOLATION` or `CREATE_DRIFT`.
   Security-critical fields (`linkId`, `merchant`, `original`, `callerPays`, the
   echoed source) must be present as well as equal — a missing field is drift.
 - **Reuse guard.** Creating an order for a link that already has an unexpired

@@ -173,7 +173,13 @@ export function snapshotFromQuote(quote) {
     protocolVersion: quote?.protocolVersion ?? null,
     merchant: quote?.merchant ?? null,
     original: quote?.invoice?.amount ?? null,
-    callerPays: quote?.quote?.callerPays ?? null,
+    // The router's own pricing block (top level). quote.quote.callerPays is the
+    // upstream invoice quote and never includes the Rozo service fee, so it is
+    // only a fallback for a router that states no pricing at all.
+    quotedOriginal: quote?.original ?? null,
+    callerPays: quote?.callerPays ?? quote?.quote?.callerPays ?? null,
+    serviceFee: quote?.serviceFee ?? null,
+    feeBps: quote?.feeBps ?? null,
     fiat: quote?.invoice?.fiat ?? null,
     coinbase: cb
       ? {

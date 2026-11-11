@@ -731,7 +731,13 @@ function snapshotFromQuote(quote) {
     protocolVersion: quote?.protocolVersion ?? null,
     merchant: quote?.merchant ?? null,
     original: quote?.invoice?.amount ?? null,
-    callerPays: quote?.quote?.callerPays ?? null,
+    // The router's own pricing block (top level). quote.quote.callerPays is the
+    // upstream invoice quote and never includes the Rozo service fee, so it is
+    // only a fallback for a router that states no pricing at all.
+    quotedOriginal: quote?.original ?? null,
+    callerPays: quote?.callerPays ?? quote?.quote?.callerPays ?? null,
+    serviceFee: quote?.serviceFee ?? null,
+    feeBps: quote?.feeBps ?? null,
     fiat: quote?.invoice?.fiat ?? null,
     coinbase: cb ? {
       id: cb.id ?? null,
@@ -1501,26 +1507,133 @@ function verifyCreateAgainstQuote({ snapshot, created, requested }) {
       drift
     };
   }
-  const disc = created?.discount;
-  if (disc !== void 0 && disc !== null && normalizeDecimal(disc) !== "0") {
-    return {
-      ok: false,
-      code: "NO_DISCOUNT_VIOLATION",
-      reason: `Server reported a discount of "${disc}"; this flow must charge the full invoice.`,
-      drift: [{ field: "discount", quoted: "0", created: String(disc) }]
-    };
+  const quoted = checkQuotePricing(snapshot);
+  if (!quoted.ok) return { ...quoted, drift: [{ field: quoted.field, quoted: quoted.value, created: null, note: "quote" }] };
+  const got = checkPricing(created);
+  if (!got.ok) return { ...got, drift: [{ field: got.field, quoted: null, created: got.value }] };
+  const feeDrift = [];
+  if (quoted.pricing.serviceFee !== got.pricing.serviceFee) {
+    feeDrift.push({ field: "serviceFee", quoted: quoted.pricing.serviceFee, created: got.pricing.serviceFee });
   }
-  if (created?.callerPays !== void 0 && created?.original !== void 0 && normalizeDecimal(created.callerPays) !== normalizeDecimal(created.original)) {
+  if (quoted.pricing.feeBps !== got.pricing.feeBps) {
+    feeDrift.push({ field: "feeBps", quoted: quoted.pricing.feeBps, created: got.pricing.feeBps });
+  }
+  if (feeDrift.length) {
     return {
       ok: false,
-      code: "NO_DISCOUNT_VIOLATION",
-      reason: `callerPays (${created.callerPays}) differs from the invoice amount (${created.original}).`,
-      drift: [
-        { field: "callerPays", quoted: String(created.original), created: String(created.callerPays) }
-      ]
+      code: "CREATE_DRIFT",
+      reason: "The created order does not match what was quoted. Refusing to continue.",
+      drift: feeDrift
     };
   }
   return { ok: true, code: null, reason: null, drift: [] };
+}
+function checkQuotePricing(snapshot) {
+  if (snapshot?.quotedOriginal !== void 0 && snapshot?.quotedOriginal !== null && normalizeDecimal(snapshot.quotedOriginal) !== normalizeDecimal(snapshot.original)) {
+    return {
+      ok: false,
+      code: "PRICING_VIOLATION",
+      reason: `The quote's amount (${snapshot.quotedOriginal}) differs from the invoice amount (${snapshot.original}).`,
+      field: "original",
+      value: String(snapshot.quotedOriginal),
+      drift: []
+    };
+  }
+  return checkPricing(snapshot);
+}
+var MAX_SERVICE_FEE_BPS = 100;
+var USDC_DECIMALS = 6;
+var ATOMIC_PER_CENT = 10000n;
+function serviceFeeAtomicFor(originalAtomic, feeBps) {
+  if (feeBps === 0 || originalAtomic === 0n) return 0n;
+  const divisor = 10000n * ATOMIC_PER_CENT;
+  return (originalAtomic * BigInt(feeBps) + divisor - 1n) / divisor * ATOMIC_PER_CENT;
+}
+function formatAtomicUsd(atomic) {
+  const whole = atomic / 1000000n;
+  const frac = (atomic % 1000000n).toString().padStart(USDC_DECIMALS, "0").replace(/0+$/, "");
+  return frac ? `${whole}.${frac}` : whole.toString();
+}
+function parseFeeBps(v) {
+  if (typeof v === "number") return Number.isSafeInteger(v) ? v : NaN;
+  if (typeof v === "string" && /^\d+$/.test(v.trim())) return Number(v.trim());
+  return NaN;
+}
+function checkPricing(obj) {
+  const bad = (code, field, value, reason) => ({ ok: false, code, reason, field, value: value ?? null, drift: [] });
+  const disc = obj?.discount;
+  if (disc !== void 0 && disc !== null && normalizeDecimal(disc) !== "0") {
+    return bad("NO_DISCOUNT_VIOLATION", "discount", String(disc), `Server reported a discount of "${disc}"; this flow must charge the full invoice.`);
+  }
+  const parse = (field) => {
+    const raw = defaultNormalize(obj?.[field]);
+    if (raw === null) return { missing: true };
+    try {
+      return { atomic: toAtomic(raw, USDC_DECIMALS) };
+    } catch {
+      return { invalid: raw };
+    }
+  };
+  const original = parse("original");
+  const callerPays = parse("callerPays");
+  for (const [field, v] of [["original", original], ["callerPays", callerPays]]) {
+    if (v.missing) return bad("PRICING_VIOLATION", field, null, `The ${field} amount is missing.`);
+    if (v.invalid !== void 0) return bad("PRICING_VIOLATION", field, v.invalid, `The ${field} amount "${v.invalid}" is not a USD amount.`);
+  }
+  const feeGiven = defaultNormalize(obj?.serviceFee) !== null;
+  const bpsGiven = obj?.feeBps !== void 0 && obj?.feeBps !== null && String(obj.feeBps).trim() !== "";
+  let feeAtomic = 0n;
+  let feeBps = 0;
+  if (feeGiven || bpsGiven) {
+    if (!feeGiven || !bpsGiven) {
+      return bad(
+        "PRICING_VIOLATION",
+        feeGiven ? "feeBps" : "serviceFee",
+        null,
+        "The server stated a service fee without its rate, or a rate without the fee. Refusing to guess."
+      );
+    }
+    feeBps = parseFeeBps(obj.feeBps);
+    if (!Number.isSafeInteger(feeBps) || feeBps < 0 || feeBps > MAX_SERVICE_FEE_BPS) {
+      return bad(
+        "PRICING_VIOLATION",
+        "feeBps",
+        String(obj.feeBps),
+        `Service fee rate ${obj.feeBps} bps is outside 0..${MAX_SERVICE_FEE_BPS} bps; this CLI does not accept it.`
+      );
+    }
+    const fee = parse("serviceFee");
+    if (fee.invalid !== void 0) return bad("PRICING_VIOLATION", "serviceFee", fee.invalid, `The service fee "${fee.invalid}" is not a USD amount.`);
+    feeAtomic = fee.atomic;
+    const expected = serviceFeeAtomicFor(original.atomic, feeBps);
+    if (feeAtomic !== expected) {
+      return bad(
+        "PRICING_VIOLATION",
+        "serviceFee",
+        String(obj.serviceFee),
+        `Service fee ${obj.serviceFee} is not ${feeBps} bps of ${obj.original} (expected ${formatAtomicUsd(expected)}).`
+      );
+    }
+  }
+  if (callerPays.atomic !== original.atomic + feeAtomic) {
+    return bad(
+      "PRICING_VIOLATION",
+      "callerPays",
+      String(obj.callerPays),
+      `callerPays (${obj.callerPays}) is not the invoice amount (${obj.original}) plus the stated service fee (${formatAtomicUsd(feeAtomic)}).`
+    );
+  }
+  return {
+    ok: true,
+    code: null,
+    reason: null,
+    pricing: {
+      original: formatAtomicUsd(original.atomic),
+      serviceFee: formatAtomicUsd(feeAtomic),
+      callerPays: formatAtomicUsd(callerPays.atomic),
+      feeBps
+    }
+  };
 }
 function defaultNormalize(v) {
   if (v === null || v === void 0) return null;
@@ -1787,6 +1900,19 @@ async function main(argv) {
   const quote = await quoteInvoice({ url: String(url), beta });
   const snapshot = snapshotFromQuote(quote);
   const quoteReceipt = quote?.quoteReceipt ?? null;
+  const quotedPricing = checkQuotePricing(snapshot);
+  if (!quotedPricing.ok) {
+    emit(
+      {
+        success: false,
+        step: "quote-pricing",
+        error: { code: quotedPricing.code, message: quotedPricing.reason },
+        linkId: snapshot.linkId ?? parsedLinkId,
+        guidance: "Nothing was created. The quoted amounts do not add up; do not pay this link through the CLI."
+      },
+      EXIT_ERROR
+    );
+  }
   const native = isNativeSource(chainId, tokenSymbol);
   if (native) {
     const offer = nativeOfferFor({
@@ -1923,6 +2049,7 @@ async function main(argv) {
       EXIT_ERROR
     );
   }
+  const createdPricing = checkPricing(created).pricing;
   const payment = await getPayment(rozoPaymentId);
   const source = payment?.source || {};
   const guard = reuseGuard({ payment, requested, reused: created.reused });
@@ -2064,7 +2191,10 @@ async function main(argv) {
     paymentLink: created.paymentLink ?? null,
     merchant: normalizeMerchant(created.merchant ?? snapshot.merchant),
     invoice: { amount: usd, currency: snapshot?.fiat?.currency ?? "USD" },
-    callerPays: created.callerPays ?? snapshot.callerPays,
+    // Verified above: callerPays == invoice + serviceFee, fee explicit and capped.
+    callerPays: createdPricing.callerPays,
+    serviceFee: createdPricing.serviceFee,
+    feeBps: createdPricing.feeBps,
     discount: created.discount ?? "0",
     // Machine-readable, copy-pastable — and WITHHELD until --confirm. This is
     // the only place the full address, memo and BOLT11 ever appear.

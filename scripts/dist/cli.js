@@ -55582,7 +55582,13 @@ function snapshotFromQuote(quote) {
     protocolVersion: quote?.protocolVersion ?? null,
     merchant: quote?.merchant ?? null,
     original: quote?.invoice?.amount ?? null,
-    callerPays: quote?.quote?.callerPays ?? null,
+    // The router's own pricing block (top level). quote.quote.callerPays is the
+    // upstream invoice quote and never includes the Rozo service fee, so it is
+    // only a fallback for a router that states no pricing at all.
+    quotedOriginal: quote?.original ?? null,
+    callerPays: quote?.callerPays ?? quote?.quote?.callerPays ?? null,
+    serviceFee: quote?.serviceFee ?? null,
+    feeBps: quote?.feeBps ?? null,
     fiat: quote?.invoice?.fiat ?? null,
     coinbase: cb ? {
       id: cb.id ?? null,
@@ -55797,26 +55803,133 @@ function verifyCreateAgainstQuote({ snapshot: snapshot2, created, requested }) {
       drift
     };
   }
-  const disc = created?.discount;
-  if (disc !== void 0 && disc !== null && normalizeDecimal(disc) !== "0") {
-    return {
-      ok: false,
-      code: "NO_DISCOUNT_VIOLATION",
-      reason: `Server reported a discount of "${disc}"; this flow must charge the full invoice.`,
-      drift: [{ field: "discount", quoted: "0", created: String(disc) }]
-    };
+  const quoted = checkQuotePricing(snapshot2);
+  if (!quoted.ok) return { ...quoted, drift: [{ field: quoted.field, quoted: quoted.value, created: null, note: "quote" }] };
+  const got = checkPricing(created);
+  if (!got.ok) return { ...got, drift: [{ field: got.field, quoted: null, created: got.value }] };
+  const feeDrift = [];
+  if (quoted.pricing.serviceFee !== got.pricing.serviceFee) {
+    feeDrift.push({ field: "serviceFee", quoted: quoted.pricing.serviceFee, created: got.pricing.serviceFee });
   }
-  if (created?.callerPays !== void 0 && created?.original !== void 0 && normalizeDecimal(created.callerPays) !== normalizeDecimal(created.original)) {
+  if (quoted.pricing.feeBps !== got.pricing.feeBps) {
+    feeDrift.push({ field: "feeBps", quoted: quoted.pricing.feeBps, created: got.pricing.feeBps });
+  }
+  if (feeDrift.length) {
     return {
       ok: false,
-      code: "NO_DISCOUNT_VIOLATION",
-      reason: `callerPays (${created.callerPays}) differs from the invoice amount (${created.original}).`,
-      drift: [
-        { field: "callerPays", quoted: String(created.original), created: String(created.callerPays) }
-      ]
+      code: "CREATE_DRIFT",
+      reason: "The created order does not match what was quoted. Refusing to continue.",
+      drift: feeDrift
     };
   }
   return { ok: true, code: null, reason: null, drift: [] };
+}
+function checkQuotePricing(snapshot2) {
+  if (snapshot2?.quotedOriginal !== void 0 && snapshot2?.quotedOriginal !== null && normalizeDecimal(snapshot2.quotedOriginal) !== normalizeDecimal(snapshot2.original)) {
+    return {
+      ok: false,
+      code: "PRICING_VIOLATION",
+      reason: `The quote's amount (${snapshot2.quotedOriginal}) differs from the invoice amount (${snapshot2.original}).`,
+      field: "original",
+      value: String(snapshot2.quotedOriginal),
+      drift: []
+    };
+  }
+  return checkPricing(snapshot2);
+}
+var MAX_SERVICE_FEE_BPS = 100;
+var USDC_DECIMALS = 6;
+var ATOMIC_PER_CENT = 10000n;
+function serviceFeeAtomicFor(originalAtomic, feeBps) {
+  if (feeBps === 0 || originalAtomic === 0n) return 0n;
+  const divisor = 10000n * ATOMIC_PER_CENT;
+  return (originalAtomic * BigInt(feeBps) + divisor - 1n) / divisor * ATOMIC_PER_CENT;
+}
+function formatAtomicUsd(atomic) {
+  const whole = atomic / 1000000n;
+  const frac = (atomic % 1000000n).toString().padStart(USDC_DECIMALS, "0").replace(/0+$/, "");
+  return frac ? `${whole}.${frac}` : whole.toString();
+}
+function parseFeeBps(v) {
+  if (typeof v === "number") return Number.isSafeInteger(v) ? v : NaN;
+  if (typeof v === "string" && /^\d+$/.test(v.trim())) return Number(v.trim());
+  return NaN;
+}
+function checkPricing(obj) {
+  const bad = (code, field, value, reason) => ({ ok: false, code, reason, field, value: value ?? null, drift: [] });
+  const disc = obj?.discount;
+  if (disc !== void 0 && disc !== null && normalizeDecimal(disc) !== "0") {
+    return bad("NO_DISCOUNT_VIOLATION", "discount", String(disc), `Server reported a discount of "${disc}"; this flow must charge the full invoice.`);
+  }
+  const parse2 = (field) => {
+    const raw = defaultNormalize(obj?.[field]);
+    if (raw === null) return { missing: true };
+    try {
+      return { atomic: toAtomic(raw, USDC_DECIMALS) };
+    } catch {
+      return { invalid: raw };
+    }
+  };
+  const original = parse2("original");
+  const callerPays = parse2("callerPays");
+  for (const [field, v] of [["original", original], ["callerPays", callerPays]]) {
+    if (v.missing) return bad("PRICING_VIOLATION", field, null, `The ${field} amount is missing.`);
+    if (v.invalid !== void 0) return bad("PRICING_VIOLATION", field, v.invalid, `The ${field} amount "${v.invalid}" is not a USD amount.`);
+  }
+  const feeGiven = defaultNormalize(obj?.serviceFee) !== null;
+  const bpsGiven = obj?.feeBps !== void 0 && obj?.feeBps !== null && String(obj.feeBps).trim() !== "";
+  let feeAtomic = 0n;
+  let feeBps = 0;
+  if (feeGiven || bpsGiven) {
+    if (!feeGiven || !bpsGiven) {
+      return bad(
+        "PRICING_VIOLATION",
+        feeGiven ? "feeBps" : "serviceFee",
+        null,
+        "The server stated a service fee without its rate, or a rate without the fee. Refusing to guess."
+      );
+    }
+    feeBps = parseFeeBps(obj.feeBps);
+    if (!Number.isSafeInteger(feeBps) || feeBps < 0 || feeBps > MAX_SERVICE_FEE_BPS) {
+      return bad(
+        "PRICING_VIOLATION",
+        "feeBps",
+        String(obj.feeBps),
+        `Service fee rate ${obj.feeBps} bps is outside 0..${MAX_SERVICE_FEE_BPS} bps; this CLI does not accept it.`
+      );
+    }
+    const fee = parse2("serviceFee");
+    if (fee.invalid !== void 0) return bad("PRICING_VIOLATION", "serviceFee", fee.invalid, `The service fee "${fee.invalid}" is not a USD amount.`);
+    feeAtomic = fee.atomic;
+    const expected = serviceFeeAtomicFor(original.atomic, feeBps);
+    if (feeAtomic !== expected) {
+      return bad(
+        "PRICING_VIOLATION",
+        "serviceFee",
+        String(obj.serviceFee),
+        `Service fee ${obj.serviceFee} is not ${feeBps} bps of ${obj.original} (expected ${formatAtomicUsd(expected)}).`
+      );
+    }
+  }
+  if (callerPays.atomic !== original.atomic + feeAtomic) {
+    return bad(
+      "PRICING_VIOLATION",
+      "callerPays",
+      String(obj.callerPays),
+      `callerPays (${obj.callerPays}) is not the invoice amount (${obj.original}) plus the stated service fee (${formatAtomicUsd(feeAtomic)}).`
+    );
+  }
+  return {
+    ok: true,
+    code: null,
+    reason: null,
+    pricing: {
+      original: formatAtomicUsd(original.atomic),
+      serviceFee: formatAtomicUsd(feeAtomic),
+      callerPays: formatAtomicUsd(callerPays.atomic),
+      feeBps
+    }
+  };
 }
 function defaultNormalize(v) {
   if (v === null || v === void 0) return null;
@@ -55955,8 +56068,14 @@ function classifyStatus({
       { terminal: false, escalate: true }
     );
   }
-  if (!bitrefill && (routerStatus === "paid" || coinbase?.settled === true)) {
+  if (!bitrefill && coinbase?.settled === true && (routerStatus === null || routerStatus === "paid")) {
     return mk("settled", "Coinbase invoice settled by the funder wallet.", { terminal: true });
+  }
+  if (!bitrefill && routerStatus === "paid") {
+    return mk(
+      "paying_coinbase",
+      "The funder wallet paid, but Coinbase has not shown the capture yet. Keep polling; do not pay again."
+    );
   }
   const nativeAccepted = isNativeSource(source.chainId, source.tokenSymbol) && NATIVE_PROGRESS_STATUSES.has(payment?.status);
   if (moneyDetected && receipt && receipt.state === "underpaid" && !nativeAccepted) {
@@ -56132,6 +56251,7 @@ async function main(argv) {
     nativeMinUsd: quote?.nativeMinUsd,
     callerPaysUsd: snapshot2.callerPays ?? snapshot2.original
   }) : null;
+  const pricing = checkQuotePricing(snapshot2);
   const payload = {
     success: payability.payable,
     step: "quote",
@@ -56143,9 +56263,12 @@ async function main(argv) {
       amount: snapshot2.original,
       fiat: snapshot2.fiat
     },
-    // No discount on this line: the caller pays the full invoice amount.
-    callerPays: snapshot2.callerPays,
-    discountPolicy: "none \u2014 callerPays equals the invoice amount",
+    // No discount on this line. callerPays is the total to pay: the invoice
+    // amount plus the Rozo service fee the router states (serviceFee, feeBps).
+    callerPays: pricing.ok ? pricing.pricing.callerPays : snapshot2.callerPays,
+    serviceFee: pricing.ok ? pricing.pricing.serviceFee : snapshot2.serviceFee ?? null,
+    feeBps: pricing.ok ? pricing.pricing.feeBps : snapshot2.feeBps ?? null,
+    discountPolicy: "none: callerPays is the invoice amount plus the stated service fee",
     coinbase: snapshot2.coinbase,
     coinbaseExpiryIso: payability.expiryMs ? new Date(payability.expiryMs).toISOString() : null,
     chosenSource,
@@ -56179,10 +56302,11 @@ async function main(argv) {
     emit(payload, EXIT_ERROR);
   }
   if (zecRequested) payload.nextStep = "create-order.js --url <url> --chain 9133 --token ZEC --shielded";
-  if (snapshot2.callerPays && snapshot2.original && normalizeDecimal(snapshot2.callerPays) !== normalizeDecimal(snapshot2.original)) {
-    payload.warnings = [
-      `callerPays (${snapshot2.callerPays}) differs from the invoice amount (${snapshot2.original}). This flow is supposed to charge the full invoice \u2014 do not proceed until that is explained.`
-    ];
+  if (!pricing.ok) {
+    payload.success = false;
+    payload.nextStep = null;
+    payload.error = { code: pricing.code, message: pricing.reason };
+    emit(payload, EXIT_ERROR);
   }
   emit(payload);
 }
@@ -56242,6 +56366,19 @@ async function main2(argv) {
   const quote = await quoteInvoice({ url: String(url), beta });
   const snapshot2 = snapshotFromQuote(quote);
   const quoteReceipt = quote?.quoteReceipt ?? null;
+  const quotedPricing = checkQuotePricing(snapshot2);
+  if (!quotedPricing.ok) {
+    emit(
+      {
+        success: false,
+        step: "quote-pricing",
+        error: { code: quotedPricing.code, message: quotedPricing.reason },
+        linkId: snapshot2.linkId ?? parsedLinkId,
+        guidance: "Nothing was created. The quoted amounts do not add up; do not pay this link through the CLI."
+      },
+      EXIT_ERROR
+    );
+  }
   const native = isNativeSource(chainId, tokenSymbol);
   if (native) {
     const offer = nativeOfferFor({
@@ -56378,6 +56515,7 @@ async function main2(argv) {
       EXIT_ERROR
     );
   }
+  const createdPricing = checkPricing(created).pricing;
   const payment = await getPayment(rozoPaymentId);
   const source = payment?.source || {};
   const guard = reuseGuard({ payment, requested, reused: created.reused });
@@ -56519,7 +56657,10 @@ async function main2(argv) {
     paymentLink: created.paymentLink ?? null,
     merchant: normalizeMerchant(created.merchant ?? snapshot2.merchant),
     invoice: { amount: usd, currency: snapshot2?.fiat?.currency ?? "USD" },
-    callerPays: created.callerPays ?? snapshot2.callerPays,
+    // Verified above: callerPays == invoice + serviceFee, fee explicit and capped.
+    callerPays: createdPricing.callerPays,
+    serviceFee: createdPricing.serviceFee,
+    feeBps: createdPricing.feeBps,
     discount: created.discount ?? "0",
     // Machine-readable, copy-pastable — and WITHHELD until --confirm. This is
     // the only place the full address, memo and BOLT11 ever appear.
@@ -59374,7 +59515,7 @@ var USDC_ASSET = {
   [NETWORK_BASE]: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   [NETWORK_SOLANA]: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 };
-var USDC_DECIMALS = 6;
+var USDC_DECIMALS2 = 6;
 var PAYABLE_NETWORKS = /* @__PURE__ */ new Set([NETWORK_BASE]);
 var SOLANA_COMING_LATER = "Solana payment leg is coming later";
 var V1_NETWORK_ALIASES = {
@@ -59451,7 +59592,7 @@ function atomicAmount(req) {
 function formatUsdc(atomic) {
   const a = BigInt(atomic);
   const whole = a / 1000000n;
-  const frac = (a % 1000000n).toString().padStart(USDC_DECIMALS, "0").replace(/0+$/, "");
+  const frac = (a % 1000000n).toString().padStart(USDC_DECIMALS2, "0").replace(/0+$/, "");
   const fracOut = frac.length < 2 ? frac.padEnd(2, "0") : frac;
   return `${whole}.${fracOut}`;
 }
@@ -59461,7 +59602,7 @@ function usdToAtomic(value) {
     throw new SkillError("BAD_VALUE", `"${value}" is not a USD amount like 0.50.`);
   }
   const [w, f = ""] = s.split(".");
-  return BigInt(w) * 1000000n + BigInt(f.padEnd(USDC_DECIMALS, "0"));
+  return BigInt(w) * 1000000n + BigInt(f.padEnd(USDC_DECIMALS2, "0"));
 }
 function classifyRequirement(req) {
   if (!req || typeof req !== "object") return { supported: false, reason: "not an object" };
@@ -60155,6 +60296,14 @@ async function askYesNo(question) {
     rl.close();
   }
 }
+function printFeeLines(payload, currency) {
+  const fee = payload.serviceFee;
+  if (fee !== void 0 && fee !== null && Number(fee) > 0) {
+    const pct = Number.isInteger(payload.feeBps) ? ` ${dim(`(${payload.feeBps / 100}% Rozo service fee)`)}` : "";
+    out(`  Fee       ${fee} ${currency}${pct}`);
+  }
+  out(`  You pay   ${bold(`${payload.callerPays} ${currency}`)} ${dim("(invoice + fee; no discount on this route)")}`);
+}
 async function cmdQuote(opts) {
   if (!opts.json) out(dim("  Reading the payment link\u2026"));
   const { payload, exitCode } = await step(run, ["--url", opts.target]);
@@ -60169,7 +60318,7 @@ async function cmdQuote(opts) {
   out();
   out(`  ${bold(payload.merchant ?? "Unknown merchant")}`);
   out(`  Invoice   ${bold(`${payload.invoice?.amount} ${payload.invoice?.fiat?.currency ?? "USD"}`)}`);
-  out(`  You pay   ${payload.callerPays} ${dim("(no discount on this route)")}`);
+  printFeeLines(payload, payload.invoice?.fiat?.currency ?? "USD");
   out(`  Expires   ${payload.coinbaseExpiryIso ?? "unknown"}`);
   const natives = (payload.nativeOffered ?? []).map((n) => presetFor(n.chainId, n.tokenSymbol)).filter(Boolean);
   if (natives.length) {
@@ -60459,6 +60608,7 @@ async function cmdPay(opts) {
     out();
     out(`  ${bold(p.merchant ?? "Unknown merchant")}`);
     out(`  Invoice   ${bold(`${p.invoice?.amount} ${p.invoice?.currency ?? "USD"}`)}`);
+    if (p.provider !== "bitrefill") printFeeLines(p, p.invoice?.currency ?? "USD");
     if (p.provider === "bitrefill") {
       out(`  Bitrefill ${p.bitrefill?.invoiceId} ${dim(`\u2192 ${p.bitrefill?.amount} USDC on Base to ${p.bitrefill?.addressMasked}`)}`);
     }

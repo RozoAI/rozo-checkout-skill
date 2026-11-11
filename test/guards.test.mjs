@@ -269,7 +269,13 @@ test('status taxonomy', () => {
   assert.equal(ef.state, 'stuck_after_payment');
   assert.equal(ef.escalate, true);
 
-  assert.equal(classifyStatus({ payment: funded, routerState: { status: 'paid' } }).state, 'settled');
+  // Router `paid` alone is not settlement: Coinbase must show the capture.
+  assert.equal(classifyStatus({ payment: funded, routerState: { status: 'paid' } }).state, 'paying_coinbase');
+  assert.equal(classifyStatus({ payment: funded, routerState: { status: 'paid' } }).terminal, false);
+  assert.equal(
+    classifyStatus({ payment: funded, routerState: { status: 'paid' }, coinbase: { settled: true } }).state,
+    'settled',
+  );
   assert.equal(
     classifyStatus({ payment: { status: 'payment_payin_completed', source: {} } }).state,
     'payin_confirmed',

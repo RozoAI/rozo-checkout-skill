@@ -486,5 +486,6 @@ test('status: shielded pay-in states and confirmations are surfaced; a seen pay-
   );
   // the generic classifier is untouched for a settled order
   const done = { ...zecPayment({ payinState: 'eligible', confirmations: 2, amountReceived: AMOUNT }), status: 'payment_payout_completed' };
-  assert.equal(classifyStatus({ payment: done, routerState: { status: 'paid' }, coinbase: null }).state, 'settled');
+  assert.equal(classifyStatus({ payment: done, routerState: { status: 'paid' }, coinbase: { settled: true } }).state, 'settled');
+  assert.equal(classifyStatus({ payment: done, routerState: { status: 'paid' }, coinbase: null }).state, 'paying_coinbase');
 });

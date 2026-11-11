@@ -318,7 +318,13 @@ function snapshotFromQuote(quote) {
     protocolVersion: quote?.protocolVersion ?? null,
     merchant: quote?.merchant ?? null,
     original: quote?.invoice?.amount ?? null,
-    callerPays: quote?.quote?.callerPays ?? null,
+    // The router's own pricing block (top level). quote.quote.callerPays is the
+    // upstream invoice quote and never includes the Rozo service fee, so it is
+    // only a fallback for a router that states no pricing at all.
+    quotedOriginal: quote?.original ?? null,
+    callerPays: quote?.callerPays ?? quote?.quote?.callerPays ?? null,
+    serviceFee: quote?.serviceFee ?? null,
+    feeBps: quote?.feeBps ?? null,
     fiat: quote?.invoice?.fiat ?? null,
     coinbase: cb ? {
       id: cb.id ?? null,
@@ -364,8 +370,39 @@ var NATIVE_COINS = Object.freeze({
 });
 var NATIVE_MAX_USD = 3500;
 var NATIVE_MIN_USD_FALLBACK = Object.freeze({ "1:ETH": 1 });
+var AmountError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+};
 function decimalsKey(chainId, tokenSymbol) {
   return `${String(chainId).trim()}:${String(tokenSymbol || "").trim().toUpperCase()}`;
+}
+function toAtomic(decimalString, decimals) {
+  if (typeof decimalString === "number") decimalString = String(decimalString);
+  if (typeof decimalString !== "string") {
+    throw new AmountError("BAD_AMOUNT", "Amount must be a string or number.");
+  }
+  const s = decimalString.trim();
+  if (!/^\d+(\.\d+)?$/.test(s)) {
+    throw new AmountError("BAD_AMOUNT", `Not a plain decimal amount: ${s}`);
+  }
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) {
+    throw new AmountError("BAD_DECIMALS", `Invalid decimals: ${decimals}`);
+  }
+  const [whole, frac = ""] = s.split(".");
+  if (frac.length > decimals) {
+    const excess = frac.slice(decimals);
+    if (/[^0]/.test(excess)) {
+      throw new AmountError(
+        "AMOUNT_PRECISION",
+        `Amount ${s} has more precision than ${decimals} decimals allow.`
+      );
+    }
+  }
+  const padded = (frac + "0".repeat(decimals)).slice(0, decimals);
+  return BigInt(whole + (decimals > 0 ? padded : ""));
 }
 function chainName(chainId) {
   return CHAIN_NAMES[String(chainId)] || CHAIN_NAMES[chainId] || `chain ${chainId}`;
@@ -529,6 +566,118 @@ function zecShieldedOfferFor({ supportedSources, sourceMeta, callerPaysUsd }) {
 }
 
 // scripts/src/lib/guards.mjs
+function checkQuotePricing(snapshot) {
+  if (snapshot?.quotedOriginal !== void 0 && snapshot?.quotedOriginal !== null && normalizeDecimal(snapshot.quotedOriginal) !== normalizeDecimal(snapshot.original)) {
+    return {
+      ok: false,
+      code: "PRICING_VIOLATION",
+      reason: `The quote's amount (${snapshot.quotedOriginal}) differs from the invoice amount (${snapshot.original}).`,
+      field: "original",
+      value: String(snapshot.quotedOriginal),
+      drift: []
+    };
+  }
+  return checkPricing(snapshot);
+}
+var MAX_SERVICE_FEE_BPS = 100;
+var USDC_DECIMALS = 6;
+var ATOMIC_PER_CENT = 10000n;
+function serviceFeeAtomicFor(originalAtomic, feeBps) {
+  if (feeBps === 0 || originalAtomic === 0n) return 0n;
+  const divisor = 10000n * ATOMIC_PER_CENT;
+  return (originalAtomic * BigInt(feeBps) + divisor - 1n) / divisor * ATOMIC_PER_CENT;
+}
+function formatAtomicUsd(atomic) {
+  const whole = atomic / 1000000n;
+  const frac = (atomic % 1000000n).toString().padStart(USDC_DECIMALS, "0").replace(/0+$/, "");
+  return frac ? `${whole}.${frac}` : whole.toString();
+}
+function parseFeeBps(v) {
+  if (typeof v === "number") return Number.isSafeInteger(v) ? v : NaN;
+  if (typeof v === "string" && /^\d+$/.test(v.trim())) return Number(v.trim());
+  return NaN;
+}
+function checkPricing(obj) {
+  const bad = (code, field, value, reason) => ({ ok: false, code, reason, field, value: value ?? null, drift: [] });
+  const disc = obj?.discount;
+  if (disc !== void 0 && disc !== null && normalizeDecimal(disc) !== "0") {
+    return bad("NO_DISCOUNT_VIOLATION", "discount", String(disc), `Server reported a discount of "${disc}"; this flow must charge the full invoice.`);
+  }
+  const parse = (field) => {
+    const raw = defaultNormalize(obj?.[field]);
+    if (raw === null) return { missing: true };
+    try {
+      return { atomic: toAtomic(raw, USDC_DECIMALS) };
+    } catch {
+      return { invalid: raw };
+    }
+  };
+  const original = parse("original");
+  const callerPays = parse("callerPays");
+  for (const [field, v] of [["original", original], ["callerPays", callerPays]]) {
+    if (v.missing) return bad("PRICING_VIOLATION", field, null, `The ${field} amount is missing.`);
+    if (v.invalid !== void 0) return bad("PRICING_VIOLATION", field, v.invalid, `The ${field} amount "${v.invalid}" is not a USD amount.`);
+  }
+  const feeGiven = defaultNormalize(obj?.serviceFee) !== null;
+  const bpsGiven = obj?.feeBps !== void 0 && obj?.feeBps !== null && String(obj.feeBps).trim() !== "";
+  let feeAtomic = 0n;
+  let feeBps = 0;
+  if (feeGiven || bpsGiven) {
+    if (!feeGiven || !bpsGiven) {
+      return bad(
+        "PRICING_VIOLATION",
+        feeGiven ? "feeBps" : "serviceFee",
+        null,
+        "The server stated a service fee without its rate, or a rate without the fee. Refusing to guess."
+      );
+    }
+    feeBps = parseFeeBps(obj.feeBps);
+    if (!Number.isSafeInteger(feeBps) || feeBps < 0 || feeBps > MAX_SERVICE_FEE_BPS) {
+      return bad(
+        "PRICING_VIOLATION",
+        "feeBps",
+        String(obj.feeBps),
+        `Service fee rate ${obj.feeBps} bps is outside 0..${MAX_SERVICE_FEE_BPS} bps; this CLI does not accept it.`
+      );
+    }
+    const fee = parse("serviceFee");
+    if (fee.invalid !== void 0) return bad("PRICING_VIOLATION", "serviceFee", fee.invalid, `The service fee "${fee.invalid}" is not a USD amount.`);
+    feeAtomic = fee.atomic;
+    const expected = serviceFeeAtomicFor(original.atomic, feeBps);
+    if (feeAtomic !== expected) {
+      return bad(
+        "PRICING_VIOLATION",
+        "serviceFee",
+        String(obj.serviceFee),
+        `Service fee ${obj.serviceFee} is not ${feeBps} bps of ${obj.original} (expected ${formatAtomicUsd(expected)}).`
+      );
+    }
+  }
+  if (callerPays.atomic !== original.atomic + feeAtomic) {
+    return bad(
+      "PRICING_VIOLATION",
+      "callerPays",
+      String(obj.callerPays),
+      `callerPays (${obj.callerPays}) is not the invoice amount (${obj.original}) plus the stated service fee (${formatAtomicUsd(feeAtomic)}).`
+    );
+  }
+  return {
+    ok: true,
+    code: null,
+    reason: null,
+    pricing: {
+      original: formatAtomicUsd(original.atomic),
+      serviceFee: formatAtomicUsd(feeAtomic),
+      callerPays: formatAtomicUsd(callerPays.atomic),
+      feeBps
+    }
+  };
+}
+function defaultNormalize(v) {
+  if (v === null || v === void 0) return null;
+  const s = String(v).trim();
+  return s === "" ? null : s;
+}
 function normalizeDecimal(v) {
   if (v === null || v === void 0) return null;
   const s = String(v).trim();
@@ -638,6 +787,7 @@ async function main(argv) {
     nativeMinUsd: quote?.nativeMinUsd,
     callerPaysUsd: snapshot.callerPays ?? snapshot.original
   }) : null;
+  const pricing = checkQuotePricing(snapshot);
   const payload = {
     success: payability.payable,
     step: "quote",
@@ -649,9 +799,12 @@ async function main(argv) {
       amount: snapshot.original,
       fiat: snapshot.fiat
     },
-    // No discount on this line: the caller pays the full invoice amount.
-    callerPays: snapshot.callerPays,
-    discountPolicy: "none \u2014 callerPays equals the invoice amount",
+    // No discount on this line. callerPays is the total to pay: the invoice
+    // amount plus the Rozo service fee the router states (serviceFee, feeBps).
+    callerPays: pricing.ok ? pricing.pricing.callerPays : snapshot.callerPays,
+    serviceFee: pricing.ok ? pricing.pricing.serviceFee : snapshot.serviceFee ?? null,
+    feeBps: pricing.ok ? pricing.pricing.feeBps : snapshot.feeBps ?? null,
+    discountPolicy: "none: callerPays is the invoice amount plus the stated service fee",
     coinbase: snapshot.coinbase,
     coinbaseExpiryIso: payability.expiryMs ? new Date(payability.expiryMs).toISOString() : null,
     chosenSource,
@@ -685,10 +838,11 @@ async function main(argv) {
     emit(payload, EXIT_ERROR);
   }
   if (zecRequested) payload.nextStep = "create-order.js --url <url> --chain 9133 --token ZEC --shielded";
-  if (snapshot.callerPays && snapshot.original && normalizeDecimal(snapshot.callerPays) !== normalizeDecimal(snapshot.original)) {
-    payload.warnings = [
-      `callerPays (${snapshot.callerPays}) differs from the invoice amount (${snapshot.original}). This flow is supposed to charge the full invoice \u2014 do not proceed until that is explained.`
-    ];
+  if (!pricing.ok) {
+    payload.success = false;
+    payload.nextStep = null;
+    payload.error = { code: pricing.code, message: pricing.reason };
+    emit(payload, EXIT_ERROR);
   }
   emit(payload);
 }

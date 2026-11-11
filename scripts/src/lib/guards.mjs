@@ -10,10 +10,13 @@
  *   CREATE_DRIFT             create response disagrees with the quoted snapshot
  *   LINK_NO_LONGER_PAYABLE   Coinbase resource used / expired / non-payable
  *   DEPOSIT_NOT_LIVE         deposit address did not come from this run's GET
- *   NO_DISCOUNT_VIOLATION    callerPays != original, or discount != "0"
+ *   NO_DISCOUNT_VIOLATION    the server reported a non-zero discount
+ *   PRICING_VIOLATION        callerPays != original + serviceFee, or the
+ *                            service fee is not explicit, over the cap, or
+ *                            not the fee its own feeBps produces
  */
 
-import { comparePayment, sourceAtomic, chainFamily, isNativeSource } from './amounts.mjs';
+import { comparePayment, sourceAtomic, chainFamily, isNativeSource, toAtomic } from './amounts.mjs';
 import { isZecSource, zecStatusOf, validateShieldedDeposit, zecMoneySeen } from './zec.mjs';
 
 /** Statuses that mean "nothing has been funded yet". */
@@ -331,34 +334,180 @@ export function verifyCreateAgainstQuote({ snapshot, created, requested }) {
     };
   }
 
-  // No-discount invariant (PLAN §1, fix P0-1): on the OpenRouter/Coinbase line
-  // callerPays == original and discount == "0". Anything else means we are
-  // reading a different code path than the one this skill was built for.
-  const disc = created?.discount;
-  if (disc !== undefined && disc !== null && normalizeDecimal(disc) !== '0') {
-    return {
-      ok: false,
-      code: 'NO_DISCOUNT_VIOLATION',
-      reason: `Server reported a discount of "${disc}"; this flow must charge the full invoice.`,
-      drift: [{ field: 'discount', quoted: '0', created: String(disc) }],
-    };
+  // Pricing invariant. No discount on this line, and the only amount allowed
+  // on top of the invoice is a service fee the router states explicitly
+  // (serviceFee + feeBps), at or under MAX_SERVICE_FEE_BPS, equal to the fee
+  // that rate produces, with callerPays == original + serviceFee exactly.
+  // Both the quote and the create response must pass, and must agree.
+  const quoted = checkQuotePricing(snapshot);
+  if (!quoted.ok) return { ...quoted, drift: [{ field: quoted.field, quoted: quoted.value, created: null, note: 'quote' }] };
+  const got = checkPricing(created);
+  if (!got.ok) return { ...got, drift: [{ field: got.field, quoted: null, created: got.value }] };
+  const feeDrift = [];
+  if (quoted.pricing.serviceFee !== got.pricing.serviceFee) {
+    feeDrift.push({ field: 'serviceFee', quoted: quoted.pricing.serviceFee, created: got.pricing.serviceFee });
   }
-  if (
-    created?.callerPays !== undefined &&
-    created?.original !== undefined &&
-    normalizeDecimal(created.callerPays) !== normalizeDecimal(created.original)
-  ) {
+  if (quoted.pricing.feeBps !== got.pricing.feeBps) {
+    feeDrift.push({ field: 'feeBps', quoted: quoted.pricing.feeBps, created: got.pricing.feeBps });
+  }
+  if (feeDrift.length) {
     return {
       ok: false,
-      code: 'NO_DISCOUNT_VIOLATION',
-      reason: `callerPays (${created.callerPays}) differs from the invoice amount (${created.original}).`,
-      drift: [
-        { field: 'callerPays', quoted: String(created.original), created: String(created.callerPays) },
-      ],
+      code: 'CREATE_DRIFT',
+      reason: 'The created order does not match what was quoted. Refusing to continue.',
+      drift: feeDrift,
     };
   }
 
   return { ok: true, code: null, reason: null, drift: [] };
+}
+
+/**
+ * Pricing check for a quote snapshot alone (before any order is created):
+ * checkPricing, plus the router's top-level `original` must equal the invoice.
+ */
+export function checkQuotePricing(snapshot) {
+  if (
+    snapshot?.quotedOriginal !== undefined &&
+    snapshot?.quotedOriginal !== null &&
+    normalizeDecimal(snapshot.quotedOriginal) !== normalizeDecimal(snapshot.original)
+  ) {
+    return {
+      ok: false,
+      code: 'PRICING_VIOLATION',
+      reason: `The quote's amount (${snapshot.quotedOriginal}) differs from the invoice amount (${snapshot.original}).`,
+      field: 'original',
+      value: String(snapshot.quotedOriginal),
+      drift: [],
+    };
+  }
+  return checkPricing(snapshot);
+}
+
+/**
+ * Highest service fee this CLI accepts, in basis points (100 = 1%). Mirrors the
+ * router's own code ceiling (MAX_CHECKOUT_WEB_FEE_BPS in rozo-mpprouter
+ * src/routes/checkout-web-pricing.ts). A router that asks for more is refused;
+ * raising this needs a reviewed change here, not a server setting.
+ */
+export const MAX_SERVICE_FEE_BPS = 100;
+
+const USDC_DECIMALS = 6;
+const ATOMIC_PER_CENT = 10_000n;
+
+/**
+ * The fee a rate produces, exactly as the router computes it: original x bps /
+ * 10,000, rounded UP to a whole cent, in atomic USDC (6 decimals).
+ */
+export function serviceFeeAtomicFor(originalAtomic, feeBps) {
+  if (feeBps === 0 || originalAtomic === 0n) return 0n;
+  const divisor = 10_000n * ATOMIC_PER_CENT;
+  return ((originalAtomic * BigInt(feeBps) + divisor - 1n) / divisor) * ATOMIC_PER_CENT;
+}
+
+function formatAtomicUsd(atomic) {
+  const whole = atomic / 1_000_000n;
+  const frac = (atomic % 1_000_000n).toString().padStart(USDC_DECIMALS, '0').replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : whole.toString();
+}
+
+function parseFeeBps(v) {
+  if (typeof v === 'number') return Number.isSafeInteger(v) ? v : NaN;
+  if (typeof v === 'string' && /^\d+$/.test(v.trim())) return Number(v.trim());
+  return NaN;
+}
+
+/**
+ * Validate the pricing block of a quote snapshot or a create response:
+ * { original, serviceFee, callerPays, feeBps, discount }.
+ *
+ * Accepted shapes, and nothing else:
+ *   - no fee fields at all: callerPays must equal original (zero fee);
+ *   - serviceFee AND feeBps both present: feeBps an integer 0..MAX_SERVICE_FEE_BPS,
+ *     serviceFee exactly the fee that feeBps produces on original, and
+ *     callerPays exactly original + serviceFee.
+ * A fee without its rate, a rate without its fee, an unparsable amount or any
+ * arithmetic mismatch is refused. Fails closed.
+ *
+ * @returns {{ok:true, pricing:{original:string, serviceFee:string, callerPays:string, feeBps:number}}
+ *          | {ok:false, code:string, reason:string, field:string, value:any}}
+ */
+export function checkPricing(obj) {
+  const bad = (code, field, value, reason) => ({ ok: false, code, reason, field, value: value ?? null, drift: [] });
+  const disc = obj?.discount;
+  if (disc !== undefined && disc !== null && normalizeDecimal(disc) !== '0') {
+    return bad('NO_DISCOUNT_VIOLATION', 'discount', String(disc), `Server reported a discount of "${disc}"; this flow must charge the full invoice.`);
+  }
+  const parse = (field) => {
+    const raw = defaultNormalize(obj?.[field]);
+    if (raw === null) return { missing: true };
+    try {
+      return { atomic: toAtomic(raw, USDC_DECIMALS) };
+    } catch {
+      return { invalid: raw };
+    }
+  };
+  const original = parse('original');
+  const callerPays = parse('callerPays');
+  for (const [field, v] of [['original', original], ['callerPays', callerPays]]) {
+    if (v.missing) return bad('PRICING_VIOLATION', field, null, `The ${field} amount is missing.`);
+    if (v.invalid !== undefined) return bad('PRICING_VIOLATION', field, v.invalid, `The ${field} amount "${v.invalid}" is not a USD amount.`);
+  }
+  const feeGiven = defaultNormalize(obj?.serviceFee) !== null;
+  const bpsGiven = obj?.feeBps !== undefined && obj?.feeBps !== null && String(obj.feeBps).trim() !== '';
+  let feeAtomic = 0n;
+  let feeBps = 0;
+  if (feeGiven || bpsGiven) {
+    if (!feeGiven || !bpsGiven) {
+      return bad(
+        'PRICING_VIOLATION',
+        feeGiven ? 'feeBps' : 'serviceFee',
+        null,
+        'The server stated a service fee without its rate, or a rate without the fee. Refusing to guess.',
+      );
+    }
+    feeBps = parseFeeBps(obj.feeBps);
+    if (!Number.isSafeInteger(feeBps) || feeBps < 0 || feeBps > MAX_SERVICE_FEE_BPS) {
+      return bad(
+        'PRICING_VIOLATION',
+        'feeBps',
+        String(obj.feeBps),
+        `Service fee rate ${obj.feeBps} bps is outside 0..${MAX_SERVICE_FEE_BPS} bps; this CLI does not accept it.`,
+      );
+    }
+    const fee = parse('serviceFee');
+    if (fee.invalid !== undefined) return bad('PRICING_VIOLATION', 'serviceFee', fee.invalid, `The service fee "${fee.invalid}" is not a USD amount.`);
+    feeAtomic = fee.atomic;
+    const expected = serviceFeeAtomicFor(original.atomic, feeBps);
+    if (feeAtomic !== expected) {
+      return bad(
+        'PRICING_VIOLATION',
+        'serviceFee',
+        String(obj.serviceFee),
+        `Service fee ${obj.serviceFee} is not ${feeBps} bps of ${obj.original} (expected ${formatAtomicUsd(expected)}).`,
+      );
+    }
+  }
+  if (callerPays.atomic !== original.atomic + feeAtomic) {
+    return bad(
+      'PRICING_VIOLATION',
+      'callerPays',
+      String(obj.callerPays),
+      `callerPays (${obj.callerPays}) is not the invoice amount (${obj.original}) plus the stated service fee ` +
+        `(${formatAtomicUsd(feeAtomic)}).`,
+    );
+  }
+  return {
+    ok: true,
+    code: null,
+    reason: null,
+    pricing: {
+      original: formatAtomicUsd(original.atomic),
+      serviceFee: formatAtomicUsd(feeAtomic),
+      callerPays: formatAtomicUsd(callerPays.atomic),
+      feeBps,
+    },
+  };
 }
 
 function defaultNormalize(v) {
@@ -552,9 +701,22 @@ export function classifyStatus({
       { terminal: false, escalate: true },
     );
   }
-  if (!bitrefill && (routerStatus === 'paid' || coinbase?.settled === true)) {
+  // Settled needs Coinbase to show the capture. The router saying `paid` is
+  // not enough on its own (Coinbase can still be authorizing), and a Coinbase
+  // capture while the router is mid-payment is waited on, not reported: the
+  // same rule receipt.mjs applies (paymentOutcomeFor / merchantSettlementProved).
+  // Bitrefill is unaffected: its proof is the Rozo payout, handled below.
+  if (!bitrefill && coinbase?.settled === true && (routerStatus === null || routerStatus === 'paid')) {
     return mk('settled', 'Coinbase invoice settled by the funder wallet.', { terminal: true });
   }
+  if (!bitrefill && routerStatus === 'paid') {
+    return mk(
+      'paying_coinbase',
+      'The funder wallet paid, but Coinbase has not shown the capture yet. Keep polling; do not pay again.',
+    );
+  }
+  // Coinbase settled while the router is mid-payment (or on another state):
+  // not settled yet; the payment status below decides what to show.
 
   // A native coin order is priced with a tolerance: the backend accepts a
   // payment slightly under the quoted coin amount (for example an exchange

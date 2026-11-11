@@ -24,7 +24,7 @@ import {
 } from './lib/amounts.mjs';
 import { parseDeadline } from './lib/expiry.mjs';
 import { ZEC_BETA_PARAM, ZEC_SHIELDED_MAX_USD, isZecSource, zecShieldedOfferFor } from './lib/zec.mjs';
-import { normalizeDecimal } from './lib/guards.mjs';
+import { checkQuotePricing } from './lib/guards.mjs';
 
 function derivePayable(snapshot, now) {
   const cb = snapshot.coinbase;
@@ -144,6 +144,10 @@ async function main(argv) {
       })
     : null;
 
+  // Amounts the user is about to be shown: the invoice, the fee and the total
+  // must add up, and the fee must be explicit and within the cap.
+  const pricing = checkQuotePricing(snapshot);
+
   const payload = {
     success: payability.payable,
     step: 'quote',
@@ -155,9 +159,12 @@ async function main(argv) {
       amount: snapshot.original,
       fiat: snapshot.fiat,
     },
-    // No discount on this line: the caller pays the full invoice amount.
-    callerPays: snapshot.callerPays,
-    discountPolicy: 'none — callerPays equals the invoice amount',
+    // No discount on this line. callerPays is the total to pay: the invoice
+    // amount plus the Rozo service fee the router states (serviceFee, feeBps).
+    callerPays: pricing.ok ? pricing.pricing.callerPays : snapshot.callerPays,
+    serviceFee: pricing.ok ? pricing.pricing.serviceFee : (snapshot.serviceFee ?? null),
+    feeBps: pricing.ok ? pricing.pricing.feeBps : (snapshot.feeBps ?? null),
+    discountPolicy: 'none: callerPays is the invoice amount plus the stated service fee',
     coinbase: snapshot.coinbase,
     coinbaseExpiryIso: payability.expiryMs ? new Date(payability.expiryMs).toISOString() : null,
     chosenSource,
@@ -199,16 +206,11 @@ async function main(argv) {
   }
   if (zecRequested) payload.nextStep = 'create-order.js --url <url> --chain 9133 --token ZEC --shielded';
 
-  // Compare as money, not as text: "5.00" and "5.000000" are the same amount.
-  if (
-    snapshot.callerPays &&
-    snapshot.original &&
-    normalizeDecimal(snapshot.callerPays) !== normalizeDecimal(snapshot.original)
-  ) {
-    payload.warnings = [
-      `callerPays (${snapshot.callerPays}) differs from the invoice amount (${snapshot.original}). ` +
-        'This flow is supposed to charge the full invoice — do not proceed until that is explained.',
-    ];
+  if (!pricing.ok) {
+    payload.success = false;
+    payload.nextStep = null;
+    payload.error = { code: pricing.code, message: pricing.reason };
+    emit(payload, EXIT_ERROR);
   }
 
   emit(payload);

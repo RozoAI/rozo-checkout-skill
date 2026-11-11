@@ -291,6 +291,19 @@ async function askYesNo(question) {
   }
 }
 
+/**
+ * Service fee and total, as the router stated them and the CLI verified them
+ * (checkPricing): invoice + serviceFee == callerPays, fee within the cap.
+ */
+function printFeeLines(payload, currency) {
+  const fee = payload.serviceFee;
+  if (fee !== undefined && fee !== null && Number(fee) > 0) {
+    const pct = Number.isInteger(payload.feeBps) ? ` ${dim(`(${payload.feeBps / 100}% Rozo service fee)`)}` : '';
+    out(`  Fee       ${fee} ${currency}${pct}`);
+  }
+  out(`  You pay   ${bold(`${payload.callerPays} ${currency}`)} ${dim('(invoice + fee; no discount on this route)')}`);
+}
+
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
@@ -312,7 +325,7 @@ async function cmdQuote(opts) {
   out();
   out(`  ${bold(payload.merchant ?? 'Unknown merchant')}`);
   out(`  Invoice   ${bold(`${payload.invoice?.amount} ${payload.invoice?.fiat?.currency ?? 'USD'}`)}`);
-  out(`  You pay   ${payload.callerPays} ${dim('(no discount on this route)')}`);
+  printFeeLines(payload, payload.invoice?.fiat?.currency ?? 'USD');
   out(`  Expires   ${payload.coinbaseExpiryIso ?? 'unknown'}`);
   const natives = (payload.nativeOffered ?? []).map((n) => presetFor(n.chainId, n.tokenSymbol)).filter(Boolean);
   if (natives.length) {
@@ -678,6 +691,7 @@ async function cmdPay(opts) {
     out();
     out(`  ${bold(p.merchant ?? 'Unknown merchant')}`);
     out(`  Invoice   ${bold(`${p.invoice?.amount} ${p.invoice?.currency ?? 'USD'}`)}`);
+    if (p.provider !== 'bitrefill') printFeeLines(p, p.invoice?.currency ?? 'USD');
     if (p.provider === 'bitrefill') {
       out(`  Bitrefill ${p.bitrefill?.invoiceId} ${dim(`→ ${p.bitrefill?.amount} USDC on Base to ${p.bitrefill?.addressMasked}`)}`);
     }

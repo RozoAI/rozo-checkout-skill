@@ -118,9 +118,14 @@ available for Bitrefill invoices (`NATIVE_NOT_AVAILABLE`).
 
 How it works: the router quotes the Coinbase link, creates a one-time bridge
 order with a deposit address for the coin you chose, and once your deposit
-lands, a funder wallet pays the Coinbase invoice. **There is no discount** —
-`callerPays` equals the invoice amount. If a response ever shows a discount, or
-`callerPays` differs from the invoice, stop and explain; do not proceed.
+lands, a funder wallet pays the Coinbase invoice. **There is no discount.**
+`callerPays` is the total to pay: the invoice amount (`original`) plus the Rozo
+service fee the router states in `serviceFee` and `feeBps` (1% today). The CLI
+accepts that total only when the fee is stated explicitly, is at most 100 bps,
+is exactly the fee that rate produces (rounded up to a whole cent), and
+`callerPays` equals `original + serviceFee` in both the quote and the created
+order. If a response ever shows a discount, or the amounts do not add up, stop
+and explain; do not proceed.
 
 ## Bitrefill invoice
 
@@ -333,7 +338,8 @@ confirmation record whose digest still matches the live deposit data.
 node scripts/dist/quote.js --url "https://payments.coinbase.com/payment-links/pl_01..."
 ```
 
-Reports merchant, invoice amount, `callerPays`, the Coinbase expiry and the
+Reports merchant, invoice amount, `serviceFee` and `feeBps`, `callerPays` (the
+total), the Coinbase expiry and the
 supported source list. An OpenRouter link stays payable about 24 hours after
 OpenRouter creates it; read the actual time from the Coinbase expiry rather
 than assuming it. Exit 1 with `LINK_NO_LONGER_PAYABLE` means the link is
@@ -346,8 +352,8 @@ The `quoteReceipt` in the output lives about **60 seconds**. Do not save it;
 
 Ask the caller which coin and chain they want to pay with, or use what they
 already told you. Narrate the plan: invoice amount, merchant, chosen
-chain/token, `callerPays` (equal to the invoice — no discount). **This is not
-the binding confirmation.**
+chain/token, the service fee and `callerPays` (invoice plus fee, no discount).
+**This is not the binding confirmation.**
 
 **Optional contact email.** If a user is present, you MAY ask once, in the
 same message: "Optional: an email so ROZO can reach you if the payment needs
@@ -407,7 +413,9 @@ Present, from the `display` and `expiry` blocks of the run above:
 ```
 About to pay:
   Merchant:   {merchant}
-  Invoice:    {invoice.amount} USD   (you pay the full amount, no discount)
+  Invoice:    {invoice.amount} USD   (the full amount, no discount)
+  Fee:        {serviceFee} USD   (Rozo service fee, {feeBps} bps)
+  Total:      {callerPays} USD
   Send:       {display.amount} on {display.chain}
   To:         {display.payToMasked}                <- masked, always
   Order ends: {expiry.effectiveDeadlineIso}  ({expiry.minutesOfSlack} min of slack)
@@ -765,7 +773,8 @@ of any `status` result that is not a clean answer.
 | `ORDER_ALREADY_FUNDED` | an order for this link already shows money | **money-detected rule** — do not pay again, escalate |
 | `REUSED_SOURCE_MISMATCH` | an existing order expects a different chain/token than the caller chose | let it expire, or pay the chain the order actually expects after re-confirming with the user |
 | `CREATE_DRIFT` | the created order disagrees with the quote (merchant, amount or link) | do not fund it; let it expire unfunded and report the drift |
-| `NO_DISCOUNT_VIOLATION` | the server reported a discount, or `callerPays ≠ invoice` | stop; this flow must charge the full invoice |
+| `NO_DISCOUNT_VIOLATION` | the server reported a discount | stop; this flow must charge the full invoice |
+| `PRICING_VIOLATION` | `callerPays ≠ original + serviceFee`, or the fee is not stated with its rate, is over 100 bps, or is not the fee that rate produces | stop; nothing was created if it came from the quote, otherwise let the order expire unfunded |
 | `EXPIRY_MARGIN` / `EXPIRED` | not enough time left to fund, bridge and settle | start over with a fresh link |
 | `QUOTE_EXPIRED` / `QUOTE_EXPIRY_MARGIN` | a native coin order's price lock has ended, or is inside the safety margin | do not send; the unfunded order costs nothing. Once it has expired, run pay again for a fresh price, or pay with a stablecoin |
 | `NATIVE_NOT_OFFERED` | the quote does not list that native coin for this invoice | nothing was created; offer a stablecoin or a native coin from `nativeOffered` |

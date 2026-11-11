@@ -7,8 +7,9 @@
 > (ETH on Ethereum, Base or Arbitrum, BNB, SOL, POL). No Coinbase account, public HTTP
 > endpoints, no API key. Crypto payments to OpenRouter are never refundable.
 > The payer funds a one-time deposit address; a bridge and a funder wallet settle the
-> Coinbase link automatically. No discount: you pay the invoice amount, plus the
-> deposit normally carries a small bridge/source-chain fee on top.
+> Coinbase link automatically. No discount: you pay the invoice amount plus a Rozo
+> service fee stated in the quote (1% today), and the deposit normally carries a
+> small bridge/source-chain fee on top.
 
 This file teaches the whole flow to any agent or script. Repo (scripts, safety rails,
 full docs): https://github.com/RozoAI/rozo-checkout-skill — see docs/QUICKSTART.md.
@@ -137,8 +138,9 @@ private key (EVM and Solana only); every other path is keyless.
    curl -X POST https://apiserver.mpprouter.dev/v1/services/rozo-agent-api/quote-invoice \
      -H 'content-type: application/json' \
      -d '{"url":"https://payments.coinbase.com/payment-links/pl_XXXX"}'
-   -> { linkId, merchant, original, callerPays, discount:"0", quoteReceipt, ... }
-   callerPays always equals the invoice amount (discount is always "0").
+   -> { linkId, merchant, original, serviceFee, feeBps, callerPays, discount:"0", quoteReceipt, ... }
+   callerPays = original + serviceFee (discount is always "0"). serviceFee is
+   feeBps of original rounded up to a whole cent; feeBps is at most 100.
 
 2) Create (or reuse) the order:
    curl -X POST https://apiserver.mpprouter.dev/v1/services/rozo-agent-api/create-invoice \

@@ -654,8 +654,14 @@ function classifyStatus({
       { terminal: false, escalate: true }
     );
   }
-  if (!bitrefill && (routerStatus === "paid" || coinbase?.settled === true)) {
+  if (!bitrefill && coinbase?.settled === true && (routerStatus === null || routerStatus === "paid")) {
     return mk("settled", "Coinbase invoice settled by the funder wallet.", { terminal: true });
+  }
+  if (!bitrefill && routerStatus === "paid") {
+    return mk(
+      "paying_coinbase",
+      "The funder wallet paid, but Coinbase has not shown the capture yet. Keep polling; do not pay again."
+    );
   }
   const nativeAccepted = isNativeSource(source.chainId, source.tokenSymbol) && NATIVE_PROGRESS_STATUSES.has(payment?.status);
   if (moneyDetected && receipt && receipt.state === "underpaid" && !nativeAccepted) {
