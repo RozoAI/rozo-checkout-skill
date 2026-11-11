@@ -54308,8 +54308,6 @@ var BITREFILL_DESTINATION = Object.freeze({ chainId: "8453", tokenSymbol: "USDC"
 var BITREFILL_MIN_EXPIRY_MS = 5 * 60 * 1e3;
 var BITREFILL_MIN_PAY_WINDOW_MS = 2 * 60 * 1e3;
 var BITREFILL_MAX_EXPIRY_AHEAD_MS = 61 * 60 * 1e3;
-var BITREFILL_LATE_PAYMENT_POLICY = "Funds that arrive after the Bitrefill invoice expires are not forwarded to Bitrefill; they are refunded manually on request: contact hi@rozo.ai with the invoice id and rozoPaymentId.";
-var BITREFILL_LATE_PAYMENT_DETAIL = "Your payment reached Rozo, but Rozo has not confirmed paying the Bitrefill invoice and the invoice has expired. Check the invoice on Bitrefill's page first; it is the source of truth. Do not pay again. " + BITREFILL_LATE_PAYMENT_POLICY;
 function checkBitrefillExpiry(expiresAt, now = Date.now(), minMs = BITREFILL_MIN_PAY_WINDOW_MS, { quoteExpiresAt = void 0, chainId = null } = {}) {
   const ms = parseDeadline(expiresAt);
   const native = quoteExpiresAt !== void 0;

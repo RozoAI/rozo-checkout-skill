@@ -36,6 +36,7 @@ import {
   intentBitrefillExpiry,
   isBitrefillFunderOrder,
   BITREFILL_LATE_PAYMENT_DETAIL,
+  BITREFILL_MIN_PAY_WINDOW_MS,
 } from './lib/bitrefill.mjs';
 import { SCHEMA_VERSION, paymentOutcomeFor, nextActionFor } from './lib/receipt.mjs';
 
@@ -234,9 +235,11 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
     }
     bitrefillExpiry = earliestExpiry(local?.bitrefill?.expiresAt, intentBitrefillExpiry(payment));
     // Funder model: money reached Rozo but the funder has not (visibly) paid
-    // the invoice, and the invoice is past its deadline. A late payment is not
-    // forwarded to Bitrefill; it is refunded by hand on request.
-    // Any stage after money arrived counts, not only after the payout.
+    // the invoice, and the invoice is past its deadline or inside its last
+    // BITREFILL_MIN_PAY_WINDOW_MS. The funder's signer refuses to pay inside
+    // that window, so waiting for the full expiry only delays the escalation.
+    // A late payment is not forwarded to Bitrefill; it is refunded by hand on
+    // request. Any stage after money arrived counts, not only after the payout.
     const lateStates = new Set(['payin_detected', 'payin_confirmed', 'bridging', 'paying_merchant']);
     if (
       payment &&
@@ -245,7 +248,7 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
       (verdict.moneyDetected || verdict.state === 'paying_merchant') &&
       lateStates.has(verdict.state) &&
       bitrefillExpiry &&
-      Date.parse(bitrefillExpiry) <= Date.now()
+      Date.parse(bitrefillExpiry) - Date.now() < BITREFILL_MIN_PAY_WINDOW_MS
     ) {
       state = 'stuck_after_payment';
       terminal = false;

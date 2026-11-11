@@ -67,7 +67,10 @@ feeBps != 100 = refuse before showing a deposit. Expiry = the invoice expiry (an
 refuse to show/send under 2 min. 409 DUPLICATE_INVOICE with rozoPaymentId: resume it; without one:
 the invoice already has a payment under the other model, do not pay again. Paid = no-fee order
 payment_payout_completed (or completed with a payout tx hash); fee order also needs merchantDeliveredAt.
-Bitrefill's page is the source of truth. 503 BITREFILL_NOT_CONFIGURED / RETRY_LATER: do not pay, retry later.
+Bitrefill's page is the source of truth. Fee order with money in, not delivered, invoice expired or under
+2 min left = stuck_after_payment: do not pay again, check Bitrefill's page first (it may be paid), then
+hi@rozo.ai. 403 BITREFILL_DISABLED / BITREFILL_INVOICE_NOT_ALLOWED: nothing created or charged, no deposit
+address; do not loop or switch route, try later. 503 BITREFILL_NOT_CONFIGURED / RETRY_LATER: do not pay, retry later.
 
 ## Local wallet setup for --send (not needed for the default keyless path)
 

@@ -1002,3 +1002,95 @@ test('create flow: a pre-fee local record never accepts a fee-bearing live order
     },
   );
 });
+
+// --- fix batch 2026-11-12 -------------------------------------------------------
+
+test('create flow: 403 BITREFILL_INVOICE_NOT_ALLOWED stops before any order, deposit or retry', async () => {
+  const notAllowed = () => json({ ok: false, error: 'BITREFILL_INVOICE_NOT_ALLOWED', message: 'invoice not in allowlist' }, 403);
+  for (const args of [ARGS, [...ARGS, '--confirm'], FARGS(), [...FARGS(), '--confirm']]) {
+    await withEnv([['/create-invoice', notAllowed]], async (calls) => {
+      const { payload, exitCode } = await capture(() => runBitrefill(args));
+      assert.notEqual(exitCode, 0);
+      assert.equal(payload.success, false);
+      assert.equal(payload.error.code, 'BITREFILL_INVOICE_NOT_ALLOWED');
+      assert.match(payload.error.message, /temporarily unavailable for this invoice/);
+      assert.match(payload.error.message, /nothing was charged/);
+      assert.match(payload.error.message, /no deposit address is shown/);
+      assert.equal(payload.deposit, undefined);
+      assert.ok(!JSON.stringify(payload).includes('rozo-9921'), 'no deposit memo leaks');
+      // One create call, no retry, no fallback to another model or endpoint.
+      assert.equal(calls.length, 1, JSON.stringify(calls.map((c) => c.url)));
+      assert.equal(calls[0].url, `${MPP_BASE}/create-invoice`);
+      assert.equal(readState(ID), null);
+    });
+  }
+});
+
+test('re-running pay for an invoice that already has an order: 403 BITREFILL_INVOICE_NOT_ALLOWED still refuses, nothing resumed', async () => {
+  let allowed = true;
+  await withEnv(
+    [
+      ['/create-invoice', () => (allowed
+        ? json(readFixture('bitrefill-create-response.json'))
+        : json({ ok: false, error: 'BITREFILL_INVOICE_NOT_ALLOWED', message: 'paused' }, 403))],
+      [`/payments/${ID}`, () => json(readFixture('payment-bitrefill-unpaid-stellar.json'))],
+    ],
+    async (calls) => {
+      const first = await capture(() => runBitrefill(ARGS));
+      assert.equal(first.exitCode, 0, JSON.stringify(first.payload));
+      allowed = false;
+      const before = calls.length;
+      const { payload, exitCode } = await capture(() => runBitrefill([...ARGS, '--confirm']));
+      assert.notEqual(exitCode, 0);
+      assert.equal(payload.error.code, 'BITREFILL_INVOICE_NOT_ALLOWED');
+      assert.equal(payload.deposit, undefined);
+      const after = calls.slice(before);
+      assert.equal(after.length, 1, JSON.stringify(after.map((c) => c.url)));
+      assert.ok(!after.some((c) => c.url.includes('/payments/')), 'nothing resumed');
+      assert.ok(!readState(ID).confirmation, 'never confirmed');
+    },
+  );
+});
+
+test('BITREFILL_DISABLED and BITREFILL_INVOICE_NOT_ALLOWED both carry a hint and keep their code', async () => {
+  const { explainRouterError, BITREFILL_ROUTER_HINTS } = await import('../scripts/src/lib/bitrefill.mjs');
+  for (const code of ['BITREFILL_DISABLED', 'BITREFILL_INVOICE_NOT_ALLOWED']) {
+    assert.ok(BITREFILL_ROUTER_HINTS[code]);
+    const e = explainRouterError(Object.assign(new Error('x'), { code }));
+    assert.equal(e.code, code);
+    assert.match(e.message, /\(router: x\)$/);
+  }
+  assert.doesNotMatch(BITREFILL_ROUTER_HINTS.BITREFILL_INVOICE_NOT_ALLOWED, /[–—]/);
+});
+
+test('status (funder): paying_merchant escalates inside the last 2 minutes, and the text sends the user to Bitrefill first', async () => {
+  const paid = (expiresAt) => {
+    const o = funderOrder({ expiresAt });
+    o.status = 'payment_payout_completed';
+    o.source.txHash = 'abc';
+    o.source.amountReceived = o.source.amount;
+    o.source.confirmedAt = '2026-10-01T00:00:00Z';
+    return o;
+  };
+  const oneMinute = new Date(Date.now() + 60_000).toISOString();
+  await withEnv([[`/payments/${ID}`, () => json(paid(oneMinute))]], async () => {
+    const { payload } = await capture(() => runStatus(['--rozo-payment-id', ID]));
+    assert.equal(payload.state, 'stuck_after_payment');
+    assert.equal(payload.escalate, true);
+    const d = payload.detail;
+    assert.match(d, /may in fact be paid/);
+    assert.ok(d.indexOf("Bitrefill's page") < d.indexOf('hi@rozo.ai'), 'Bitrefill page before support');
+    assert.ok(d.indexOf('hi@rozo.ai') < d.indexOf('refunded manually'), 'support before refund');
+  });
+  await withEnv([[`/payments/${ID}`, () => json(paid(inMin(3)))]], async () => {
+    const { payload } = await capture(() => runStatus(['--rozo-payment-id', ID]));
+    assert.equal(payload.state, 'paying_merchant');
+    assert.equal(payload.escalate, false);
+  });
+  const delivered = paid(oneMinute);
+  delivered.merchantDeliveredAt = new Date().toISOString();
+  await withEnv([[`/payments/${ID}`, () => json(delivered)]], async () => {
+    const { payload } = await capture(() => runStatus(['--rozo-payment-id', ID]));
+    assert.equal(payload.escalate, false);
+  });
+});

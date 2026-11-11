@@ -13,8 +13,9 @@ description: >
   and has no link yet (OpenRouter's crypto credits API returns 410 Gone).
   Also pays a Bitrefill invoice created with "USDC on Base": triggers on
   "pay bitrefill", "bitrefill invoice", or an invoice id plus a Base USDC
-  address and amount from Bitrefill. Supports Coinbase payment links and
-  Bitrefill invoices only (not Stripe). Also pays any x402 API (HTTP 402,
+  address and amount from Bitrefill (invoice amount plus a 1% Rozo service
+  fee; same coins as the router accepts for the invoice, not ZEC). Supports
+  Coinbase payment links and Bitrefill invoices only (not Stripe). Also pays any x402 API (HTTP 402,
   PAYMENT-REQUIRED) from a prepaid Rozo balance: triggers on "x402", "402
   Payment Required", "pay this x402 endpoint"; the payment leg is USDC on
   Base only (Solana payment leg is coming later).
@@ -186,11 +187,20 @@ Stripe checkout is not supported by this skill.
    Rozo's funder pays the invoice, and `settled` once the invoice address is
    paid ("paid to the address on the Bitrefill invoice; Bitrefill's invoice
    page is the source of truth"). With no fee (the router's older model) the
-   Rozo payout itself pays the invoice address. Money that reached Rozo after
-   the invoice expired shows as `stuck_after_payment`. Works without a local
-   record (provider read from the order).
+   Rozo payout itself pays the invoice address. Money that reached Rozo
+   without the invoice being confirmed paid, once the invoice has expired or
+   has under 2 minutes left (Rozo's funder does not pay inside the last 2
+   minutes), shows as `stuck_after_payment`. Then tell the user, in this
+   order: do not pay again; check the invoice on Bitrefill's page first,
+   because it may in fact be paid; if it is not, contact hi@rozo.ai with the
+   invoice id and `rozoPaymentId`. Works without a local record (provider read
+   from the order).
 
-Router errors to relay as-is: `BITREFILL_DISABLED`, `INVALID_ADDRESS`,
+Router errors to relay as-is: `BITREFILL_DISABLED` and
+`BITREFILL_INVOICE_NOT_ALLOWED` (403: Bitrefill payments through Rozo are off,
+or temporarily not open for this invoice; nothing was created or charged and
+no deposit address is shown; do not retry in a loop and do not try another
+route, try again later), `INVALID_ADDRESS`,
 `INVALID_AMOUNT`, `AMOUNT_OUT_OF_RANGE`, `INVOICE_EXPIRING`, `BLOCKED_ADDRESS`,
 `UNSUPPORTED_SOURCE`, `INVALID_INPUT` (400), `DUPLICATE_INVOICE` without an
 order id (409: this invoice already has a payment started under the other

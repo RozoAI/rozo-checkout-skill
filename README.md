@@ -4,8 +4,8 @@
 
 ### When your agent needs to pay OpenRouter (or any Coinbase invoice) with the crypto you already hold
 
-OpenRouter crypto top-ups and other Coinbase-hosted invoices settle in USDC on
-Base. This skill pays them from whatever you hold instead, and it does three
+OpenRouter and other AI services that take crypto through Coinbase settle in
+USDC on Base. This skill pays them from whatever you hold instead, and it does three
 things the official path cannot:
 
 - **Pay from the chain you are already on.** USDT or USDC on Solana, BNB Chain,
@@ -602,6 +602,16 @@ The full list of what this refuses to do, and why, is in
 
 ## Changelog
 
+- **0.1.27**: Bitrefill invoices work like OpenRouter: invoice amount plus a 1%
+  Rozo service fee (rounded up to the cent), checked before any deposit is
+  shown, and the same coins as the router accepts for the invoice (not ZEC).
+  Fee orders report `paying_merchant` until the router confirms the invoice
+  paid, and escalate once the invoice has under 2 minutes left without that
+  confirmation (check Bitrefill's page first). New router answers get clear
+  messages: 403 `BITREFILL_INVOICE_NOT_ALLOWED`, 409 `DUPLICATE_INVOICE`
+  without an order id, 503 `RETRY_LATER`. Required before the router's
+  Bitrefill fee model is switched on: 0.1.26 refuses those orders before
+  showing a deposit address.
 - **0.1.17**: new `resume <rozoPaymentId>` command: re-shows the pay page and
   deposit instructions for an unpaid order (read-only, same expiry, payability
   and blacklist gates as `pay`), and answers clearly when it is already paid or

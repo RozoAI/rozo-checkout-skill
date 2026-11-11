@@ -922,8 +922,7 @@ var BITREFILL_DESTINATION = Object.freeze({ chainId: "8453", tokenSymbol: "USDC"
 var BITREFILL_MIN_EXPIRY_MS = 5 * 60 * 1e3;
 var BITREFILL_MIN_PAY_WINDOW_MS = 2 * 60 * 1e3;
 var BITREFILL_MAX_EXPIRY_AHEAD_MS = 61 * 60 * 1e3;
-var BITREFILL_LATE_PAYMENT_POLICY = "Funds that arrive after the Bitrefill invoice expires are not forwarded to Bitrefill; they are refunded manually on request: contact hi@rozo.ai with the invoice id and rozoPaymentId.";
-var BITREFILL_LATE_PAYMENT_DETAIL = "Your payment reached Rozo, but Rozo has not confirmed paying the Bitrefill invoice and the invoice has expired. Check the invoice on Bitrefill's page first; it is the source of truth. Do not pay again. " + BITREFILL_LATE_PAYMENT_POLICY;
+var BITREFILL_LATE_PAYMENT_DETAIL = "Your payment reached Rozo, but Rozo has not confirmed paying the Bitrefill invoice, and the invoice has expired or has under 2 minutes left (Rozo does not pay an invoice inside its last 2 minutes). Do not pay again. First check the invoice on Bitrefill's page: it may in fact be paid, and Bitrefill's page is the source of truth. If it is paid, nothing else is needed. If it is not, contact hi@rozo.ai with the invoice id and rozoPaymentId. Funds that arrive after the invoice expires are not forwarded to Bitrefill; they are refunded manually on request.";
 function providerFromPayment(payment) {
   if (!payment) return null;
   if (String(payment.orderId ?? payment.order_id ?? "").startsWith("bitrefill_")) return PROVIDER_BITREFILL;
@@ -1229,7 +1228,7 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
     }
     bitrefillExpiry = earliestExpiry(local?.bitrefill?.expiresAt, intentBitrefillExpiry(payment));
     const lateStates = /* @__PURE__ */ new Set(["payin_detected", "payin_confirmed", "bridging", "paying_merchant"]);
-    if (payment && isBitrefillFunderOrder(payment) && !payment.merchantDeliveredAt && (verdict.moneyDetected || verdict.state === "paying_merchant") && lateStates.has(verdict.state) && bitrefillExpiry && Date.parse(bitrefillExpiry) <= Date.now()) {
+    if (payment && isBitrefillFunderOrder(payment) && !payment.merchantDeliveredAt && (verdict.moneyDetected || verdict.state === "paying_merchant") && lateStates.has(verdict.state) && bitrefillExpiry && Date.parse(bitrefillExpiry) - Date.now() < BITREFILL_MIN_PAY_WINDOW_MS) {
       state = "stuck_after_payment";
       terminal = false;
       escalate = true;

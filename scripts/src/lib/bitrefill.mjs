@@ -54,14 +54,25 @@ export const BITREFILL_LATE_PAYMENT_POLICY =
   'Funds that arrive after the Bitrefill invoice expires are not forwarded to Bitrefill; ' +
   'they are refunded manually on request: contact hi@rozo.ai with the invoice id and rozoPaymentId.';
 
+/**
+ * Shown when money reached Rozo on a funder order, the invoice has expired (or
+ * is inside its last BITREFILL_MIN_PAY_WINDOW_MS, where the funder's signer
+ * refuses to pay), and Rozo has not stamped the order delivered. The invoice
+ * may in fact be paid (the delivered stamp can lag or fail), so the first step
+ * is Bitrefill's own page; support comes second, refunds only after that.
+ */
 export const BITREFILL_LATE_PAYMENT_DETAIL =
-  'Your payment reached Rozo, but Rozo has not confirmed paying the Bitrefill invoice and the invoice has expired. ' +
-  "Check the invoice on Bitrefill's page first; it is the source of truth. Do not pay again. " +
-  BITREFILL_LATE_PAYMENT_POLICY;
+  'Your payment reached Rozo, but Rozo has not confirmed paying the Bitrefill invoice, and the invoice has expired ' +
+  'or has under 2 minutes left (Rozo does not pay an invoice inside its last 2 minutes). Do not pay again. ' +
+  "First check the invoice on Bitrefill's page: it may in fact be paid, and Bitrefill's page is the source of truth. " +
+  'If it is paid, nothing else is needed. If it is not, contact hi@rozo.ai with the invoice id and rozoPaymentId. ' +
+  'Funds that arrive after the invoice expires are not forwarded to Bitrefill; they are refunded manually on request.';
 
 /** Router error codes, with what the user should do about each. */
 export const BITREFILL_ROUTER_HINTS = {
   BITREFILL_DISABLED: 'Bitrefill payments are switched off on the router right now. Try again later.',
+  BITREFILL_INVOICE_NOT_ALLOWED:
+    'Bitrefill payments through Rozo are temporarily unavailable for this invoice (403). Nothing was created and nothing was charged; no deposit address is shown. Do not send any funds for this invoice through Rozo. Retrying right away will not help: try again later, or pay the invoice on Bitrefill another way.',
   BITREFILL_NOT_CONFIGURED: 'The router is not configured for Bitrefill payments yet (503). Nothing was created; try again later.',
   RETRY_LATER: 'The router could not reserve or finish the order for this invoice right now (503). Do not pay anything yet; wait a minute and retry the same command, which resumes the same order.',
   DUPLICATE_INVOICE: 'This Bitrefill invoice already has a payment that was started under the other Rozo checkout model (409), so a second one is not created. Do not pay again: finish the payment you already started, or check the invoice on Bitrefill. If you are unsure, contact hi@rozo.ai with the invoice id.',
