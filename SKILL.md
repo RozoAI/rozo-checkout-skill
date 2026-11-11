@@ -107,7 +107,8 @@ orders are limited to $3,500 per invoice (`NATIVE_AMOUNT_TOO_HIGH`), and native
 ETH on Ethereum needs at least $1 (`NATIVE_AMOUNT_TOO_LOW`). A native order is
 **exact-out**, like Lightning: `deposit.amount` is the exact coin amount to
 send, and its price is locked only until `deposit.quoteExpiresAt` (about an
-hour; the order itself stays open longer, but a payment after the lock is
+hour, much shorter than the OpenRouter link, which stays payable about 24
+hours after it is created; the order itself stays open longer, but a payment after the lock is
 valued at the arrival price and can fall short). Tell the user the deadline is
 the price lock, that the coin amount includes an FX spread on top of the
 service fee, that their wallet needs a little more of the same coin for gas,
@@ -333,7 +334,9 @@ node scripts/dist/quote.js --url "https://payments.coinbase.com/payment-links/pl
 ```
 
 Reports merchant, invoice amount, `callerPays`, the Coinbase expiry and the
-supported source list. Exit 1 with `LINK_NO_LONGER_PAYABLE` means the link is
+supported source list. An OpenRouter link stays payable about 24 hours after
+OpenRouter creates it; read the actual time from the Coinbase expiry rather
+than assuming it. Exit 1 with `LINK_NO_LONGER_PAYABLE` means the link is
 used or expired — ask the merchant for a fresh one and stop.
 
 The `quoteReceipt` in the output lives about **60 seconds**. Do not save it;
@@ -387,6 +390,13 @@ Coinbase link is still payable.
 (`deposit: null`, `depositWithheld: true`). You get everything you need to ask
 the user — masked address, exact amount, both expiries, the
 reused flag — and nothing that could be paid by accident.
+
+The two expiries are different clocks. The OpenRouter (Coinbase) link stays
+payable about 24 hours after it is created. The Rozo deposit order is much
+shorter: about an hour for a stablecoin order, and for a native coin the
+price lock. `expiry.effectiveDeadlineIso` is the earliest of them. If the
+order expires unfunded while the link is still valid, nothing is lost: run
+the flow again on the same link and a new order is created.
 
 Any non-zero exit here means **do not fund the order**. See Troubleshooting.
 

@@ -310,6 +310,9 @@ was already paid; it is not a second charge.
   means the order is already funded — do NOT pay again; escalate for reconciliation.
 - Deposit addresses are one-time and quote-bound. Never reuse an address from an old
   order, a cached response, or a document. Always re-fetch step 3 in the same run.
+- Two clocks: an OpenRouter Coinbase link stays payable about 24 hours after it is
+  created; a Rozo deposit order lasts about an hour (a native order's price lock is
+  its quoteExpiresAt). An order that expires unfunded can be replaced on the same link.
 - Respect expiry with margin: do not send if now > min(order expiresAt, Coinbase
   link expiry) minus a safety margin (10 min EVM/Stellar, 5 min Solana; Lightning:
   only pay a BOLT11 with >= 10 min validity left).

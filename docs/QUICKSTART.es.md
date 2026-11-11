@@ -35,7 +35,8 @@ terminal y no hay moneda por defecto.
 Una moneda nativa solo se ofrece cuando la cotización de la factura la incluye,
 para facturas de hasta $3,500 (ETH nativo en Ethereum: mínimo $1). Es exact-out:
 envía exactamente la cantidad indicada antes de que termine el precio fijado
-(alrededor de una hora), y guarda un poco de la misma moneda para el gas. El BTC
+(alrededor de una hora; el enlace de OpenRouter en sí se puede pagar durante
+unas 24 horas desde su creación), y guarda un poco de la misma moneda para el gas. El BTC
 on-chain y Tron no están soportados.
 ZEC en Zcash (Beta): usa https://checkout.rozo.ai/zec, esta CLI no crea órdenes en ZEC.
 
@@ -114,7 +115,10 @@ está usado o expirado: pedir uno nuevo y detenerse.
 node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT
 ```
 
-No se mueve dinero, y una orden sin fondear simplemente expira. La dirección de
+No se mueve dinero, y una orden sin fondear simplemente expira. La orden dura
+alrededor de una hora, mientras que el enlace de OpenRouter se puede pagar
+durante unas 24 horas desde su creación (`coinbaseExpiryIso`), así que una orden
+vencida se puede reemplazar con el mismo enlace. La dirección de
 depósito (deposit address) completa se **retiene** en esta etapa: se obtiene un
 resumen enmascarado para revisarlo primero.
 

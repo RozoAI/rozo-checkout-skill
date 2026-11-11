@@ -82,7 +82,8 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 A native coin is offered only when the invoice's quote lists it (`quote` shows
 which), and only for invoices up to $3,500. The order is **exact-out**, like
 Lightning: send exactly the coin amount in the deposit block. Its price is
-locked only until the time shown (about an hour); after that, do not send it,
+locked only until the time shown (about an hour, while the OpenRouter link
+itself stays payable about 24 hours); after that, do not send it,
 let the order expire and start a new one. The coin amount includes an FX spread
 on top of the service fee, and your wallet needs a little more of the same coin
 for the network fee. If you pay from an exchange, the amount that arrives must
@@ -471,7 +472,9 @@ done < links.txt
 - The deadline to watch is `order.expiry.effectiveDeadlineIso`, not
   `deposit.expiresAt`: it is the earlier of our order expiry and the Coinbase
   link expiry, and for a native coin also its price lock
-  (`deposit.quoteExpiresAt`). Stop paying at least `order.expiry.marginMinutes`
+  (`deposit.quoteExpiresAt`). The two differ a lot: an OpenRouter link stays
+  payable about 24 hours after it is created, while a Rozo order lasts about
+  an hour, so an order that expires unfunded can be replaced on the same link. Stop paying at least `order.expiry.marginMinutes`
   before it, since settlement needs that much time.
 - If time has passed since you created the order, do not pay saved deposit
   details blindly. Re-run the same `pay` command (same `--with`): while the

@@ -34,7 +34,8 @@ only appears on a terminal, and there is no default coin.
 
 A native coin is offered only when the invoice's quote lists it, for invoices up
 to $3,500 (native ETH on Ethereum: $1 minimum). It is exact-out: send exactly
-the coin amount shown, before its price lock ends (about an hour), and keep a
+the coin amount shown, before its price lock ends (about an hour; the OpenRouter
+link itself stays payable about 24 hours), and keep a
 little of the same coin for gas. On-chain BTC and Tron are not supported.
 ZEC on Zcash (Beta): use https://checkout.rozo.ai/zec, this CLI does not create ZEC orders.
 
@@ -108,7 +109,10 @@ expired — ask for a fresh one and stop.
 node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT
 ```
 
-No money moves, and an unfunded order simply expires. The full deposit address
+No money moves, and an unfunded order simply expires. The order lasts about an
+hour, while the OpenRouter link stays payable about 24 hours after it was
+created (`coinbaseExpiryIso`), so an expired order can be replaced on the same
+link. The full deposit address
 is **withheld** at this stage — you get a masked summary to check first.
 
 ```json
