@@ -787,20 +787,23 @@ test('preflight (Mode B): price lock, confirmed lock, blacklist and digest all h
   );
 });
 
-test('Bitrefill invoices refuse native coins before any request', async () => {
+test('Bitrefill invoices leave native coins to the router (no local refusal)', async () => {
   const originalFetch = globalThis.fetch;
-  let calls = 0;
-  globalThis.fetch = async () => {
-    calls++;
-    throw new Error('network must not be reached');
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(String(url));
+    return new Response(JSON.stringify({ ok: false, error: 'UNSUPPORTED_SOURCE', message: 'not for this invoice' }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' },
+    });
   };
   try {
     const { payload, exitCode } = await capture(() =>
       runCreateBitrefill(['--invoice-id', 'bfr-1', '--to', FROM, '--amount', '7.90', '--expires-at', inMin(20), '--chain', '8453', '--token', 'ETH']),
     );
     assert.equal(exitCode, 1);
-    assert.equal(payload.error.code, 'NATIVE_NOT_AVAILABLE');
-    assert.equal(calls, 0);
+    assert.equal(payload.error.code, 'UNSUPPORTED_SOURCE');
+    assert.ok(urls.some((u) => u.endsWith('/create-invoice')), 'the router decides');
   } finally {
     globalThis.fetch = originalFetch;
   }

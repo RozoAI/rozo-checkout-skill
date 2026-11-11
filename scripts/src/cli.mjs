@@ -429,6 +429,11 @@ async function cmdResume(opts) {
   if (payload.resumable && !opts.json) {
     out();
     out(`  Order     ${payload.rozoPaymentId}  ${dim('(unpaid)')}`);
+    if (payload.provider === 'bitrefill' && payload.callerPays !== undefined) {
+      out(`  Invoice   ${bold(`${payload.original} USDC`)} ${dim('(Bitrefill receives)')}`);
+      printFeeLines(payload, 'USDC');
+      if (payload.latePaymentPolicy) out(`  ${dim(payload.latePaymentPolicy)}`);
+    }
     out(`  You send  ${bold(payload.display?.amount)} on ${bold(payload.display?.chain)}`);
     out(`  To        ${payload.display?.payToMasked} ${dim('(full address shown after you confirm)')}`);
     if (payload.display?.hasMemo) {
@@ -691,9 +696,12 @@ async function cmdPay(opts) {
     out();
     out(`  ${bold(p.merchant ?? 'Unknown merchant')}`);
     out(`  Invoice   ${bold(`${p.invoice?.amount} ${p.invoice?.currency ?? 'USD'}`)}`);
-    if (p.provider !== 'bitrefill') printFeeLines(p, p.invoice?.currency ?? 'USD');
+    // Bitrefill carries the same fee fields as the OpenRouter line (zero on
+    // orders from the router's direct model).
+    printFeeLines(p, p.invoice?.currency ?? 'USD');
     if (p.provider === 'bitrefill') {
       out(`  Bitrefill ${p.bitrefill?.invoiceId} ${dim(`→ ${p.bitrefill?.amount} USDC on Base to ${p.bitrefill?.addressMasked}`)}`);
+      out(`  ${dim('A payment that arrives after the invoice expires is not forwarded to Bitrefill; refunds are manual, on request (hi@rozo.ai).')}`);
     }
     out(`  You send  ${bold(p.display?.amount)} on ${bold(p.display?.chain)}${p.display?.shielded ? dim(' (from a shielded balance, Beta)') : ''}`);
     out(`  To        ${p.display?.payToMasked} ${dim('(full address shown after you confirm)')}`);

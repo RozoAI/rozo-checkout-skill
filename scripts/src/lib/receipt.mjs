@@ -50,6 +50,7 @@ export const STATE_TO_OUTCOME = Object.freeze({
   payin_confirmed: 'processing',
   bridging: 'processing',
   paying_coinbase: 'processing',
+  paying_merchant: 'processing',
   settled: 'settled',
   expired_unfunded: 'expired_unfunded',
   invoice_expired: 'expired_unfunded',
@@ -64,8 +65,8 @@ const SERVICE_DELIVERY_NOTE = {
     'The invoice is paid. Arrival of the OpenRouter credits (or other goods) is not independently ' +
     'verified by Rozo; check the merchant account.',
   bitrefill:
-    'USDC reached the Bitrefill invoice address. Delivery of the Bitrefill order is not ' +
-    'independently verified by Rozo; check the Bitrefill order page.',
+    "Paid to the address on the Bitrefill invoice. Bitrefill's invoice page is the source of truth; " +
+    'delivery of the Bitrefill order is not independently verified by Rozo.',
 };
 
 /** True when the merchant leg is proved by the merchant-side resource itself. */
@@ -251,10 +252,15 @@ function merchantSettlementLayer(result) {
     const proved = result?.state === 'settled';
     return {
       status: proved ? 'confirmed' : result?.unknown ? 'unknown' : 'pending',
-      evidence: proved ? 'rozo-payout' : null,
+      // Direct model: the Rozo payout itself. Funder model: the router's
+      // delivered stamp after the funder paid the invoice address.
+      evidence: proved ? (result?.bitrefillModel === 'funder' ? 'rozo-delivered' : 'rozo-payout') : null,
       provider: 'bitrefill',
-      txHash: result?.payout?.txHash ?? null,
-      confirmedAt: result?.payout?.confirmedAt ?? null,
+      // Funder model: the payout tx is Rozo paying its funder, not the
+      // invoice; the funder's own tx is not exposed, so only the delivered
+      // stamp is reported.
+      txHash: result?.bitrefillModel === 'funder' ? null : (result?.payout?.txHash ?? null),
+      confirmedAt: result?.bitrefillModel === 'funder' ? (result?.merchantDeliveredAt ?? null) : (result?.payout?.confirmedAt ?? null),
     };
   }
   const backend = result?.backend || {};

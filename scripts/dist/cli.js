@@ -55359,8 +55359,8 @@ function rateLimitInfo(res) {
     tier: pick2("x-ratelimit-tier"),
     scope: pick2("x-ratelimit-scope")
   };
-  const present = Object.fromEntries(Object.entries(info).filter(([, v]) => v !== null));
-  return Object.keys(present).length ? present : null;
+  const present2 = Object.fromEntries(Object.entries(info).filter(([, v]) => v !== null));
+  return Object.keys(present2).length ? present2 : null;
 }
 function parseBody(text) {
   if (!text) return null;
@@ -55598,6 +55598,22 @@ function snapshotFromQuote(quote) {
       preApprovalExpiry: cb.preApprovalExpiry ?? cb.expiresAt ?? null
     } : null
   };
+}
+
+// scripts/src/lib/bitrefill-model.mjs
+var BITREFILL_FUNDER = "0x2352Fa2970dBadD12d21808DB0F56CDEC8141739";
+var BITREFILL_FEE_BPS = 100;
+var present = (v) => v !== void 0 && v !== null && String(v).trim() !== "";
+function isBitrefillFunderOrder(payment) {
+  if (!payment || typeof payment !== "object") return false;
+  const meta = payment.metadata && typeof payment.metadata === "object" ? payment.metadata : {};
+  if (meta.bitrefill !== void 0 && meta.bitrefill !== null) return true;
+  if (["serviceFee", "feeBps", "callerPays", "original"].some((k) => present(meta[k]))) return true;
+  const dest = payment.destination || {};
+  const receiver = String(dest.receiverAddress ?? dest.address ?? "").trim().toLowerCase();
+  if (receiver && receiver === BITREFILL_FUNDER.toLowerCase()) return true;
+  const appId = String(payment.appId ?? payment.app_id ?? "");
+  return appId === "merchant_openrouter";
 }
 
 // scripts/src/lib/guards.mjs
@@ -56020,6 +56036,7 @@ function checkPayable(statusResponse, now = Date.now()) {
   }
   return { ok: true, code: null, reason: null, derived };
 }
+var BITREFILL_PAID_DETAIL = "Paid to the address on the Bitrefill invoice. Bitrefill's invoice page is the source of truth for the order.";
 function classifyStatus({
   payment,
   routerState,
@@ -56092,8 +56109,18 @@ function classifyStatus({
   }
   if (bitrefill) {
     const payoutTx = Boolean(payment?.destination?.txHash);
-    if (payment?.status === "payment_payout_completed" || payment?.status === "payment_completed" && payoutTx) {
-      return mk("settled", "USDC delivered to the Bitrefill invoice address on Base.", {
+    const payoutDone = payment?.status === "payment_payout_completed" || payment?.status === "payment_completed" && payoutTx;
+    if (payoutDone && isBitrefillFunderOrder(payment)) {
+      if (payment?.merchantDeliveredAt) {
+        return mk("settled", BITREFILL_PAID_DETAIL, { terminal: true });
+      }
+      return mk(
+        "paying_merchant",
+        "Your payment reached Rozo; the Rozo funder pays the address on the Bitrefill invoice next. Bitrefill's invoice page is the source of truth. Do not pay again."
+      );
+    }
+    if (payoutDone) {
+      return mk("settled", BITREFILL_PAID_DETAIL, {
         terminal: true
       });
     }
@@ -56761,31 +56788,70 @@ var BITREFILL_DESTINATION = Object.freeze({ chainId: "8453", tokenSymbol: "USDC"
 var BITREFILL_MIN_EXPIRY_MS = 5 * 60 * 1e3;
 var BITREFILL_MIN_PAY_WINDOW_MS = 2 * 60 * 1e3;
 var BITREFILL_MAX_EXPIRY_AHEAD_MS = 61 * 60 * 1e3;
+var BITREFILL_LATE_PAYMENT_POLICY = "Funds that arrive after the Bitrefill invoice expires are not forwarded to Bitrefill; they are refunded manually on request: contact hi@rozo.ai with the invoice id and rozoPaymentId.";
+var BITREFILL_LATE_PAYMENT_DETAIL = "Your payment reached Rozo, but Rozo has not confirmed paying the Bitrefill invoice, and the invoice has expired or has under 2 minutes left (Rozo does not pay an invoice inside its last 2 minutes). Do not pay again. First check the invoice on Bitrefill's page: it may in fact be paid, and Bitrefill's page is the source of truth. If it is paid, nothing else is needed. If it is not, contact hi@rozo.ai with the invoice id and rozoPaymentId. Funds that arrive after the invoice expires are not forwarded to Bitrefill; they are refunded manually on request.";
 var BITREFILL_ROUTER_HINTS = {
   BITREFILL_DISABLED: "Bitrefill payments are switched off on the router right now. Try again later.",
+  BITREFILL_INVOICE_NOT_ALLOWED: "Bitrefill payments through Rozo are temporarily unavailable for this invoice (403). Nothing was created and nothing was charged; no deposit address is shown. Do not send any funds for this invoice through Rozo. Retrying right away will not help: try again later, or pay the invoice on Bitrefill another way.",
   BITREFILL_NOT_CONFIGURED: "The router is not configured for Bitrefill payments yet (503). Nothing was created; try again later.",
-  RETRY_LATER: "The router is temporarily unable to create the order (503). Nothing was created; wait a minute and retry the same command.",
+  RETRY_LATER: "The router could not reserve or finish the order for this invoice right now (503). Do not pay anything yet; wait a minute and retry the same command, which resumes the same order.",
+  DUPLICATE_INVOICE: "This Bitrefill invoice already has a payment that was started under the other Rozo checkout model (409), so a second one is not created. Do not pay again: finish the payment you already started, or check the invoice on Bitrefill. If you are unsure, contact hi@rozo.ai with the invoice id.",
+  INTENTS_API_FAILED: "The router could not reach the Rozo order service (502). Nothing to pay yet; retry the same command shortly.",
   INVALID_INPUT: "The router rejected the invoice details (400). Check the invoice id, address, amount and expiry against Bitrefill.",
   INVALID_ADDRESS: "The router rejected the receiving address. Copy it again from the Bitrefill invoice.",
   INVALID_AMOUNT: "The router rejected the amount. Use the exact USDC amount Bitrefill shows.",
-  AMOUNT_OUT_OF_RANGE: "The amount is outside what the router accepts for Bitrefill invoices.",
+  AMOUNT_OUT_OF_RANGE: "The amount is outside what the router accepts for Bitrefill invoices (at most 1050 USDC invoice amount; native coins have their own per-invoice USD limit).",
   INVOICE_EXPIRING: "The invoice expires too soon (or too far out) for the router. Create a fresh Bitrefill invoice.",
   BLOCKED_ADDRESS: "The router refused this receiving address. Do not pay it; report it.",
-  UNSUPPORTED_SOURCE: "The router does not accept this coin for Bitrefill invoices. Choose another coin."
+  UNSUPPORTED_SOURCE: "The router does not accept this coin for Bitrefill invoices right now. Choose another coin (USDC or USDT always work)."
 };
 function explainRouterError(err) {
   const hint = BITREFILL_ROUTER_HINTS[err?.code];
   if (!hint) return err;
   return new SkillError(err.code, `${hint}${err.message ? ` (router: ${err.message})` : ""}`, err.details);
 }
-function checkBitrefillExpiry(expiresAt, now = Date.now(), minMs = BITREFILL_MIN_PAY_WINDOW_MS) {
+function checkBitrefillExpiry(expiresAt, now = Date.now(), minMs = BITREFILL_MIN_PAY_WINDOW_MS, { quoteExpiresAt = void 0, chainId = null } = {}) {
   const ms = parseDeadline(expiresAt);
-  const base = { marginMs: minMs, deadlines: { invoiceMs: ms } };
+  const native = quoteExpiresAt !== void 0;
+  const quoteMs = native ? parseDeadline(quoteExpiresAt) : null;
+  const base = { marginMs: minMs, deadlines: { invoiceMs: ms, quoteMs } };
+  const none = { effectiveDeadlineMs: null, msRemaining: null, msOfSlack: null };
   if (ms === null) {
-    return { ...base, ok: false, code: "EXPIRY_UNPARSABLE", reason: "The Bitrefill invoice expiry is missing or unreadable.", effectiveDeadlineMs: null, msRemaining: null, msOfSlack: null };
+    return { ...base, ...none, ok: false, code: "EXPIRY_UNPARSABLE", reason: "The Bitrefill invoice expiry is missing or unreadable." };
+  }
+  if (native && quoteMs === null) {
+    return {
+      ...base,
+      ...none,
+      ok: false,
+      code: "EXPIRY_UNPARSABLE",
+      reason: "This native coin order carries no price lock (quoteExpiresAt), so the coin amount cannot be trusted. Refusing to treat it as payable."
+    };
   }
   const msRemaining = ms - now;
-  const out2 = { ...base, effectiveDeadlineMs: ms, msRemaining, msOfSlack: msRemaining - minMs };
+  const quoteMarginMs = native ? Math.max(minMs, marginFor(chainId)) : null;
+  const lockFirst = native && quoteMs < ms;
+  const out2 = {
+    ...base,
+    marginMs: lockFirst ? quoteMarginMs : minMs,
+    effectiveDeadlineMs: lockFirst ? quoteMs : ms,
+    msRemaining: lockFirst ? quoteMs - now : msRemaining,
+    msOfSlack: native ? Math.min(quoteMs - now - quoteMarginMs, msRemaining - minMs) : msRemaining - minMs
+  };
+  if (native) {
+    const qRemaining = quoteMs - now;
+    if (qRemaining <= 0) {
+      return { ...out2, ok: false, code: "QUOTE_EXPIRED", reason: "The coin price lock for this order has passed. Do not send it; let the order expire unfunded and start again." };
+    }
+    if (qRemaining < quoteMarginMs) {
+      return {
+        ...out2,
+        ok: false,
+        code: "QUOTE_EXPIRY_MARGIN",
+        reason: `Only ${Math.floor(qRemaining / 1e3)}s left on the coin price lock; this chain needs a ${Math.round(quoteMarginMs / 6e4)} min safety margin.`
+      };
+    }
+  }
   if (msRemaining <= 0) return { ...out2, ok: false, code: "EXPIRED", reason: "The Bitrefill invoice has expired." };
   if (msRemaining < minMs) {
     return {
@@ -56847,13 +56913,14 @@ function validateBitrefillInput({ invoiceId, address, amount, expiresAt }, now =
   return { invoiceId: id, address: addr, amount: normalizeDecimal(amt), expiresAt: expiresIso };
 }
 var sameAddress = (a, b) => typeof a === "string" && typeof b === "string" && a.trim().toLowerCase() === b.trim().toLowerCase();
+var sameInvoiceId = (a, b) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase() && String(a ?? "").trim() !== "";
 function verifyBitrefillCreate({ requested, created }) {
   const drift = [];
   const dest = created?.destination || {};
   if (created?.provider !== PROVIDER_BITREFILL) {
     drift.push({ field: "provider", requested: PROVIDER_BITREFILL, created: created?.provider ?? null });
   }
-  if (String(created?.invoiceId ?? "") !== requested.invoiceId) {
+  if (!sameInvoiceId(created?.invoiceId, requested.invoiceId)) {
     drift.push({ field: "invoiceId", requested: requested.invoiceId, created: created?.invoiceId ?? null });
   }
   if (!sameAddress(dest.address, requested.address)) {
@@ -56875,29 +56942,196 @@ function verifyBitrefillCreate({ requested, created }) {
     drift
   } : { ok: true, code: null, reason: null, drift };
 }
+function usdcAtomic(v) {
+  const s = v === null || v === void 0 ? "" : String(v).trim();
+  if (!/^\d+(?:\.\d{1,6})?$/.test(s)) return null;
+  try {
+    return toAtomic(s, 6);
+  } catch {
+    return null;
+  }
+}
+function atomicToUsdc(a) {
+  const whole = a / 1000000n;
+  const frac = (a % 1000000n).toString().padStart(6, "0").replace(/0+$/, "");
+  return frac ? `${whole}.${frac}` : whole.toString();
+}
+function atomicField(v) {
+  const s = v === null || v === void 0 ? "" : String(v).trim();
+  return /^\d+$/.test(s) ? BigInt(s) : null;
+}
 function verifyBitrefillDestination({ requested, payment }) {
   const dest = payment?.destination || {};
   const drift = [];
+  const model = isBitrefillFunderOrder(payment) ? "funder" : "direct";
   if (String(dest.chainId ?? "") !== BITREFILL_DESTINATION.chainId) {
     drift.push({ field: "destination.chainId", requested: "8453", live: dest.chainId ?? null });
   }
   if (String(dest.tokenSymbol ?? "").toUpperCase() !== BITREFILL_DESTINATION.tokenSymbol) {
     drift.push({ field: "destination.tokenSymbol", requested: "USDC", live: dest.tokenSymbol ?? null });
   }
-  if (normalizeDecimal(dest.amount) !== normalizeDecimal(requested.amount)) {
-    drift.push({ field: "destination.amount", requested: requested.amount, live: dest.amount ?? null });
-  }
   const liveAddress = dest.receiverAddress ?? dest.address ?? null;
-  if (!sameAddress(liveAddress, requested.address)) {
-    drift.push({ field: "destination.address", requested: requested.address, live: liveAddress });
+  const invoiceAtomic = usdcAtomic(requested.amount);
+  let livePricing = null;
+  if (model === "direct") {
+    if (normalizeDecimal(dest.amount) !== normalizeDecimal(requested.amount)) {
+      drift.push({ field: "destination.amount", requested: requested.amount, live: dest.amount ?? null });
+    }
+    if (!sameAddress(liveAddress, requested.address)) {
+      drift.push({ field: "destination.address", requested: requested.address, live: liveAddress });
+    }
+    if (invoiceAtomic !== null) {
+      const amt = atomicToUsdc(invoiceAtomic);
+      livePricing = { original: amt, serviceFee: "0", feeBps: 0, callerPays: amt, callerPaysAtomicUsdc: invoiceAtomic.toString() };
+    }
+  } else {
+    if (!sameAddress(liveAddress, BITREFILL_FUNDER)) {
+      drift.push({ field: "destination.address", requested: `funder ${BITREFILL_FUNDER}`, live: liveAddress });
+    }
+    const f = payment?.metadata?.bitrefill;
+    const facts = f && typeof f === "object" && !Array.isArray(f) ? f : null;
+    if (!facts) {
+      drift.push({ field: "metadata.bitrefill", requested: "frozen invoice facts", live: null });
+    } else {
+      if (Number(facts.v) !== 1) drift.push({ field: "metadata.bitrefill.v", requested: 1, live: facts.v ?? null });
+      if (parseDeadline(facts.expiresAt) === null) {
+        drift.push({ field: "metadata.bitrefill.expiresAt", requested: "ISO timestamp", live: facts.expiresAt ?? null });
+      }
+      if (typeof facts.binding !== "string" || !/^[0-9a-f]{64}$/i.test(facts.binding)) {
+        drift.push({ field: "metadata.bitrefill.binding", requested: "hex HMAC-SHA256", live: facts.binding ?? null });
+      }
+      if (!sameInvoiceId(facts.invoiceId, requested.invoiceId)) {
+        drift.push({ field: "metadata.bitrefill.invoiceId", requested: requested.invoiceId, live: facts.invoiceId ?? null });
+      }
+      if (!sameAddress(facts.address, requested.address)) {
+        drift.push({ field: "metadata.bitrefill.address", requested: requested.address, live: facts.address ?? null });
+      }
+      const amountAtomic = atomicField(facts.amountAtomic);
+      if (invoiceAtomic === null || amountAtomic === null || amountAtomic !== invoiceAtomic) {
+        drift.push({ field: "metadata.bitrefill.amountAtomic", requested: invoiceAtomic?.toString() ?? null, live: facts.amountAtomic ?? null });
+      }
+      if (facts.feeBps !== BITREFILL_FEE_BPS) {
+        drift.push({ field: "metadata.bitrefill.feeBps", requested: BITREFILL_FEE_BPS, live: facts.feeBps ?? null });
+      }
+      const feeAtomic = atomicField(facts.serviceFeeAtomic);
+      const payAtomic = atomicField(facts.callerPaysAtomic);
+      if (invoiceAtomic !== null) {
+        const wantFee = serviceFeeAtomicFor(invoiceAtomic, BITREFILL_FEE_BPS);
+        const wantPay = invoiceAtomic + wantFee;
+        if (feeAtomic === null || feeAtomic !== wantFee) {
+          drift.push({ field: "metadata.bitrefill.serviceFeeAtomic", requested: wantFee.toString(), live: facts.serviceFeeAtomic ?? null });
+        }
+        if (payAtomic === null || payAtomic !== wantPay) {
+          drift.push({ field: "metadata.bitrefill.callerPaysAtomic", requested: wantPay.toString(), live: facts.callerPaysAtomic ?? null });
+        }
+        const liveDest = usdcAtomic(dest.amount);
+        if (liveDest === null || liveDest !== wantPay) {
+          drift.push({ field: "destination.amount", requested: atomicToUsdc(wantPay), live: dest.amount ?? null });
+        }
+        livePricing = {
+          original: atomicToUsdc(invoiceAtomic),
+          serviceFee: atomicToUsdc(wantFee),
+          feeBps: BITREFILL_FEE_BPS,
+          callerPays: atomicToUsdc(wantPay),
+          callerPaysAtomicUsdc: wantPay.toString()
+        };
+      }
+    }
   }
   return drift.length ? {
     ok: false,
     code: "BITREFILL_ECHO_MISMATCH",
-    reason: "The live order does not deliver to the Bitrefill invoice. Refusing to continue.",
+    reason: model === "funder" ? "The live order does not pay this Bitrefill invoice (funder or frozen invoice facts differ). Refusing to continue." : "The live order does not deliver to the Bitrefill invoice. Refusing to continue.",
     drift,
-    addressVerified: false
-  } : { ok: true, code: null, reason: null, drift, addressVerified: true };
+    addressVerified: false,
+    model,
+    livePricing: null
+  } : { ok: true, code: null, reason: null, drift, addressVerified: true, model, livePricing };
+}
+var ROUTER_FEE_FIELDS = ["original", "serviceFee", "feeBps", "callerPays", "callerPaysAtomicUsdc"];
+var given = (v) => v !== void 0 && v !== null && String(v).trim() !== "";
+function checkBitrefillPricing({ invoiceAmount, routerPricing = null, live, source }) {
+  const bad = (reason, details = {}) => ({ ok: false, code: "BITREFILL_FEE_MISMATCH", reason, details });
+  if (!live?.ok || !live.livePricing) return bad("The live order could not be priced; refusing to show a deposit.");
+  const lp = live.livePricing;
+  const r = routerPricing && typeof routerPricing === "object" ? routerPricing : {};
+  const present2 = ROUTER_FEE_FIELDS.filter((k) => given(r[k]));
+  if (routerPricing === null) {
+  } else if (present2.length === 0) {
+    if (live.model !== "direct" || lp.feeBps !== 0) {
+      return bad("The router stated no service fee, but the live order charges one. Refusing to continue.", { model: live.model });
+    }
+  } else {
+    const missing = ROUTER_FEE_FIELDS.filter((k) => !given(r[k]));
+    if (missing.length) {
+      return bad("The router sent only part of the fee figures. Refusing to guess the price.", { missing });
+    }
+    const checked = checkPricing(r);
+    if (!checked.ok) return bad(checked.reason, { field: checked.field, value: checked.value });
+    const p = checked.pricing;
+    if (p.feeBps !== BITREFILL_FEE_BPS) {
+      return bad(`A Bitrefill order must carry a ${BITREFILL_FEE_BPS} bps service fee; the router stated ${r.feeBps} bps.`, { feeBps: r.feeBps });
+    }
+    const atomic = atomicField(r.callerPaysAtomicUsdc);
+    if (atomic === null || atomicToUsdc(atomic) !== p.callerPays) {
+      return bad("callerPaysAtomicUsdc does not equal callerPays.", { callerPays: r.callerPays, callerPaysAtomicUsdc: r.callerPaysAtomicUsdc });
+    }
+    if (normalizeDecimal(p.original) !== normalizeDecimal(invoiceAmount)) {
+      return bad(`The router priced ${p.original} USDC, but the invoice is ${invoiceAmount} USDC.`, { original: r.original });
+    }
+    const drift = [];
+    for (const k of ["original", "serviceFee", "callerPays"]) {
+      if (normalizeDecimal(p[k]) !== normalizeDecimal(lp[k])) drift.push({ field: k, router: r[k], order: lp[k] });
+    }
+    if (p.feeBps !== lp.feeBps) drift.push({ field: "feeBps", router: r.feeBps, order: lp.feeBps });
+    if (drift.length) return bad("The router's fee figures differ from the live order.", { drift, model: live.model });
+  }
+  const pricing = { model: live.model, ...lp, bridgeFee: null };
+  const token = String(source?.tokenSymbol ?? "").toUpperCase();
+  const stable = String(source?.chainId) !== "lightning" && (token === "USDC" || token === "USDT");
+  if (stable) {
+    const dep = dec18(source?.amount);
+    const need = dec18(lp.callerPays);
+    if (dep === null || need === null || dep < need) {
+      return bad("The deposit does not cover the invoice plus the service fee.", { deposit: source?.amount ?? null, callerPays: lp.callerPays });
+    }
+    pricing.bridgeFee = fmt18(dep - need);
+  }
+  return { ok: true, pricing };
+}
+function dec18(v) {
+  if (typeof v === "number") v = String(v);
+  if (typeof v !== "string" || !/^\d+(?:\.\d{1,18})?$/.test(v.trim())) return null;
+  const [w, f = ""] = v.trim().split(".");
+  return BigInt(w) * 10n ** 18n + BigInt(f.padEnd(18, "0"));
+}
+function fmt18(n) {
+  const w = n / 10n ** 18n;
+  const f = (n % 10n ** 18n).toString().padStart(18, "0").replace(/0+$/, "");
+  return f ? `${w}.${f}` : `${w}`;
+}
+function bitrefillRequestedFromOrder(payment) {
+  const meta = payment?.metadata || {};
+  if (isBitrefillFunderOrder(payment)) {
+    const f = meta.bitrefill && typeof meta.bitrefill === "object" ? meta.bitrefill : {};
+    const a = atomicField(f.amountAtomic);
+    return { invoiceId: f.invoiceId ?? null, address: f.address ?? null, amount: a === null ? null : atomicToUsdc(a) };
+  }
+  const dest = payment?.destination || {};
+  return { invoiceId: meta.bitrefillInvoiceId ?? null, address: dest.receiverAddress ?? dest.address ?? null, amount: dest.amount ?? null };
+}
+function bitrefillPricingDrift(recorded, livePricing) {
+  const want = recorded ?? { serviceFee: "0", feeBps: 0, callerPays: null };
+  const drift = [];
+  if (!livePricing) return [{ field: "pricing", recorded: want, live: null }];
+  if (normalizeDecimal(String(want.serviceFee ?? "0")) !== normalizeDecimal(livePricing.serviceFee)) {
+    drift.push({ field: "serviceFee", recorded: want.serviceFee ?? "0", live: livePricing.serviceFee });
+  }
+  if (Number(want.feeBps ?? 0) !== livePricing.feeBps) drift.push({ field: "feeBps", recorded: want.feeBps ?? 0, live: livePricing.feeBps });
+  if (want.callerPays !== null && want.callerPays !== void 0 && normalizeDecimal(String(want.callerPays)) !== normalizeDecimal(livePricing.callerPays)) {
+    drift.push({ field: "callerPays", recorded: want.callerPays, live: livePricing.callerPays });
+  }
+  return drift;
 }
 function duplicateInvoicePaymentId(err) {
   if (err?.code !== "DUPLICATE_INVOICE") return null;
@@ -56917,7 +57151,7 @@ function earliestExpiry(...values) {
   return ms.length ? new Date(Math.min(...ms)).toISOString() : null;
 }
 function intentBitrefillExpiry(payment) {
-  return payment?.metadata?.bitrefillExpiresAt ?? null;
+  return earliestExpiry(payment?.metadata?.bitrefillExpiresAt, payment?.metadata?.bitrefill?.expiresAt);
 }
 
 // scripts/src/create-bitrefill-order.mjs
@@ -56945,12 +57179,10 @@ async function main3(argv) {
       supported: SUPPORTED_SOURCES
     });
   }
-  if (isNativeSource(chainId, tokenSymbol)) {
-    throw new SkillError(
-      "NATIVE_NOT_AVAILABLE",
-      `${tokenSymbol} on ${chainName(chainId)} is a native coin, and native coins are not available for Bitrefill invoices. Pay with USDC, USDT or BTC over Lightning.`
-    );
+  if (isZecSource(chainId, tokenSymbol)) {
+    throw new SkillError("ZEC_NOT_AVAILABLE", "ZEC is not available for Bitrefill invoices. Choose another coin.");
   }
+  const native = isNativeSource(chainId, tokenSymbol);
   const requested = { chainId, tokenSymbol };
   const confirmed = Boolean(args.confirm);
   const email = contactEmailFromArgs(args);
@@ -56973,6 +57205,7 @@ async function main3(argv) {
   let created = null;
   let rozoPaymentId;
   let resumed = false;
+  let routerPricing = null;
   try {
     created = await createBitrefillInvoice({
       invoice,
@@ -56985,12 +57218,14 @@ async function main3(argv) {
     if (!existing) throw explainRouterError(err);
     rozoPaymentId = assertRozoPaymentId(existing);
     resumed = true;
+    routerPricing = err?.details?.body && typeof err.details.body === "object" ? err.details.body : {};
   }
   if (created) {
     if (created.ok === false || !created.rozoPaymentId) {
       throw new SkillError(created?.error || "CREATE_FAILED", created?.message || "create-invoice returned no rozoPaymentId.");
     }
     rozoPaymentId = assertRozoPaymentId(created.rozoPaymentId);
+    routerPricing = created;
     const echo = verifyBitrefillCreate({ requested: invoice, created });
     if (!echo.ok) {
       abort("verify-create", echo.code, echo.reason, {
@@ -57021,6 +57256,23 @@ async function main3(argv) {
       fields: { rozoPaymentId, invoiceId: invoice.invoiceId }
     });
   }
+  const fee = checkBitrefillPricing({ invoiceAmount: invoice.amount, routerPricing, live: dest, source });
+  if (!fee.ok) {
+    abort("fee-guard", fee.code, fee.reason, {
+      details: fee.details,
+      fields: { rozoPaymentId, invoiceId: invoice.invoiceId }
+    }, "Do not fund this order. Let it expire unfunded.");
+  }
+  const pricing = fee.pricing;
+  if (local?.bitrefill) {
+    const drift = bitrefillPricingDrift(local.bitrefill.pricing, pricing);
+    if (drift.length) {
+      abort("fee-guard", "BITREFILL_FEE_MISMATCH", "The live order charges a different fee than the one recorded for it earlier.", {
+        details: { drift },
+        fields: { rozoPaymentId, invoiceId: invoice.invoiceId }
+      }, "Do not fund this order. Let it expire unfunded.");
+    }
+  }
   const guard = reuseGuard({ payment, requested, reused: resumed });
   if (!guard.ok) {
     emit(
@@ -57044,7 +57296,12 @@ async function main3(argv) {
     intentBitrefillExpiry(payment)
   );
   const lightning = String(source.chainId) === "lightning";
-  const expiry = checkBitrefillExpiry(invoiceExpiry, Date.now());
+  const quoteExpiresAt = priceLockFor({
+    native,
+    payment,
+    others: [created?.quoteExpiresAt, local?.quoteExpiresAt, local?.confirmation?.quoteExpiresAt]
+  });
+  const expiry = checkBitrefillExpiry(invoiceExpiry, Date.now(), BITREFILL_MIN_PAY_WINDOW_MS, native ? { quoteExpiresAt, chainId: source.chainId } : {});
   if (!expiry.ok) {
     abort("expiry-guard", expiry.code, expiry.reason, {
       details: expiry,
@@ -57056,7 +57313,12 @@ async function main3(argv) {
   } catch (err) {
     abort("blacklist", err.code, err.message, { fields: { rozoPaymentId } }, "Do NOT send anything. Report this to the operator immediately.");
   }
-  const bitrefill = { ...invoice, expiresAt: invoiceExpiry };
+  const bitrefill = {
+    ...invoice,
+    expiresAt: invoiceExpiry,
+    // What the user confirms; the send scripts refuse if the live order drifts.
+    pricing: { model: pricing.model, serviceFee: pricing.serviceFee, feeBps: pricing.feeBps, callerPays: pricing.callerPays }
+  };
   createOrderRecord({
     rozoPaymentId,
     provider: PROVIDER_BITREFILL,
@@ -57069,10 +57331,18 @@ async function main3(argv) {
     receiverMemo: source.receiverMemo ?? null,
     amount: source.amount,
     amountUnit: source.amountUnit ?? null,
-    expiresAt: payment?.expiresAt ?? null
+    expiresAt: payment?.expiresAt ?? null,
+    ...native ? { quoteExpiresAt } : {}
   });
-  const tier = confirmTier2(invoice.amount);
-  if (confirmed) recordConfirmation(rozoPaymentId, { source, invoiceAmount: invoice.amount, tier });
+  const tier = confirmTier2(pricing.callerPays);
+  if (confirmed) {
+    recordConfirmation(rozoPaymentId, {
+      source,
+      invoiceAmount: invoice.amount,
+      tier,
+      ...native ? { quoteExpiresAt } : {}
+    });
+  }
   const family = chainFamily(source.chainId);
   const depositInfo = guard.deposit;
   const bolt11 = source.lnInvoice ?? payment?.lnInvoice ?? null;
@@ -57092,6 +57362,17 @@ async function main3(argv) {
     rozoPaymentId,
     merchant: "Bitrefill",
     invoice: { amount: invoice.amount, currency: "USDC" },
+    // Same names as the OpenRouter line: original = Bitrefill receives,
+    // serviceFee = Rozo's fee (feeBps of the invoice, rounded up to the cent),
+    // callerPays = both. pricing adds the router model and, for stablecoin
+    // deposits, bridgeFee = the rest of the deposit.
+    original: pricing.original,
+    serviceFee: pricing.serviceFee,
+    feeBps: pricing.feeBps,
+    callerPays: pricing.callerPays,
+    discount: "0",
+    pricing,
+    latePaymentPolicy: BITREFILL_LATE_PAYMENT_POLICY,
     bitrefill: {
       invoiceId: invoice.invoiceId,
       addressMasked: maskAddress2(invoice.address),
@@ -57115,7 +57396,10 @@ async function main3(argv) {
       lnInvoice: bolt11 || null,
       payTo: depositInfo.payTo,
       expiresAt: payment?.expiresAt ?? null,
-      expiresIn: formatRemaining(expiry.msRemaining)
+      expiresIn: formatRemaining(expiry.msRemaining),
+      native,
+      exactOut: native || lightning,
+      quoteExpiresAt: native ? quoteExpiresAt : null
     } : null,
     depositWithheld: !confirmed,
     display: {
@@ -57127,11 +57411,16 @@ async function main3(argv) {
       receiverMemoMasked: maskMemo(source.receiverMemo),
       hasMemo: Boolean(source.receiverMemo),
       memoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
-      memoRequirement
+      memoRequirement,
+      native,
+      priceLockedUntil: native ? quoteExpiresAt : null,
+      // The bare decimal amount (not secret), for balance comparisons.
+      coinAmount: isSatsUnit(source.amountUnit) ? null : String(source.amount ?? "")
     },
     expiry: {
       intentExpiresAt: payment?.expiresAt ?? null,
       invoiceExpiresAt: bitrefill.expiresAt,
+      quoteExpiresAt: native ? quoteExpiresAt : null,
       effectiveDeadlineIso: new Date(expiry.effectiveDeadlineMs).toISOString(),
       expiresIn: formatRemaining(expiry.msRemaining),
       msRemaining: expiry.msRemaining,
@@ -57141,12 +57430,14 @@ async function main3(argv) {
     confirmation: {
       required: tier,
       satisfied: confirmed,
-      note: confirmed ? "Confirmation recorded. The send scripts will verify it against the live deposit data." : "BINDING CONFIRMATION POINT. Present the Bitrefill invoice id, the USDC amount Bitrefill receives, the coin and exact amount to send, the masked deposit address and the expiry, and get an explicit yes. Then re-run with --confirm to release the full deposit details.",
+      note: confirmed ? "Confirmation recorded. The send scripts will verify it against the live deposit data." : "BINDING CONFIRMATION POINT. Present the Bitrefill invoice id, the USDC amount Bitrefill receives (original), the Rozo service fee (serviceFee, feeBps bps) and the total (callerPays), the coin and exact amount to send (it also covers the bridge and network fees), the masked deposit address, the expiry, and that a payment arriving after the invoice expires is not forwarded to Bitrefill, and get an explicit yes. Then re-run with --confirm to release the full deposit details.",
       warnings: [
         "Wrong token, wrong network, or wrong amount is usually unrecoverable.",
         memoRequirement,
         "Send exactly once. A second send to the same one-time address is not guaranteed to be credited.",
-        "The deposit amount can exceed the invoice: it includes the bridge and network fees."
+        pricing.feeBps > 0 ? `You pay the invoice plus a ${pricing.feeBps / 100}% Rozo service fee (${pricing.serviceFee} USDC, total ${pricing.callerPays} USDC), plus the bridge and network fees.` : "The deposit amount can exceed the invoice: it includes the bridge and network fees.",
+        BITREFILL_LATE_PAYMENT_POLICY,
+        ...native ? nativeDepositWarnings({ tokenSymbol: source.tokenSymbol, chainId: source.chainId }) : []
       ]
     },
     blacklist: { checked: true, addressesInList: blacklist.entries.length, digest: blacklist.provenance.addressesSha256 },
@@ -57184,6 +57475,7 @@ var STATE_TO_OUTCOME = Object.freeze({
   payin_confirmed: "processing",
   bridging: "processing",
   paying_coinbase: "processing",
+  paying_merchant: "processing",
   settled: "settled",
   expired_unfunded: "expired_unfunded",
   invoice_expired: "expired_unfunded",
@@ -57194,7 +57486,7 @@ var STATE_TO_OUTCOME = Object.freeze({
 });
 var SERVICE_DELIVERY_NOTE = {
   coinbase: "The invoice is paid. Arrival of the OpenRouter credits (or other goods) is not independently verified by Rozo; check the merchant account.",
-  bitrefill: "USDC reached the Bitrefill invoice address. Delivery of the Bitrefill order is not independently verified by Rozo; check the Bitrefill order page."
+  bitrefill: "Paid to the address on the Bitrefill invoice. Bitrefill's invoice page is the source of truth; delivery of the Bitrefill order is not independently verified by Rozo."
 };
 function merchantSettlementProved(result) {
   if (result?.provider === "bitrefill") return result?.state === "settled";
@@ -57339,10 +57631,15 @@ function merchantSettlementLayer(result) {
     const proved = result?.state === "settled";
     return {
       status: proved ? "confirmed" : result?.unknown ? "unknown" : "pending",
-      evidence: proved ? "rozo-payout" : null,
+      // Direct model: the Rozo payout itself. Funder model: the router's
+      // delivered stamp after the funder paid the invoice address.
+      evidence: proved ? result?.bitrefillModel === "funder" ? "rozo-delivered" : "rozo-payout" : null,
       provider: "bitrefill",
-      txHash: result?.payout?.txHash ?? null,
-      confirmedAt: result?.payout?.confirmedAt ?? null
+      // Funder model: the payout tx is Rozo paying its funder, not the
+      // invoice; the funder's own tx is not exposed, so only the delivered
+      // stamp is reported.
+      txHash: result?.bitrefillModel === "funder" ? null : result?.payout?.txHash ?? null,
+      confirmedAt: result?.bitrefillModel === "funder" ? result?.merchantDeliveredAt ?? null : result?.payout?.confirmedAt ?? null
     };
   }
   const backend = result?.backend || {};
@@ -57428,7 +57725,9 @@ function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, qu
       now,
       chainId,
       intentExpiresAt: payment?.expiresAt ?? deadline,
-      coinbaseExpiry: deadline
+      coinbaseExpiry: deadline,
+      // Native coins: the price lock is a deadline too (undefined otherwise).
+      ...quoteExpiresAt !== void 0 ? { quoteExpiresAt } : {}
     });
     return expiry2.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry2.msOfSlack / 6e4), deadlineMs: expiry2.effectiveDeadlineMs } : { ok: false, code: expiry2.code, reason: expiry2.reason };
   }
@@ -57534,6 +57833,13 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       local = null;
     }
     bitrefillExpiry = earliestExpiry(local?.bitrefill?.expiresAt, intentBitrefillExpiry(payment));
+    const lateStates = /* @__PURE__ */ new Set(["payin_detected", "payin_confirmed", "bridging", "paying_merchant"]);
+    if (payment && isBitrefillFunderOrder(payment) && !payment.merchantDeliveredAt && (verdict.moneyDetected || verdict.state === "paying_merchant") && lateStates.has(verdict.state) && bitrefillExpiry && Date.parse(bitrefillExpiry) - Date.now() < BITREFILL_MIN_PAY_WINDOW_MS) {
+      state = "stuck_after_payment";
+      terminal = false;
+      escalate = true;
+      detail = BITREFILL_LATE_PAYMENT_DETAIL;
+    }
     if (!verdict.moneyDetected && ["awaiting_deposit", "expired_unfunded"].includes(verdict.state)) {
       const ms = bitrefillExpiry ? Date.parse(bitrefillExpiry) : NaN;
       if (Number.isFinite(ms) && ms <= Date.now()) {
@@ -57548,6 +57854,10 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   }
   return {
     provider,
+    ...provider === "bitrefill" ? {
+      bitrefillModel: payment ? isBitrefillFunderOrder(payment) ? "funder" : "direct" : null,
+      merchantDeliveredAt: payment?.merchantDeliveredAt ?? null
+    } : {},
     rozoPaymentId: id,
     rozoPaymentIdSource: idSource,
     // Without the authoritative payment object we are reading a partial view.
@@ -57729,6 +58039,7 @@ var PAID_STATES = /* @__PURE__ */ new Set([
   "payin_confirmed",
   "bridging",
   "paying_coinbase",
+  "paying_merchant",
   "settled"
 ]);
 var EXPIRED_STATES = /* @__PURE__ */ new Set(["expired_unfunded", "invoice_expired"]);
@@ -57865,6 +58176,37 @@ async function main6(argv) {
       EXIT_ERROR
     );
   }
+  let bitrefillPricing = null;
+  if (snap.provider === "bitrefill") {
+    let local = null;
+    try {
+      local = readState(id);
+    } catch {
+      local = null;
+    }
+    const requested = local?.bitrefill ?? bitrefillRequestedFromOrder(payment);
+    const live = verifyBitrefillDestination({ requested, payment });
+    const fee = live.ok ? checkBitrefillPricing({ invoiceAmount: requested.amount, routerPricing: null, live, source }) : null;
+    const drift = fee?.ok && local?.bitrefill ? bitrefillPricingDrift(local.bitrefill.pricing ?? null, fee.pricing) : [];
+    const failure = !live.ok ? { code: live.code, message: live.reason, details: { drift: live.drift } } : !fee.ok ? { code: fee.code, message: fee.reason, details: fee.details } : drift.length ? { code: "BITREFILL_FEE_MISMATCH", message: "The live order charges a different fee than the one recorded for it.", details: { drift } } : null;
+    if (failure) {
+      emit(
+        {
+          success: false,
+          step: "resume",
+          resumable: false,
+          outcome: "not_payable",
+          rozoPaymentId: id,
+          moneyDetected: false,
+          error: failure,
+          guidance: "This order could not be proved to pay the Bitrefill invoice at the stated fee. Do not fund it; let it expire unfunded.",
+          support: SUPPORT
+        },
+        EXIT_ERROR
+      );
+    }
+    bitrefillPricing = fee.pricing;
+  }
   const native = isNativeSource(source.chainId, source.tokenSymbol);
   const isZec = isZecSource(source.chainId, source.tokenSymbol);
   const zecStatus = isZec ? zecStatusOf(source) : null;
@@ -57934,6 +58276,14 @@ async function main6(argv) {
     // Shown in full only for Rozo's own pay-page hosts; anything else is
     // reduced to its host by the normal output redaction.
     paymentLink: publicPayPage(paymentLink),
+    ...bitrefillPricing ? {
+      original: bitrefillPricing.original,
+      serviceFee: bitrefillPricing.serviceFee,
+      feeBps: bitrefillPricing.feeBps,
+      callerPays: bitrefillPricing.callerPays,
+      pricing: bitrefillPricing,
+      latePaymentPolicy: BITREFILL_LATE_PAYMENT_POLICY
+    } : {},
     deposit: confirmed ? {
       chainId: source.chainId,
       chain: chainName(source.chainId),
@@ -58039,7 +58389,17 @@ function assertBitrefillLive(state, payment) {
   }
   const dest = verifyBitrefillDestination({ requested: state.bitrefill, payment });
   if (!dest.ok) throw new SkillError(dest.code, dest.reason, { drift: dest.drift });
-  const expiry = checkBitrefillExpiry(state.bitrefill.expiresAt, Date.now());
+  const drift = bitrefillPricingDrift(state.bitrefill.pricing ?? null, dest.livePricing);
+  if (drift.length) {
+    throw new SkillError("BITREFILL_FEE_MISMATCH", "The live order charges a different fee than the one confirmed. Refusing to send.", { drift });
+  }
+  const quoteExpiresAt = sendPriceLock(payment, state);
+  const expiry = checkBitrefillExpiry(
+    earliestExpiry(state.bitrefill.expiresAt, intentBitrefillExpiry(payment)),
+    Date.now(),
+    BITREFILL_MIN_PAY_WINDOW_MS,
+    quoteExpiresAt !== void 0 ? { quoteExpiresAt, chainId: payment?.source?.chainId } : {}
+  );
   if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
   return expiry;
 }
@@ -58139,9 +58499,6 @@ async function preflight({
   let statusNow = null;
   let expiry;
   if (state.provider === "bitrefill") {
-    if (isNativeSource(source.chainId, source.tokenSymbol)) {
-      throw new SkillError("NATIVE_NOT_AVAILABLE", "Native coins are not available for Bitrefill invoices.");
-    }
     expiry = assertBitrefillLive(state, payment);
   } else {
     statusNow = await invoiceStatus({ linkId: state.linkId });
@@ -58185,9 +58542,6 @@ async function finalPayabilityCheck({
   rozoPaymentId = null
 }) {
   if (state?.provider === "bitrefill") {
-    if (isNativeSource(state?.source?.chainId, state?.source?.tokenSymbol)) {
-      throw new SkillError("NATIVE_NOT_AVAILABLE", "Native coins are not available for Bitrefill invoices.");
-    }
     const id = rozoPaymentId ?? state.rozoPaymentId;
     const payment = await getPayment(id);
     const guard = reuseGuard({ payment, requested: state.source });
@@ -60407,6 +60761,11 @@ async function cmdResume(opts) {
   if (payload.resumable && !opts.json) {
     out();
     out(`  Order     ${payload.rozoPaymentId}  ${dim("(unpaid)")}`);
+    if (payload.provider === "bitrefill" && payload.callerPays !== void 0) {
+      out(`  Invoice   ${bold(`${payload.original} USDC`)} ${dim("(Bitrefill receives)")}`);
+      printFeeLines(payload, "USDC");
+      if (payload.latePaymentPolicy) out(`  ${dim(payload.latePaymentPolicy)}`);
+    }
     out(`  You send  ${bold(payload.display?.amount)} on ${bold(payload.display?.chain)}`);
     out(`  To        ${payload.display?.payToMasked} ${dim("(full address shown after you confirm)")}`);
     if (payload.display?.hasMemo) {
@@ -60608,9 +60967,10 @@ async function cmdPay(opts) {
     out();
     out(`  ${bold(p.merchant ?? "Unknown merchant")}`);
     out(`  Invoice   ${bold(`${p.invoice?.amount} ${p.invoice?.currency ?? "USD"}`)}`);
-    if (p.provider !== "bitrefill") printFeeLines(p, p.invoice?.currency ?? "USD");
+    printFeeLines(p, p.invoice?.currency ?? "USD");
     if (p.provider === "bitrefill") {
       out(`  Bitrefill ${p.bitrefill?.invoiceId} ${dim(`\u2192 ${p.bitrefill?.amount} USDC on Base to ${p.bitrefill?.addressMasked}`)}`);
+      out(`  ${dim("A payment that arrives after the invoice expires is not forwarded to Bitrefill; refunds are manual, on request (hi@rozo.ai).")}`);
     }
     out(`  You send  ${bold(p.display?.amount)} on ${bold(p.display?.chain)}${p.display?.shielded ? dim(" (from a shielded balance, Beta)") : ""}`);
     out(`  To        ${p.display?.payToMasked} ${dim("(full address shown after you confirm)")}`);

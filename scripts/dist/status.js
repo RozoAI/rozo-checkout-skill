@@ -186,8 +186,8 @@ function rateLimitInfo(res) {
     tier: pick("x-ratelimit-tier"),
     scope: pick("x-ratelimit-scope")
   };
-  const present = Object.fromEntries(Object.entries(info).filter(([, v]) => v !== null));
-  return Object.keys(present).length ? present : null;
+  const present2 = Object.fromEntries(Object.entries(info).filter(([, v]) => v !== null));
+  return Object.keys(present2).length ? present2 : null;
 }
 function parseBody(text) {
   if (!text) return null;
@@ -520,6 +520,21 @@ function zecMoneySeen(zec) {
   return false;
 }
 
+// scripts/src/lib/bitrefill-model.mjs
+var BITREFILL_FUNDER = "0x2352Fa2970dBadD12d21808DB0F56CDEC8141739";
+var present = (v) => v !== void 0 && v !== null && String(v).trim() !== "";
+function isBitrefillFunderOrder(payment) {
+  if (!payment || typeof payment !== "object") return false;
+  const meta = payment.metadata && typeof payment.metadata === "object" ? payment.metadata : {};
+  if (meta.bitrefill !== void 0 && meta.bitrefill !== null) return true;
+  if (["serviceFee", "feeBps", "callerPays", "original"].some((k) => present(meta[k]))) return true;
+  const dest = payment.destination || {};
+  const receiver = String(dest.receiverAddress ?? dest.address ?? "").trim().toLowerCase();
+  if (receiver && receiver === BITREFILL_FUNDER.toLowerCase()) return true;
+  const appId = String(payment.appId ?? payment.app_id ?? "");
+  return appId === "merchant_openrouter";
+}
+
 // scripts/src/lib/guards.mjs
 var NATIVE_PROGRESS_STATUSES = /* @__PURE__ */ new Set([
   "payment_payin_completed",
@@ -606,6 +621,7 @@ function checkPayable(statusResponse, now = Date.now()) {
   }
   return { ok: true, code: null, reason: null, derived };
 }
+var BITREFILL_PAID_DETAIL = "Paid to the address on the Bitrefill invoice. Bitrefill's invoice page is the source of truth for the order.";
 function classifyStatus({
   payment,
   routerState,
@@ -678,8 +694,18 @@ function classifyStatus({
   }
   if (bitrefill) {
     const payoutTx = Boolean(payment?.destination?.txHash);
-    if (payment?.status === "payment_payout_completed" || payment?.status === "payment_completed" && payoutTx) {
-      return mk("settled", "USDC delivered to the Bitrefill invoice address on Base.", {
+    const payoutDone = payment?.status === "payment_payout_completed" || payment?.status === "payment_completed" && payoutTx;
+    if (payoutDone && isBitrefillFunderOrder(payment)) {
+      if (payment?.merchantDeliveredAt) {
+        return mk("settled", BITREFILL_PAID_DETAIL, { terminal: true });
+      }
+      return mk(
+        "paying_merchant",
+        "Your payment reached Rozo; the Rozo funder pays the address on the Bitrefill invoice next. Bitrefill's invoice page is the source of truth. Do not pay again."
+      );
+    }
+    if (payoutDone) {
+      return mk("settled", BITREFILL_PAID_DETAIL, {
         terminal: true
       });
     }
@@ -896,6 +922,7 @@ var BITREFILL_DESTINATION = Object.freeze({ chainId: "8453", tokenSymbol: "USDC"
 var BITREFILL_MIN_EXPIRY_MS = 5 * 60 * 1e3;
 var BITREFILL_MIN_PAY_WINDOW_MS = 2 * 60 * 1e3;
 var BITREFILL_MAX_EXPIRY_AHEAD_MS = 61 * 60 * 1e3;
+var BITREFILL_LATE_PAYMENT_DETAIL = "Your payment reached Rozo, but Rozo has not confirmed paying the Bitrefill invoice, and the invoice has expired or has under 2 minutes left (Rozo does not pay an invoice inside its last 2 minutes). Do not pay again. First check the invoice on Bitrefill's page: it may in fact be paid, and Bitrefill's page is the source of truth. If it is paid, nothing else is needed. If it is not, contact hi@rozo.ai with the invoice id and rozoPaymentId. Funds that arrive after the invoice expires are not forwarded to Bitrefill; they are refunded manually on request.";
 function providerFromPayment(payment) {
   if (!payment) return null;
   if (String(payment.orderId ?? payment.order_id ?? "").startsWith("bitrefill_")) return PROVIDER_BITREFILL;
@@ -908,7 +935,7 @@ function earliestExpiry(...values) {
   return ms.length ? new Date(Math.min(...ms)).toISOString() : null;
 }
 function intentBitrefillExpiry(payment) {
-  return payment?.metadata?.bitrefillExpiresAt ?? null;
+  return earliestExpiry(payment?.metadata?.bitrefillExpiresAt, payment?.metadata?.bitrefill?.expiresAt);
 }
 
 // scripts/src/lib/receipt.mjs
@@ -935,6 +962,7 @@ var STATE_TO_OUTCOME = Object.freeze({
   payin_confirmed: "processing",
   bridging: "processing",
   paying_coinbase: "processing",
+  paying_merchant: "processing",
   settled: "settled",
   expired_unfunded: "expired_unfunded",
   invoice_expired: "expired_unfunded",
@@ -1091,7 +1119,9 @@ function sendWindowFor({ provider, chainId, payment, status, bitrefillExpiry, qu
       now,
       chainId,
       intentExpiresAt: payment?.expiresAt ?? deadline,
-      coinbaseExpiry: deadline
+      coinbaseExpiry: deadline,
+      // Native coins: the price lock is a deadline too (undefined otherwise).
+      ...quoteExpiresAt !== void 0 ? { quoteExpiresAt } : {}
     });
     return expiry2.ok ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry2.msOfSlack / 6e4), deadlineMs: expiry2.effectiveDeadlineMs } : { ok: false, code: expiry2.code, reason: expiry2.reason };
   }
@@ -1197,6 +1227,13 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
       local = null;
     }
     bitrefillExpiry = earliestExpiry(local?.bitrefill?.expiresAt, intentBitrefillExpiry(payment));
+    const lateStates = /* @__PURE__ */ new Set(["payin_detected", "payin_confirmed", "bridging", "paying_merchant"]);
+    if (payment && isBitrefillFunderOrder(payment) && !payment.merchantDeliveredAt && (verdict.moneyDetected || verdict.state === "paying_merchant") && lateStates.has(verdict.state) && bitrefillExpiry && Date.parse(bitrefillExpiry) - Date.now() < BITREFILL_MIN_PAY_WINDOW_MS) {
+      state = "stuck_after_payment";
+      terminal = false;
+      escalate = true;
+      detail = BITREFILL_LATE_PAYMENT_DETAIL;
+    }
     if (!verdict.moneyDetected && ["awaiting_deposit", "expired_unfunded"].includes(verdict.state)) {
       const ms = bitrefillExpiry ? Date.parse(bitrefillExpiry) : NaN;
       if (Number.isFinite(ms) && ms <= Date.now()) {
@@ -1211,6 +1248,10 @@ async function snapshot({ rozoPaymentId, linkId, provider: explicitProvider }) {
   }
   return {
     provider,
+    ...provider === "bitrefill" ? {
+      bitrefillModel: payment ? isBitrefillFunderOrder(payment) ? "funder" : "direct" : null,
+      merchantDeliveredAt: payment?.merchantDeliveredAt ?? null
+    } : {},
     rozoPaymentId: id,
     rozoPaymentIdSource: idSource,
     // Without the authoritative payment object we are reading a partial view.
