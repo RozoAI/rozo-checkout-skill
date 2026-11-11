@@ -44,7 +44,9 @@ configuration** — and waits until the invoice is settled.
 
 Paying a **Bitrefill** invoice instead? Create it on Bitrefill with "USDC on
 Base", then pass its id, address and amount (Coinbase payment links and
-Bitrefill invoices are the two supported targets; Stripe is not):
+Bitrefill invoices are the two supported targets; Stripe is not). The
+invoice amount can be up to 1050 USDC, which covers cards up to the ~1,000 USD
+tier; the deposit you send adds the bridge fee on top:
 
 ```bash
 npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x…> --amount 7.90 --expires-at <ISO> --with usdc-stellar

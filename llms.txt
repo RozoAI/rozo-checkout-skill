@@ -54,7 +54,7 @@ Bitrefill address:
   npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x…> --amount 7.90 --expires-at <ISO> --with usdc-stellar
 
 Router call: POST {MPP}/create-invoice {"provider":"bitrefill","bitrefill":{"invoiceId","address",
-"amount","expiresAt" (required, ≤60 min out)},"source":{"chainId","tokenSymbol"}}. Verify the response echoes the same
+"amount" (invoice amount, ≤1050 USDC; over that = 400 AMOUNT_OUT_OF_RANGE),"expiresAt" (required, ≤60 min out)},"source":{"chainId","tokenSymbol"}}. Verify the response echoes the same
 invoiceId/address/amount, and that GET payments/<rozoPaymentId> destination has the same
 chain/token/address/amount (missing = mismatch), before showing the deposit or sending.
 Expiry = the invoice expiry only; refuse to show/send under 2 min. 409 DUPLICATE_INVOICE returns
