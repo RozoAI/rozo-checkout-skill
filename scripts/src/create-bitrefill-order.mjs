@@ -14,14 +14,20 @@
  *   3. create through mpprouter (never payment-api directly); a 409
  *      DUPLICATE_INVOICE resumes the existing order
  *   4. the router must echo invoiceId/address/amount         -> BITREFILL_ECHO_MISMATCH
- *   5. live GET payments/<id>: destination must match the invoice, and the
- *      reuse guard (unpaid, nothing received, right source) must pass
- *   6. expiry margins on min(intent expiry, invoice expiry)  -> EXPIRY_MARGIN
+ *   5. live GET payments/<id>: the order must pay this invoice (direct model:
+ *      the invoice address; funder model: the Rozo funder, with the invoice
+ *      frozen in metadata.bitrefill), the fee figures must be complete and
+ *      consistent (BITREFILL_FEE_MISMATCH), and the reuse guard (unpaid,
+ *      nothing received, right source) must pass
+ *   6. expiry margins on the invoice expiry, and for a native coin also its
+ *      price lock                                             -> INVOICE_EXPIRING / QUOTE_*
  *   7. blacklist check on the deposit address                -> BLACKLIST_HIT
  *   8. persist local state (provider: bitrefill), then print
  *
  * There is no quote step and no Coinbase payability check: the amount is fixed
- * by the invoice and Bitrefill is paid by the Rozo payout itself.
+ * by the invoice. Which coins work is the router's call (it answers
+ * UNSUPPORTED_SOURCE); only ZEC is refused here, because the router never
+ * accepts it for Bitrefill.
  */
 
 import { parseArgs, emit, usage, EXIT_ERROR, SkillError } from './lib/output.mjs';
@@ -37,7 +43,9 @@ import {
   isSatsUnit,
   STELLAR_MEMO_TYPE,
 } from './lib/amounts.mjs';
-import { formatRemaining } from './lib/expiry.mjs';
+import { formatRemaining, priceLockFor } from './lib/expiry.mjs';
+import { nativeDepositWarnings } from './lib/native.mjs';
+import { isZecSource } from './lib/zec.mjs';
 import { reuseGuard } from './lib/guards.mjs';
 import { assertNotBlacklisted, loadBlacklist } from './lib/blacklist.mjs';
 import { createOrderRecord, recordConfirmation, readState, findByLinkId } from './lib/state.mjs';
@@ -48,10 +56,12 @@ import {
   verifyBitrefillCreate,
   verifyBitrefillDestination,
   checkBitrefillPricing,
+  bitrefillPricingDrift,
   duplicateInvoicePaymentId,
   explainRouterError,
   checkBitrefillExpiry,
   BITREFILL_MIN_PAY_WINDOW_MS,
+  BITREFILL_LATE_PAYMENT_POLICY,
   earliestExpiry,
   intentBitrefillExpiry,
 } from './lib/bitrefill.mjs';
@@ -84,15 +94,12 @@ async function main(argv) {
       supported: SUPPORTED_SOURCES,
     });
   }
-  // A Bitrefill invoice has no quote step, so there is no per-invoice
-  // supportedSources to prove a native coin is offered. Stablecoins only.
-  if (isNativeSource(chainId, tokenSymbol)) {
-    throw new SkillError(
-      'NATIVE_NOT_AVAILABLE',
-      `${tokenSymbol} on ${chainName(chainId)} is a native coin, and native coins are not available ` +
-        'for Bitrefill invoices. Pay with USDC, USDT or BTC over Lightning.',
-    );
+  // The router never accepts ZEC for Bitrefill (its window outlives a 60
+  // minute invoice). Every other coin is the router's call.
+  if (isZecSource(chainId, tokenSymbol)) {
+    throw new SkillError('ZEC_NOT_AVAILABLE', 'ZEC is not available for Bitrefill invoices. Choose another coin.');
   }
+  const native = isNativeSource(chainId, tokenSymbol);
   const requested = { chainId, tokenSymbol };
   const confirmed = Boolean(args.confirm);
   // Optional; validated before any network call so a typo creates nothing.
@@ -183,8 +190,9 @@ async function main(argv) {
     });
   }
 
-  // Service fee: the live order decides; the router's figures must agree.
-  const fee = checkBitrefillPricing({ invoiceAmount: invoice.amount, source, routerPricing });
+  // Service fee: the router's fee fields (Coinbase line names), checked with
+  // the Coinbase line's pricing guard, must match what the live order charges.
+  const fee = checkBitrefillPricing({ invoiceAmount: invoice.amount, routerPricing, live: dest, source });
   if (!fee.ok) {
     abort('fee-guard', fee.code, fee.reason, {
       details: fee.details,
@@ -192,6 +200,16 @@ async function main(argv) {
     }, 'Do not fund this order. Let it expire unfunded.');
   }
   const pricing = fee.pricing;
+  // A resumed order must still charge what this machine recorded for it.
+  if (local?.bitrefill?.pricing) {
+    const drift = bitrefillPricingDrift(local.bitrefill.pricing, pricing);
+    if (drift.length) {
+      abort('fee-guard', 'BITREFILL_FEE_MISMATCH', 'The live order charges a different fee than the one recorded for it earlier.', {
+        details: { drift },
+        fields: { rozoPaymentId, invoiceId: invoice.invoiceId },
+      }, 'Do not fund this order. Let it expire unfunded.');
+    }
+  }
 
   const guard = reuseGuard({ payment, requested, reused: resumed });
   if (!guard.ok) {
@@ -223,7 +241,14 @@ async function main(argv) {
     intentBitrefillExpiry(payment),
   );
   const lightning = String(source.chainId) === 'lightning';
-  const expiry = checkBitrefillExpiry(invoiceExpiry, Date.now());
+  // Native coins: the price lock too (live, create response, local record;
+  // the earliest wins, none at all is a refusal).
+  const quoteExpiresAt = priceLockFor({
+    native,
+    payment,
+    others: [created?.quoteExpiresAt, local?.quoteExpiresAt, local?.confirmation?.quoteExpiresAt],
+  });
+  const expiry = checkBitrefillExpiry(invoiceExpiry, Date.now(), BITREFILL_MIN_PAY_WINDOW_MS, native ? { quoteExpiresAt } : {});
   if (!expiry.ok) {
     abort('expiry-guard', expiry.code, expiry.reason, {
       details: expiry,
@@ -239,7 +264,12 @@ async function main(argv) {
   }
 
   // --- 8. persist, then print ---------------------------------------------
-  const bitrefill = { ...invoice, expiresAt: invoiceExpiry };
+  const bitrefill = {
+    ...invoice,
+    expiresAt: invoiceExpiry,
+    // What the user confirms; the send scripts refuse if the live order drifts.
+    pricing: { model: pricing.model, serviceFee: pricing.serviceFee, feeBps: pricing.feeBps, callerPays: pricing.callerPays },
+  };
   createOrderRecord({
     rozoPaymentId,
     provider: PROVIDER_BITREFILL,
@@ -253,10 +283,19 @@ async function main(argv) {
     amount: source.amount,
     amountUnit: source.amountUnit ?? null,
     expiresAt: payment?.expiresAt ?? null,
+    ...(native ? { quoteExpiresAt } : {}),
   });
 
-  const tier = confirmTier(invoice.amount);
-  if (confirmed) recordConfirmation(rozoPaymentId, { source, invoiceAmount: invoice.amount, tier });
+  // The confirmation tier follows what the user pays, fee included.
+  const tier = confirmTier(pricing.callerPays);
+  if (confirmed) {
+    recordConfirmation(rozoPaymentId, {
+      source,
+      invoiceAmount: invoice.amount,
+      tier,
+      ...(native ? { quoteExpiresAt } : {}),
+    });
+  }
 
   const family = chainFamily(source.chainId);
   const depositInfo = guard.deposit;
@@ -282,10 +321,17 @@ async function main(argv) {
     rozoPaymentId,
     merchant: 'Bitrefill',
     invoice: { amount: invoice.amount, currency: 'USDC' },
-    // What the user pays on top of the invoice. original = Bitrefill receives,
-    // serviceFee = Rozo's fee (feeBps of the invoice), callerPays = both,
-    // bridgeFee = the rest of the deposit (stablecoin deposits only).
+    // Same names as the OpenRouter line: original = Bitrefill receives,
+    // serviceFee = Rozo's fee (feeBps of the invoice, rounded up to the cent),
+    // callerPays = both. pricing adds the router model and, for stablecoin
+    // deposits, bridgeFee = the rest of the deposit.
+    original: pricing.original,
+    serviceFee: pricing.serviceFee,
+    feeBps: pricing.feeBps,
+    callerPays: pricing.callerPays,
+    discount: '0',
     pricing,
+    latePaymentPolicy: BITREFILL_LATE_PAYMENT_POLICY,
     bitrefill: {
       invoiceId: invoice.invoiceId,
       addressMasked: maskAddress(invoice.address),
@@ -311,6 +357,9 @@ async function main(argv) {
           payTo: depositInfo.payTo,
           expiresAt: payment?.expiresAt ?? null,
           expiresIn: formatRemaining(expiry.msRemaining),
+          native,
+          exactOut: native || lightning,
+          quoteExpiresAt: native ? quoteExpiresAt : null,
         }
       : null,
     depositWithheld: !confirmed,
@@ -324,10 +373,15 @@ async function main(argv) {
       hasMemo: Boolean(source.receiverMemo),
       memoType: source.receiverMemo ? STELLAR_MEMO_TYPE : null,
       memoRequirement,
+      native,
+      priceLockedUntil: native ? quoteExpiresAt : null,
+      // The bare decimal amount (not secret), for balance comparisons.
+      coinAmount: isSatsUnit(source.amountUnit) ? null : String(source.amount ?? ''),
     },
     expiry: {
       intentExpiresAt: payment?.expiresAt ?? null,
       invoiceExpiresAt: bitrefill.expiresAt,
+      quoteExpiresAt: native ? quoteExpiresAt : null,
       effectiveDeadlineIso: new Date(expiry.effectiveDeadlineMs).toISOString(),
       expiresIn: formatRemaining(expiry.msRemaining),
       msRemaining: expiry.msRemaining,
@@ -339,17 +393,20 @@ async function main(argv) {
       satisfied: confirmed,
       note: confirmed
         ? 'Confirmation recorded. The send scripts will verify it against the live deposit data.'
-        : 'BINDING CONFIRMATION POINT. Present the Bitrefill invoice id, the USDC amount Bitrefill receives, ' +
-          'the Rozo service fee (pricing.serviceFee, pricing.feeBps bps) and the bridge fee, ' +
-          'the coin and exact amount to send, the masked deposit address and the expiry, and get an explicit yes. ' +
+        : 'BINDING CONFIRMATION POINT. Present the Bitrefill invoice id, the USDC amount Bitrefill receives (original), ' +
+          'the Rozo service fee (serviceFee, feeBps bps) and the total (callerPays), ' +
+          'the coin and exact amount to send (it also covers the bridge and network fees), the masked deposit address, ' +
+          'the expiry, and that a payment arriving after the invoice expires is not forwarded to Bitrefill, and get an explicit yes. ' +
           'Then re-run with --confirm to release the full deposit details.',
       warnings: [
         'Wrong token, wrong network, or wrong amount is usually unrecoverable.',
         memoRequirement,
         'Send exactly once. A second send to the same one-time address is not guaranteed to be credited.',
         pricing.feeBps > 0
-          ? `The deposit exceeds the invoice: it adds a ${pricing.feeBps / 100}% Rozo service fee (${pricing.serviceFee} USDC) and the bridge fee.`
+          ? `You pay the invoice plus a ${pricing.feeBps / 100}% Rozo service fee (${pricing.serviceFee} USDC, total ${pricing.callerPays} USDC), plus the bridge and network fees.`
           : 'The deposit amount can exceed the invoice: it includes the bridge and network fees.',
+        BITREFILL_LATE_PAYMENT_POLICY,
+        ...(native ? nativeDepositWarnings({ tokenSymbol: source.tokenSymbol, chainId: source.chainId }) : []),
       ],
     },
     blacklist: { checked: true, addressesInList: blacklist.entries.length, digest: blacklist.provenance.addressesSha256 },

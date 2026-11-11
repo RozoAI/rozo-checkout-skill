@@ -48,19 +48,26 @@ Key files and .env must be chmod 600 and untracked by git.
 ## Bitrefill invoices
 
 Also supported: a Bitrefill invoice created with "USDC on Base" (Stripe is not supported).
-No quote step; mpprouter creates an exactOut order paying exactly that amount to the
-Bitrefill address. Rozo charges a 1% service fee on the invoice amount (response fields
-original, serviceFee, feeBps, callerPays; deposit = callerPays + bridge fee). USDC/USDT sources only:
+No quote step; mpprouter creates the order. Priced like the OpenRouter line: invoice + 1% Rozo
+service fee rounded up to the cent (204.37 -> fee 2.05, callerPays 206.42; response fields
+original, serviceFee, feeBps, callerPays, callerPaysAtomicUsdc; deposit = callerPays + bridge fee).
+Same sources as the OpenRouter line as the router accepts them (USDC/USDT, Lightning, native); not ZEC.
+Funds arriving after the invoice expires are not forwarded to Bitrefill; manual refund on request (hi@rozo.ai):
 
   npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x…> --amount 7.90 --expires-at <ISO> --with usdc-stellar
 
 Router call: POST {MPP}/create-invoice {"provider":"bitrefill","bitrefill":{"invoiceId","address",
 "amount" (invoice amount, ≤1050 USDC; over that = 400 AMOUNT_OUT_OF_RANGE),"expiresAt" (required, ≤60 min out)},"source":{"chainId","tokenSymbol"}}. Verify the response echoes the same
-invoiceId/address/amount, and that GET payments/<rozoPaymentId> destination has the same
-chain/token/address/amount (missing = mismatch), before showing the deposit or sending.
-Expiry = the invoice expiry only; refuse to show/send under 2 min. 409 DUPLICATE_INVOICE returns
-the existing rozoPaymentId: resume it. Settled = payment_payout_completed (or completed with a
-payout tx hash). 503 BITREFILL_NOT_CONFIGURED / RETRY_LATER: nothing created, retry later.
+invoiceId/address/amount. GET payments/<rozoPaymentId> must pay this invoice: no-fee order =
+destination is the Bitrefill address for the invoice amount; fee order = destination is the Rozo
+funder for callerPays and metadata.bitrefill freezes this invoiceId/address/amountAtomic, feeBps 100,
+serviceFeeAtomic, callerPaysAtomic (missing = mismatch). Fee fields: none = zero-fee order (accepted
+only if the live order is the no-fee kind); partial or original + serviceFee != callerPays or
+feeBps != 100 = refuse before showing a deposit. Expiry = the invoice expiry (and a native price lock);
+refuse to show/send under 2 min. 409 DUPLICATE_INVOICE with rozoPaymentId: resume it; without one:
+the invoice already has a payment under the other model, do not pay again. Paid = no-fee order
+payment_payout_completed (or completed with a payout tx hash); fee order also needs merchantDeliveredAt.
+Bitrefill's page is the source of truth. 503 BITREFILL_NOT_CONFIGURED / RETRY_LATER: do not pay, retry later.
 
 ## Local wallet setup for --send (not needed for the default keyless path)
 

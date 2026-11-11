@@ -36,6 +36,7 @@ const PAID_STATES = new Set([
   'payin_confirmed',
   'bridging',
   'paying_coinbase',
+  'paying_merchant',
   'settled',
 ]);
 const EXPIRED_STATES = new Set(['expired_unfunded', 'invoice_expired']);

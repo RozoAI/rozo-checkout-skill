@@ -46,9 +46,12 @@ Paying a **Bitrefill** invoice instead? Create it on Bitrefill with "USDC on
 Base", then pass its id, address and amount (Coinbase payment links and
 Bitrefill invoices are the two supported targets; Stripe is not). The
 invoice amount can be up to 1050 USDC, which covers cards up to the ~1,000 USD
-tier. Rozo charges a 1% service fee on the invoice amount (204 USDC invoice:
-2.04 fee, 206.04 total), and the deposit adds the bridge fee on top. Bitrefill
-invoices are paid with USDC or USDT:
+tier. It works like OpenRouter: you pay the invoice plus a 1% Rozo service fee,
+rounded up to the cent (204.37 USDC invoice: 2.05 fee, 206.42 total), and the
+deposit adds the bridge fee on top. The same coins work (USDC/USDT, Lightning,
+native coins, as the router accepts them for the invoice; not ZEC). Funds that
+arrive after the invoice expires are not forwarded to Bitrefill; they are
+refunded manually on request (hi@rozo.ai):
 
 ```bash
 npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x…> --amount 7.90 --expires-at <ISO> --with usdc-stellar

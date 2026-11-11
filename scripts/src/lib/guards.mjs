@@ -18,6 +18,7 @@
 
 import { comparePayment, sourceAtomic, chainFamily, isNativeSource, toAtomic } from './amounts.mjs';
 import { isZecSource, zecStatusOf, validateShieldedDeposit, zecMoneySeen } from './zec.mjs';
+import { isBitrefillFunderOrder } from './bitrefill-model.mjs';
 
 /** Statuses that mean "nothing has been funded yet". */
 export const UNPAID_STATUS = 'payment_unpaid';
@@ -630,6 +631,10 @@ export function checkPayable(statusResponse, now = Date.now()) {
   return { ok: true, code: null, reason: null, derived };
 }
 
+/** Success wording for a Bitrefill invoice (task-pack R6). */
+export const BITREFILL_PAID_DETAIL =
+  "Paid to the address on the Bitrefill invoice. Bitrefill's invoice page is the source of truth for the order.";
+
 /**
  * Status taxonomy for step 7 (PLAN §3, fix P1-7). Combines the Rozo intent
  * status with the mpprouter fulfillment state and the money-detected rule.
@@ -738,15 +743,29 @@ export function classifyStatus({
     });
   }
 
-  // Bitrefill: the Rozo payout IS the payment. Once the intent reports the
-  // payout (or the whole payment) completed, the exact USDC amount has been
-  // delivered to the Bitrefill address, so there is no paying_coinbase stage.
+  // Bitrefill, direct model: the Rozo payout IS the payment. Once the intent
+  // reports the payout (or the whole payment) completed, the exact USDC amount
+  // has been delivered to the Bitrefill address, so there is no paying stage.
   // payment_completed alone is not proof the payout landed; it counts only
   // with a payout tx hash.
+  // Funder model (mpprouter #315): the payout reaches the Rozo funder, which
+  // then pays the invoice address. The router stamps merchantDeliveredAt on
+  // the order only after that payment; until then the merchant leg is open.
   if (bitrefill) {
     const payoutTx = Boolean(payment?.destination?.txHash);
-    if (payment?.status === 'payment_payout_completed' || (payment?.status === 'payment_completed' && payoutTx)) {
-      return mk('settled', 'USDC delivered to the Bitrefill invoice address on Base.', {
+    const payoutDone = payment?.status === 'payment_payout_completed' || (payment?.status === 'payment_completed' && payoutTx);
+    if (payoutDone && isBitrefillFunderOrder(payment)) {
+      if (payment?.merchantDeliveredAt) {
+        return mk('settled', BITREFILL_PAID_DETAIL, { terminal: true });
+      }
+      return mk(
+        'paying_merchant',
+        'Your payment reached Rozo; the Rozo funder pays the address on the Bitrefill invoice next. ' +
+          "Bitrefill's invoice page is the source of truth. Do not pay again.",
+      );
+    }
+    if (payoutDone) {
+      return mk('settled', BITREFILL_PAID_DETAIL, {
         terminal: true,
       });
     }

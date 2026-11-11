@@ -16,6 +16,8 @@ import {
   verifyBitrefillDestination,
   duplicateInvoicePaymentId,
   checkBitrefillPricing,
+  bitrefillPricingDrift,
+  BITREFILL_FUNDER,
 } from '../scripts/src/lib/bitrefill.mjs';
 import { classifyStatus } from '../scripts/src/lib/guards.mjs';
 import { parseCliArgs, CliError } from '../scripts/src/lib/cli-args.mjs';
@@ -498,90 +500,400 @@ test('status: bitrefill deadline unknown is not payable; past deadline is invoic
   });
 });
 
-// --- service fee (router 2026-11-11: 1% via payment-api partner fee) --------
-const feeSource = (over = {}) => ({ chainId: '1500', tokenSymbol: 'USDC', amount: '206.1', partnerFee: '2.0400', partnerFeeBps: 100, ...over });
+// --- service fee: funder model (mpprouter #315, founder 2026-11-11) ---------
+// 1% of the invoice, rounded UP to the cent, read from the router's
+// Coinbase-line fee fields; the live order pays the funder invoice + fee and
+// freezes the invoice facts in metadata.bitrefill.
 
-test('fee guard: 1% of 204 is 2.04, total 206.04, rest of the deposit is the bridge fee', () => {
-  const r = checkBitrefillPricing({ invoiceAmount: '204', source: feeSource() });
+const UUID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+const atomic = (d) => {
+  const [w, f = ''] = String(d).split('.');
+  return (BigInt(w) * 1_000_000n + BigInt(f.padEnd(6, '0'))).toString();
+};
+
+function funderOrder({ invoice = '204.37', fee = '2.05', total = '206.42', deposit = '206.5000000', expiresAt = inMin(20) } = {}) {
+  const p = clone(readFixture('payment-bitrefill-unpaid-stellar.json'));
+  p.orderId = `bitrefill_${UUID}`;
+  p.source.amount = deposit;
+  p.destination = { chainId: '8453', tokenSymbol: 'USDC', receiverAddress: BITREFILL_FUNDER, amount: total };
+  p.metadata = {
+    provider: 'bitrefill',
+    bitrefillInvoiceId: UUID,
+    bitrefillExpiresAt: expiresAt,
+    original: invoice,
+    serviceFee: fee,
+    callerPays: total,
+    feeBps: 100,
+    pricingVersion: 'v1',
+    bitrefill: {
+      v: 1,
+      invoiceId: UUID,
+      address: ADDR.toLowerCase(),
+      amountAtomic: atomic(invoice),
+      expiresAt,
+      feeBps: 100,
+      serviceFeeAtomic: atomic(fee),
+      callerPaysAtomic: atomic(total),
+      binding: 'ab'.repeat(32),
+    },
+  };
+  return p;
+}
+function funderCreate({ invoice = '204.37', fee = '2.05', total = '206.42' } = {}) {
+  return {
+    ok: true,
+    provider: 'bitrefill',
+    model: 'funder',
+    invoiceId: UUID,
+    rozoPaymentId: ID,
+    destination: { chainId: '8453', tokenSymbol: 'USDC', address: ADDR, amount: invoice },
+    original: invoice,
+    serviceFee: fee,
+    feeBps: 100,
+    callerPays: total,
+    callerPaysAtomicUsdc: atomic(total),
+    pricingVersion: 'v1',
+    expiresAt: inMin(20),
+  };
+}
+const FARGS = (over = {}) => {
+  const a = ['--invoice-id', UUID.toUpperCase(), '--to', ADDR, '--amount', over.amount ?? '204.37', '--expires-at', over.expiresAt ?? inMin(20), '--chain', over.chain ?? '1500', '--token', over.token ?? 'USDC'];
+  return a;
+};
+const requestedFor = (amount = '204.37') => ({ invoiceId: UUID, address: ADDR, amount });
+
+test('funder fee: 204.37 -> fee 2.05 (cent round up), total 206.42, rest of the deposit is the bridge fee', () => {
+  const live = verifyBitrefillDestination({ requested: requestedFor(), payment: funderOrder() });
+  assert.equal(live.ok, true, JSON.stringify(live));
+  assert.equal(live.model, 'funder');
+  const r = checkBitrefillPricing({ invoiceAmount: '204.37', routerPricing: funderCreate(), live, source: funderOrder().source });
   assert.equal(r.ok, true, JSON.stringify(r));
-  assert.deepEqual(r.pricing, { original: '204', serviceFee: '2.04', feeBps: 100, callerPays: '206.04', bridgeFee: '0.06' });
+  assert.deepEqual(r.pricing, {
+    model: 'funder', original: '204.37', serviceFee: '2.05', feeBps: 100, callerPays: '206.42', callerPaysAtomicUsdc: '206420000', bridgeFee: '0.08',
+  });
 });
 
-test('fee guard: accepts the 4 dp round-up payment-api quotes, refuses anything above it', () => {
-  assert.equal(checkBitrefillPricing({ invoiceAmount: '204.37', source: feeSource({ amount: '206.5', partnerFee: '2.0437' }) }).ok, true);
-  assert.equal(checkBitrefillPricing({ invoiceAmount: '1.000001', source: feeSource({ amount: '1.02', partnerFee: '0.0101' }) }).ok, true);
-  const over = checkBitrefillPricing({ invoiceAmount: '204.37', source: feeSource({ amount: '206.5', partnerFee: '2.0438' }) });
-  assert.equal(over.ok, false);
-  assert.equal(over.code, 'BITREFILL_FEE_MISMATCH');
+test('funder fee: 204 -> 2.04 / 206.04 too', () => {
+  const o = funderOrder({ invoice: '204', fee: '2.04', total: '206.04', deposit: '206.1' });
+  const live = verifyBitrefillDestination({ requested: requestedFor('204'), payment: o });
+  const r = checkBitrefillPricing({ invoiceAmount: '204', routerPricing: funderCreate({ invoice: '204', fee: '2.04', total: '206.04' }), live, source: o.source });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.pricing.callerPays, '206.04');
+  assert.equal(r.pricing.bridgeFee, '0.06');
 });
 
-test('fee guard: rates above 100 bps, unreadable fees and short deposits are refused', () => {
-  for (const over of [
-    { partnerFeeBps: 101, partnerFee: '2.0604' },
-    { partnerFeeBps: 1.5 },
-    { partnerFee: undefined },
-    { partnerFee: '-1' },
-    { amount: '206.03' },
+test('compatibility: a response with no fee fields is a zero-fee direct-model order', () => {
+  const payment = readFixture('payment-bitrefill-unpaid-stellar.json');
+  const live = verifyBitrefillDestination({ requested: { invoiceId: 'x', address: ADDR, amount: '7.9' }, payment });
+  assert.equal(live.model, 'direct');
+  const r = checkBitrefillPricing({ invoiceAmount: '7.9', routerPricing: readFixture('bitrefill-create-response.json'), live, source: payment.source });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.pricing, { model: 'direct', original: '7.9', serviceFee: '0', feeBps: 0, callerPays: '7.9', callerPaysAtomicUsdc: '7900000', bridgeFee: '0.031' });
+  // null fee fields (a router DUPLICATE body for a row without facts) count as absent.
+  const nulls = { ...readFixture('bitrefill-create-response.json'), original: null, serviceFee: null, feeBps: null, callerPays: null, callerPaysAtomicUsdc: null };
+  assert.equal(checkBitrefillPricing({ invoiceAmount: '7.9', routerPricing: nulls, live, source: payment.source }).ok, true);
+});
+
+test('fee guard refuses partial, inconsistent or non-1% fee figures before any deposit', () => {
+  const o = funderOrder();
+  const live = verifyBitrefillDestination({ requested: requestedFor(), payment: o });
+  for (const [label, patch] of [
+    ['callerPays missing', { callerPays: undefined }],
+    ['callerPaysAtomicUsdc missing', { callerPaysAtomicUsdc: undefined }],
+    ['serviceFee missing', { serviceFee: undefined }],
+    ['feeBps missing', { feeBps: undefined }],
+    ['original + fee != callerPays', { callerPays: '206.43', callerPaysAtomicUsdc: '206430000' }],
+    ['fee rounded to 4 dp, not the cent', { serviceFee: '2.0437', callerPays: '206.4137', callerPaysAtomicUsdc: '206413700' }],
+    ['feeBps 50 (consistent figures)', { feeBps: 50, serviceFee: '1.03', callerPays: '205.4', callerPaysAtomicUsdc: '205400000' }],
+    ['feeBps 0', { feeBps: 0, serviceFee: '0', callerPays: '204.37', callerPaysAtomicUsdc: '204370000' }],
+    ['feeBps above the cap', { feeBps: 150 }],
+    ['atomic disagrees with callerPays', { callerPaysAtomicUsdc: '206420001' }],
+    ['original is not the invoice', { original: '204.36', serviceFee: '2.05', callerPays: '206.41', callerPaysAtomicUsdc: '206410000' }],
   ]) {
-    const r = checkBitrefillPricing({ invoiceAmount: '204', source: feeSource(over) });
-    assert.equal(r.ok, false, JSON.stringify(over));
-    assert.equal(r.code, 'BITREFILL_FEE_MISMATCH');
+    const router = { ...funderCreate(), ...patch };
+    for (const k of Object.keys(patch)) if (patch[k] === undefined) delete router[k];
+    const r = checkBitrefillPricing({ invoiceAmount: '204.37', routerPricing: router, live, source: o.source });
+    assert.equal(r.ok, false, label);
+    assert.equal(r.code, 'BITREFILL_FEE_MISMATCH', label);
+  }
+  // Short deposit.
+  const short = funderOrder({ deposit: '206.41' });
+  const rs = checkBitrefillPricing({ invoiceAmount: '204.37', routerPricing: funderCreate(), live, source: short.source });
+  assert.equal(rs.ok, false);
+});
+
+test('fee guard refuses when the router and the live order disagree on the model', () => {
+  // Router states the fee, live order is a direct-model order.
+  const direct = readFixture('payment-bitrefill-unpaid-stellar.json');
+  const liveDirect = verifyBitrefillDestination({ requested: { invoiceId: 'x', address: ADDR, amount: '7.9' }, payment: direct });
+  const withFee = { ...readFixture('bitrefill-create-response.json'), original: '7.9', serviceFee: '0.08', feeBps: 100, callerPays: '7.98', callerPaysAtomicUsdc: '7980000' };
+  assert.equal(checkBitrefillPricing({ invoiceAmount: '7.9', routerPricing: withFee, live: liveDirect, source: direct.source }).ok, false);
+  // Router states no fee, live order charges one.
+  const o = funderOrder();
+  const liveFunder = verifyBitrefillDestination({ requested: requestedFor(), payment: o });
+  const noFee = { ...funderCreate() };
+  for (const k of ['original', 'serviceFee', 'feeBps', 'callerPays', 'callerPaysAtomicUsdc']) delete noFee[k];
+  assert.equal(checkBitrefillPricing({ invoiceAmount: '204.37', routerPricing: noFee, live: liveFunder, source: o.source }).ok, false);
+});
+
+test('funder live order must pay the funder and freeze exactly this invoice', () => {
+  const requested = requestedFor();
+  for (const [label, mutate] of [
+    ['payout not to the funder', (p) => { p.destination.receiverAddress = ADDR; }],
+    ['frozen address differs', (p) => { p.metadata.bitrefill.address = '0x9999999999999999999999999999999999999999'; }],
+    ['frozen amount differs', (p) => { p.metadata.bitrefill.amountAtomic = '204380000'; }],
+    ['frozen fee rate differs', (p) => { p.metadata.bitrefill.feeBps = 50; }],
+    ['frozen fee differs', (p) => { p.metadata.bitrefill.serviceFeeAtomic = '2040000'; }],
+    ['frozen total differs', (p) => { p.metadata.bitrefill.callerPaysAtomic = '206410000'; }],
+    ['frozen invoice id differs', (p) => { p.metadata.bitrefill.invoiceId = 'bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee'; }],
+    ['payout amount is not invoice + fee', (p) => { p.destination.amount = '204.37'; }],
+    ['frozen facts missing', (p) => { delete p.metadata.bitrefill; }],
+    ['wrong version', (p) => { p.metadata.bitrefill.v = 2; }],
+  ]) {
+    const p = funderOrder();
+    mutate(p);
+    const v = verifyBitrefillDestination({ requested, payment: p });
+    assert.equal(v.ok, false, label);
+    assert.equal(v.code, 'BITREFILL_ECHO_MISMATCH', label);
+  }
+  // Any funder marker demands the funder checks: a direct-looking order with
+  // fee metadata is not accepted as direct.
+  const half = clone(readFixture('payment-bitrefill-unpaid-stellar.json'));
+  half.metadata = { serviceFee: '0.08' };
+  assert.equal(verifyBitrefillDestination({ requested: { invoiceId: 'x', address: ADDR, amount: '7.9' }, payment: half }).ok, false);
+});
+
+test('create flow (funder): shows fee and total, accepts the lowercased UUID echo, names the late-payment rule', async () => {
+  await withEnv(
+    [
+      ['/create-invoice', () => json(funderCreate())],
+      [`/payments/${ID}`, () => json(funderOrder())],
+    ],
+    async (calls) => {
+      const { payload, exitCode } = await capture(() => runBitrefill(FARGS()));
+      assert.equal(exitCode, 0, JSON.stringify(payload));
+      // Sent as typed (the current router keys orders by it); the router's lowercase echo is accepted.
+      assert.equal(calls.find((c) => c.url === `${MPP_BASE}/create-invoice`).body.bitrefill.invoiceId, UUID.toUpperCase());
+      assert.equal(payload.original, '204.37');
+      assert.equal(payload.serviceFee, '2.05');
+      assert.equal(payload.feeBps, 100);
+      assert.equal(payload.callerPays, '206.42');
+      assert.equal(payload.pricing.model, 'funder');
+      assert.equal(payload.pricing.bridgeFee, '0.08');
+      assert.ok(payload.confirmation.warnings.some((w) => w.includes('1% Rozo service fee (2.05 USDC, total 206.42 USDC)')));
+      assert.ok(payload.confirmation.warnings.some((w) => /not forwarded to Bitrefill/.test(w) && w.includes('hi@rozo.ai')));
+      assert.match(payload.latePaymentPolicy, /refunded manually on request/);
+      assert.doesNotMatch(payload.latePaymentPolicy, /\d+ (day|hour|business)/i, 'no refund timing promised');
+      assert.equal(payload.deposit, null);
+      const st = readState(ID);
+      assert.deepEqual(st.bitrefill.pricing, { model: 'funder', serviceFee: '2.05', feeBps: 100, callerPays: '206.42' });
+      const conf = await capture(() => runBitrefill([...FARGS(), '--confirm']));
+      assert.equal(conf.exitCode, 0, JSON.stringify(conf.payload));
+      assert.ok(conf.payload.deposit.receiverAddress);
+    },
+  );
+});
+
+test('create flow (funder): inconsistent router fee figures abort before any deposit is shown', async () => {
+  for (const patch of [{ callerPays: '206.43' }, { feeBps: 99 }, { callerPaysAtomicUsdc: undefined }]) {
+    const c = { ...funderCreate(), ...patch };
+    for (const k of Object.keys(patch)) if (patch[k] === undefined) delete c[k];
+    await withEnv(
+      [
+        ['/create-invoice', () => json(c)],
+        [`/payments/${ID}`, () => json(funderOrder())],
+      ],
+      async () => {
+        const { payload, exitCode } = await capture(() => runBitrefill([...FARGS(), '--confirm']));
+        assert.notEqual(exitCode, 0, JSON.stringify(patch));
+        assert.equal(payload.error.code, 'BITREFILL_FEE_MISMATCH', JSON.stringify(patch));
+        assert.equal(payload.deposit, undefined);
+        assert.equal(readState(ID), null);
+      },
+    );
   }
 });
 
-test('fee guard: an order created before the fee reports a zero fee', () => {
-  const r = checkBitrefillPricing({ invoiceAmount: '7.9', source: { chainId: '1500', tokenSymbol: 'USDC', amount: '7.931' } });
-  assert.equal(r.ok, true);
-  assert.deepEqual(r.pricing, { original: '7.9', serviceFee: '0', feeBps: 0, callerPays: '7.9', bridgeFee: '0.031' });
-});
-
-test('fee guard: router figures must match the live order', () => {
-  const ok = checkBitrefillPricing({ invoiceAmount: '204', source: feeSource(), routerPricing: { original: '204', serviceFee: '2.04', feeBps: 100, callerPays: '206.04' } });
-  assert.equal(ok.ok, true);
-  const drift = checkBitrefillPricing({ invoiceAmount: '204', source: feeSource(), routerPricing: { original: '204', serviceFee: '1.00', feeBps: 100, callerPays: '205' } });
-  assert.equal(drift.ok, false);
-  assert.ok(drift.details.drift.some((d) => d.field === 'serviceFee'));
-});
-
-function feeOrder() {
-  const p = clone(readFixture('payment-bitrefill-unpaid-stellar.json'));
-  p.source.amount = '8.0100000';
-  p.source.partnerFee = '0.0790';
-  p.source.partnerFeeBps = 100;
-  return p;
-}
-function feeCreate() {
-  return { ...clone(readFixture('bitrefill-create-response.json')), original: '7.9', serviceFee: '0.079', feeBps: 100, callerPays: '7.979' };
-}
-
-test('create flow: shows the service fee and total, and names it in the confirmation warning', async () => {
+test('create flow (current production router): no fee fields, direct order, no fee shown', async () => {
   await withEnv(
     [
-      ['/create-invoice', () => json(feeCreate())],
-      [`/payments/${ID}`, () => json(feeOrder())],
+      ['/create-invoice', () => json(readFixture('bitrefill-create-response.json'))],
+      [`/payments/${ID}`, () => json(readFixture('payment-bitrefill-unpaid-stellar.json'))],
     ],
     async () => {
       const { payload, exitCode } = await capture(() => runBitrefill(ARGS));
       assert.equal(exitCode, 0, JSON.stringify(payload));
-      assert.deepEqual(payload.pricing, { original: '7.9', serviceFee: '0.079', feeBps: 100, callerPays: '7.979', bridgeFee: '0.031' });
-      assert.ok(payload.confirmation.warnings.some((w) => w.includes('1% Rozo service fee (0.079 USDC)')));
+      assert.equal(payload.serviceFee, '0');
+      assert.equal(payload.feeBps, 0);
+      assert.equal(payload.callerPays, '7.9');
+      assert.equal(payload.pricing.model, 'direct');
+      assert.ok(!payload.confirmation.warnings.some((w) => /service fee/.test(w)));
     },
   );
 });
 
-test('create flow: a fee the user would not see aborts before any deposit is shown', async () => {
-  const order = feeOrder();
-  order.source.partnerFee = '0.5000';
+test('create flow (funder): DUPLICATE_INVOICE with the existing order resumes it with its fee', async () => {
+  const dup = { ok: false, error: 'DUPLICATE_INVOICE', message: 'exists', invoiceId: UUID, rozoPaymentId: ID, original: '204.37', serviceFee: '2.05', feeBps: 100, callerPays: '206.42', callerPaysAtomicUsdc: '206420000' };
   await withEnv(
     [
-      ['/create-invoice', () => json(feeCreate())],
-      [`/payments/${ID}`, () => json(order)],
+      ['/create-invoice', () => json(dup, 409)],
+      [`/payments/${ID}`, () => json(funderOrder())],
     ],
     async () => {
-      const { payload, exitCode } = await capture(() => runBitrefill([...ARGS, '--confirm']));
+      const { payload, exitCode } = await capture(() => runBitrefill(FARGS()));
+      assert.equal(exitCode, 0, JSON.stringify(payload));
+      assert.equal(payload.reused, true);
+      assert.equal(payload.callerPays, '206.42');
+    },
+  );
+});
+
+test('create flow: DUPLICATE_INVOICE under the other model (no order id) and RETRY_LATER get clear messages', async () => {
+  await withEnv(
+    [['/create-invoice', () => json({ ok: false, error: 'DUPLICATE_INVOICE', message: 'other model', invoiceId: UUID }, 409)]],
+    async (calls) => {
+      const { payload, exitCode } = await capture(() => runBitrefill(FARGS()));
       assert.notEqual(exitCode, 0);
-      assert.equal(payload.error.code, 'BITREFILL_FEE_MISMATCH');
+      assert.equal(payload.error.code, 'DUPLICATE_INVOICE');
+      assert.match(payload.error.message, /other Rozo checkout model/);
+      assert.match(payload.error.message, /Do not pay again/);
+      assert.ok(!calls.some((c) => c.url.includes('/payments/')), 'nothing resumed');
+    },
+  );
+  await withEnv(
+    [['/create-invoice', () => json({ ok: false, error: 'RETRY_LATER', message: 'claim store down' }, 503)]],
+    async () => {
+      const { payload } = await capture(() => runBitrefill(FARGS()));
+      assert.equal(payload.error.code, 'RETRY_LATER');
+      assert.match(payload.error.message, /Do not pay anything yet/);
+    },
+  );
+});
+
+test('create flow (funder): a native coin follows the router and its price lock', async () => {
+  const native = (over = {}) => {
+    const p = funderOrder();
+    p.source = {
+      chainId: '8453',
+      tokenSymbol: 'ETH',
+      tokenAddress: '0x0000000000000000000000000000000000000000',
+      amount: '0.0652',
+      receiverAddress: '0x2222222222222222222222222222222222222222',
+      txHash: null,
+      amountReceived: null,
+      confirmedAt: null,
+      ...over,
+    };
+    return p;
+  };
+  await withEnv(
+    [
+      ['/create-invoice', () => json(funderCreate())],
+      [`/payments/${ID}`, () => json(native({ quoteExpiresAt: inMin(15) }))],
+    ],
+    async (calls) => {
+      const { payload, exitCode } = await capture(() => runBitrefill(FARGS({ chain: '8453', token: 'ETH' })));
+      assert.equal(exitCode, 0, JSON.stringify(payload));
+      assert.deepEqual(calls.find((c) => c.url === `${MPP_BASE}/create-invoice`).body.source, { chainId: '8453', tokenSymbol: 'ETH' });
+      assert.equal(payload.display.native, true);
+      assert.equal(payload.pricing.bridgeFee, null, 'no bridge fee arithmetic on a coin amount');
+      assert.ok(payload.expiry.quoteExpiresAt);
+    },
+  );
+  await withEnv(
+    [
+      ['/create-invoice', () => json(funderCreate())],
+      [`/payments/${ID}`, () => json(native())],
+    ],
+    async () => {
+      const { payload } = await capture(() => runBitrefill([...FARGS({ chain: '8453', token: 'ETH' }), '--confirm']));
+      assert.equal(payload.error.code, 'EXPIRY_UNPARSABLE', 'a native order without a price lock is refused');
       assert.equal(payload.deposit, undefined);
     },
   );
+  // Current production router refuses native for Bitrefill: the refusal surfaces with a hint.
+  await withEnv(
+    [['/create-invoice', () => json({ ok: false, error: 'UNSUPPORTED_SOURCE', message: 'Native ETH ... not available for Bitrefill invoices' }, 400)]],
+    async () => {
+      const { payload } = await capture(() => runBitrefill(FARGS({ chain: '8453', token: 'ETH' })));
+      assert.equal(payload.error.code, 'UNSUPPORTED_SOURCE');
+      assert.match(payload.error.message, /USDC or USDT always work/);
+    },
+  );
+});
+
+test('ZEC is refused for Bitrefill before any request', async () => {
+  await withEnv([], async (calls) => {
+    const { payload } = await capture(() => runBitrefill(FARGS({ chain: '9133', token: 'ZEC' })));
+    assert.equal(payload.error.code, 'ZEC_NOT_AVAILABLE');
+    assert.equal(calls.length, 0);
+  });
+});
+
+test('classifyStatus (funder): payout to the funder is not yet paid; the delivered stamp is', () => {
+  const o = funderOrder();
+  o.status = 'payment_payout_completed';
+  o.source.txHash = 'abc';
+  o.source.amountReceived = o.source.amount;
+  o.source.confirmedAt = '2026-10-01T00:00:00Z';
+  const paying = classifyStatus({ payment: o, provider: 'bitrefill' });
+  assert.equal(paying.state, 'paying_merchant');
+  assert.equal(paying.terminal, false);
+  const done = classifyStatus({ payment: { ...o, merchantDeliveredAt: '2026-10-01T00:01:00Z' }, provider: 'bitrefill' });
+  assert.equal(done.state, 'settled');
+  assert.match(done.detail, /Paid to the address on the Bitrefill invoice/);
+  assert.match(done.detail, /source of truth/);
+  // Direct model unchanged: the payout itself pays Bitrefill.
+  const direct = classifyStatus({ payment: { status: 'payment_payout_completed', source: {} }, provider: 'bitrefill' });
+  assert.equal(direct.state, 'settled');
+});
+
+test('status (funder): money after the invoice expired without delivery escalates with the refund rule', async () => {
+  const o = funderOrder({ expiresAt: '2020-01-01T00:00:00Z' });
+  o.status = 'payment_payout_completed';
+  o.source.txHash = 'abc';
+  o.source.amountReceived = o.source.amount;
+  o.source.confirmedAt = '2026-10-01T00:00:00Z';
+  await withEnv([[`/payments/${ID}`, () => json(o)]], async () => {
+    const { payload } = await capture(() => runStatus(['--rozo-payment-id', ID]));
+    assert.equal(payload.provider, 'bitrefill');
+    assert.equal(payload.bitrefillModel, 'funder');
+    assert.equal(payload.state, 'stuck_after_payment');
+    assert.equal(payload.escalate, true);
+    assert.match(payload.detail, /not forwarded to Bitrefill/);
+    assert.match(payload.detail, /hi@rozo\.ai/);
+  });
+  const fresh = funderOrder();
+  fresh.status = 'payment_payout_completed';
+  fresh.source.txHash = 'abc';
+  fresh.source.amountReceived = fresh.source.amount;
+  fresh.source.confirmedAt = '2026-10-01T00:00:00Z';
+  await withEnv([[`/payments/${ID}`, () => json(fresh)]], async () => {
+    const { payload } = await capture(() => runStatus(['--rozo-payment-id', ID]));
+    assert.equal(payload.state, 'paying_merchant');
+    assert.equal(payload.escalate, false);
+  });
+});
+
+test('presend (funder): the confirmed fee must still be the live fee; a pre-fee record never pays a fee order', async () => {
+  const { finalPayabilityCheck } = await import('../scripts/src/lib/presend.mjs');
+  const base = {
+    rozoPaymentId: ID,
+    provider: 'bitrefill',
+    source: { chainId: '1500', tokenSymbol: 'USDC' },
+    bitrefill: { invoiceId: UUID, address: ADDR, amount: '204.37', expiresAt: inMin(20), pricing: { model: 'funder', serviceFee: '2.05', feeBps: 100, callerPays: '206.42' } },
+  };
+  await withEnv([[`/payments/${ID}`, () => json(funderOrder())]], async () => {
+    const r = await finalPayabilityCheck({ linkId: null, chainId: '1500', state: base, rozoPaymentId: ID });
+    assert.equal(r.statusNow, null);
+  });
+  const legacy = { ...base, bitrefill: { ...base.bitrefill, pricing: undefined } };
+  await withEnv([[`/payments/${ID}`, () => json(funderOrder())]], async () => {
+    await assert.rejects(
+      finalPayabilityCheck({ linkId: null, chainId: '1500', state: legacy, rozoPaymentId: ID }),
+      (e) => e.code === 'BITREFILL_FEE_MISMATCH',
+    );
+  });
+  assert.deepEqual(bitrefillPricingDrift({ serviceFee: '2.05', feeBps: 100, callerPays: '206.42' }, { serviceFee: '2.05', feeBps: 100, callerPays: '206.42' }), []);
+  assert.ok(bitrefillPricingDrift({ serviceFee: '2.05', feeBps: 100, callerPays: '206.42' }, { serviceFee: '2.06', feeBps: 100, callerPays: '206.43' }).length > 0);
 });

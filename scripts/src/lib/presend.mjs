@@ -32,11 +32,17 @@ import { assertNotBlacklisted, loadBlacklist } from './blacklist.mjs';
 import { readState, depositDigest } from './state.mjs';
 import { chainFamily, isNativeSource } from './amounts.mjs';
 import { SkillError } from './output.mjs';
-import { verifyBitrefillDestination, checkBitrefillExpiry } from './bitrefill.mjs';
+import {
+  verifyBitrefillDestination,
+  checkBitrefillExpiry,
+  bitrefillPricingDrift,
+  BITREFILL_MIN_PAY_WINDOW_MS,
+} from './bitrefill.mjs';
 
 /**
  * Bitrefill orders: the live intent must still pay exactly the recorded
- * invoice, and the invoice (only) must have time left. Throws on any doubt.
+ * invoice at the recorded (confirmed) fee, and the invoice must have time
+ * left; for a native coin, so must the price lock. Throws on any doubt.
  */
 function assertBitrefillLive(state, payment) {
   if (!state.bitrefill) {
@@ -44,7 +50,17 @@ function assertBitrefillLive(state, payment) {
   }
   const dest = verifyBitrefillDestination({ requested: state.bitrefill, payment });
   if (!dest.ok) throw new SkillError(dest.code, dest.reason, { drift: dest.drift });
-  const expiry = checkBitrefillExpiry(state.bitrefill.expiresAt, Date.now());
+  const drift = bitrefillPricingDrift(state.bitrefill.pricing ?? null, dest.livePricing);
+  if (drift.length) {
+    throw new SkillError('BITREFILL_FEE_MISMATCH', 'The live order charges a different fee than the one confirmed. Refusing to send.', { drift });
+  }
+  const quoteExpiresAt = sendPriceLock(payment, state);
+  const expiry = checkBitrefillExpiry(
+    state.bitrefill.expiresAt,
+    Date.now(),
+    BITREFILL_MIN_PAY_WINDOW_MS,
+    quoteExpiresAt !== undefined ? { quoteExpiresAt } : {},
+  );
   if (!expiry.ok) throw new SkillError(expiry.code, expiry.reason, expiry);
   return expiry;
 }
@@ -191,9 +207,6 @@ export async function preflight({
   let statusNow = null;
   let expiry;
   if (state.provider === 'bitrefill') {
-    if (isNativeSource(source.chainId, source.tokenSymbol)) {
-      throw new SkillError('NATIVE_NOT_AVAILABLE', 'Native coins are not available for Bitrefill invoices.');
-    }
     expiry = assertBitrefillLive(state, payment);
   } else {
     statusNow = await invoiceStatus({ linkId: state.linkId });
@@ -253,9 +266,6 @@ export async function finalPayabilityCheck({
   rozoPaymentId = null,
 }) {
   if (state?.provider === 'bitrefill') {
-    if (isNativeSource(state?.source?.chainId, state?.source?.tokenSymbol)) {
-      throw new SkillError('NATIVE_NOT_AVAILABLE', 'Native coins are not available for Bitrefill invoices.');
-    }
     // No Coinbase resource to re-read. Re-prove instead that the intent is
     // still unpaid and unfunded, and that the invoice has not run out.
     const id = rozoPaymentId ?? state.rozoPaymentId;
