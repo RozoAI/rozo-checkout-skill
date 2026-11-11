@@ -169,11 +169,19 @@ test('bridge completion is not Coinbase settlement', () => {
   assert.equal(r.terminal, false);
 
   // Only real settlement evidence flips it.
+  // The router saying `paid` is not enough while Coinbase has not captured.
+  const routerOnly = classifyStatus({ payment: completed, routerState: { status: 'paid' } });
+  assert.equal(routerOnly.state, 'paying_coinbase');
+  assert.equal(routerOnly.terminal, false);
   assert.equal(
-    classifyStatus({ payment: completed, routerState: { status: 'paid' } }).state,
+    classifyStatus({ payment: completed, routerState: { status: 'paid' }, coinbase: { settled: true } }).state,
     'settled',
   );
   assert.equal(classifyStatus({ payment: completed, coinbase: { settled: true } }).state, 'settled');
+  // Coinbase settled while the router is still paying: wait, do not report settled.
+  const midPay = classifyStatus({ payment: completed, routerState: { status: 'paying' }, coinbase: { settled: true } });
+  assert.notEqual(midPay.state, 'settled');
+  assert.equal(midPay.terminal, false);
 });
 
 test('an unreadable backend is `unknown`, never `awaiting_deposit`', () => {

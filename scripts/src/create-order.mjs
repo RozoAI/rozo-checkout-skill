@@ -62,6 +62,8 @@ import { ZEC_BETA_PARAM, isZecSource, zecShieldedOfferFor, zecStatusOf, zecDepos
 import {
   reuseGuard,
   verifyCreateAgainstQuote,
+  checkQuotePricing,
+  checkPricing,
   checkPayable,
   normalizeMerchant,
 } from './lib/guards.mjs';
@@ -130,6 +132,22 @@ async function main(argv) {
   const quote = await quoteInvoice({ url: String(url), beta });
   const snapshot = snapshotFromQuote(quote);
   const quoteReceipt = quote?.quoteReceipt ?? null;
+
+  // --- 1a. pricing: invoice + stated service fee == total, fee within cap --
+  // Checked before create, so a refusal leaves nothing behind.
+  const quotedPricing = checkQuotePricing(snapshot);
+  if (!quotedPricing.ok) {
+    emit(
+      {
+        success: false,
+        step: 'quote-pricing',
+        error: { code: quotedPricing.code, message: quotedPricing.reason },
+        linkId: snapshot.linkId ?? parsedLinkId,
+        guidance: 'Nothing was created. The quoted amounts do not add up; do not pay this link through the CLI.',
+      },
+      EXIT_ERROR,
+    );
+  }
 
   // --- 1b. native coin: offered for THIS invoice, inside the USD bounds ----
   // Checked before create, so a refusal leaves nothing behind.
@@ -299,6 +317,10 @@ async function main(argv) {
       EXIT_ERROR,
     );
   }
+
+  // verifyCreateAgainstQuote already ran checkPricing on `created`; read the
+  // normalized amounts back for display.
+  const createdPricing = checkPricing(created).pricing;
 
   // --- 4. authoritative deposit detail -----------------------------------
   const payment = await getPayment(rozoPaymentId);
@@ -489,7 +511,10 @@ async function main(argv) {
     paymentLink: created.paymentLink ?? null,
     merchant: normalizeMerchant(created.merchant ?? snapshot.merchant),
     invoice: { amount: usd, currency: snapshot?.fiat?.currency ?? 'USD' },
-    callerPays: created.callerPays ?? snapshot.callerPays,
+    // Verified above: callerPays == invoice + serviceFee, fee explicit and capped.
+    callerPays: createdPricing.callerPays,
+    serviceFee: createdPricing.serviceFee,
+    feeBps: createdPricing.feeBps,
     discount: created.discount ?? '0',
 
     // Machine-readable, copy-pastable — and WITHHELD until --confirm. This is

@@ -25,9 +25,10 @@ and Alchemy**. Any `payments.coinbase.com` link is quoted the same way.
 
 Before you pay, know two things:
 
-- **The fee is in the live quote.** You pay the full invoice, no discount and no
-  markup on it; the bridge and network fee is added to the deposit amount, which
-  is shown in the order summary before the deposit address is released. Send
+- **The fee is in the live quote.** You pay the full invoice, no discount, plus
+  a Rozo service fee shown as its own line (1% today, never more than 1% in this
+  CLI); the bridge and network fee is added to the deposit amount, which is
+  shown in the order summary before the deposit address is released. Send
   exactly that amount, nothing more is charged.
 - **Crypto payments to OpenRouter are never refundable.** That is OpenRouter's
   policy, not ours; check the credit amount before you send.

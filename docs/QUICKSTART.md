@@ -95,7 +95,9 @@ node scripts/dist/quote.js --url "$LINK"
   "success": true,
   "merchant": "OpenRouter, Inc.",
   "invoice": { "amount": "1050.00", "fiat": { "amount": "1050.00", "currency": "USD" } },
-  "callerPays": "1050.00",
+  "serviceFee": "10.5",
+  "feeBps": 100,
+  "callerPays": "1060.5",
   "coinbaseExpiryIso": "2026-08-09T10:00:00.000Z"
 }
 ```
@@ -120,11 +122,14 @@ is **withheld** at this stage — you get a masked summary to check first.
   "success": true,
   "rozoPaymentId": "11111111-2222-4333-8444-555555555555",
   "invoice": { "amount": "1050.000000", "currency": "USD" },
+  "serviceFee": "10.5",
+  "feeBps": 100,
+  "callerPays": "1060.5",
   "deposit": null,
   "depositWithheld": true,
   "display": {
     "chain": "Solana",
-    "amount": "1054.410000 USDT",
+    "amount": "1064.910000 USDT",
     "payToMasked": "9WzDXw...AWWM"
   },
   "expiry": { "effectiveDeadlineIso": "2026-08-08T11:00:00.000Z", "minutesOfSlack": 55 }
