@@ -31,8 +31,12 @@ export const BITREFILL_MIN_EXPIRY_MS = 5 * 60 * 1000;
 /** Refuse to SHOW a deposit or SEND with less than this much life left. */
 export const BITREFILL_MIN_PAY_WINDOW_MS = 2 * 60 * 1000;
 
-/** The router rejects an expiry further out than this; mirror it locally. */
-export const BITREFILL_MAX_EXPIRY_AHEAD_MS = 30 * 60 * 1000;
+/**
+ * The router rejects an expiry further out than this; mirror it locally.
+ * Bitrefill invoices live 60 minutes (measured 2026-11-11); the extra minute
+ * absorbs clock skew, matching the router.
+ */
+export const BITREFILL_MAX_EXPIRY_AHEAD_MS = 61 * 60 * 1000;
 
 /** Router error codes, with what the user should do about each. */
 export const BITREFILL_ROUTER_HINTS = {
@@ -130,7 +134,7 @@ export function validateBitrefillInput(
   if (ms - now > BITREFILL_MAX_EXPIRY_AHEAD_MS) {
     throw new SkillError(
       'INVOICE_EXPIRING',
-      'The invoice expiry is more than 30 minutes away, which a Bitrefill invoice never is. Check --expires-at.',
+      'The invoice expiry is more than 60 minutes away, which a Bitrefill invoice never is. Check --expires-at.',
       { expiresAt: new Date(ms).toISOString() },
     );
   }

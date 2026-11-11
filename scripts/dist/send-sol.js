@@ -34009,7 +34009,7 @@ function assertNotBlacklisted(targets, blacklist) {
 var BITREFILL_DESTINATION = Object.freeze({ chainId: "8453", tokenSymbol: "USDC" });
 var BITREFILL_MIN_EXPIRY_MS = 5 * 60 * 1e3;
 var BITREFILL_MIN_PAY_WINDOW_MS = 2 * 60 * 1e3;
-var BITREFILL_MAX_EXPIRY_AHEAD_MS = 30 * 60 * 1e3;
+var BITREFILL_MAX_EXPIRY_AHEAD_MS = 61 * 60 * 1e3;
 function checkBitrefillExpiry(expiresAt, now = Date.now(), minMs = BITREFILL_MIN_PAY_WINDOW_MS) {
   const ms = parseDeadline(expiresAt);
   const base = { marginMs: minMs, deadlines: { invoiceMs: ms } };

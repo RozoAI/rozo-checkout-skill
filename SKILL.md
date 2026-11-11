@@ -148,7 +148,7 @@ Stripe checkout is not supported by this skill.
    payment-api directly). The deposit you send is that amount plus bridge fees.
 3. Rails, all hard aborts: the address must be a 0x EVM address, the amount a
    positive USDC decimal (≤ 6 dp), `--expires-at` is required (the invoice
-   expiry, ≤ 30 min out); at least 5 minutes must remain to create an order and
+   expiry, ≤ 60 min out); at least 5 minutes must remain to create an order and
    2 minutes to show the deposit or send (the invoice expiry is the only clock
    used), and neither the Bitrefill address nor the deposit address may be on
    the compromised-address list. The router's response and the live order must

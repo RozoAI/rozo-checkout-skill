@@ -42576,7 +42576,7 @@ OPTIONS
   --bitrefill-invoice <id>  pay a Bitrefill invoice created with "USDC on Base"
                   instead of a Coinbase link. Needs --to <0x\u2026 address Bitrefill
                   shows>, --amount <exact USDC amount> and --expires-at <ISO>
-                  (required; refused under 5 minutes or over 30 minutes out).
+                  (required; refused under 5 minutes or over 60 minutes out).
   --from <coin>   same as --with; also accepts chain-first, e.g. stellar-usdc
   --payer <addr>  optional. Check what this wallet holds and mark the coin
                   list accordingly. Display help only; it never changes what
@@ -56760,7 +56760,7 @@ var PROVIDER_BITREFILL = "bitrefill";
 var BITREFILL_DESTINATION = Object.freeze({ chainId: "8453", tokenSymbol: "USDC" });
 var BITREFILL_MIN_EXPIRY_MS = 5 * 60 * 1e3;
 var BITREFILL_MIN_PAY_WINDOW_MS = 2 * 60 * 1e3;
-var BITREFILL_MAX_EXPIRY_AHEAD_MS = 30 * 60 * 1e3;
+var BITREFILL_MAX_EXPIRY_AHEAD_MS = 61 * 60 * 1e3;
 var BITREFILL_ROUTER_HINTS = {
   BITREFILL_DISABLED: "Bitrefill payments are switched off on the router right now. Try again later.",
   BITREFILL_NOT_CONFIGURED: "The router is not configured for Bitrefill payments yet (503). Nothing was created; try again later.",
@@ -56839,7 +56839,7 @@ function validateBitrefillInput({ invoiceId, address, amount, expiresAt }, now =
   if (ms - now > BITREFILL_MAX_EXPIRY_AHEAD_MS) {
     throw new SkillError(
       "INVOICE_EXPIRING",
-      "The invoice expiry is more than 30 minutes away, which a Bitrefill invoice never is. Check --expires-at.",
+      "The invoice expiry is more than 60 minutes away, which a Bitrefill invoice never is. Check --expires-at.",
       { expiresAt: new Date(ms).toISOString() }
     );
   }
