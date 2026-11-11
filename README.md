@@ -46,7 +46,9 @@ Paying a **Bitrefill** invoice instead? Create it on Bitrefill with "USDC on
 Base", then pass its id, address and amount (Coinbase payment links and
 Bitrefill invoices are the two supported targets; Stripe is not). The
 invoice amount can be up to 1050 USDC, which covers cards up to the ~1,000 USD
-tier; the deposit you send adds the bridge fee on top:
+tier. Rozo charges a 1% service fee on the invoice amount (204 USDC invoice:
+2.04 fee, 206.04 total), and the deposit adds the bridge fee on top. Bitrefill
+invoices are paid with USDC or USDT:
 
 ```bash
 npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x…> --amount 7.90 --expires-at <ISO> --with usdc-stellar

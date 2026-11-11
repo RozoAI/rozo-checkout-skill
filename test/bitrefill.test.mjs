@@ -15,6 +15,7 @@ import {
   verifyBitrefillCreate,
   verifyBitrefillDestination,
   duplicateInvoicePaymentId,
+  checkBitrefillPricing,
 } from '../scripts/src/lib/bitrefill.mjs';
 import { classifyStatus } from '../scripts/src/lib/guards.mjs';
 import { parseCliArgs, CliError } from '../scripts/src/lib/cli-args.mjs';
@@ -495,4 +496,92 @@ test('status: bitrefill deadline unknown is not payable; past deadline is invoic
     assert.equal(payload.state, 'awaiting_deposit');
     assert.equal(payload.expiry.expiresAt, ok.metadata.bitrefillExpiresAt);
   });
+});
+
+// --- service fee (router 2026-11-11: 1% via payment-api partner fee) --------
+const feeSource = (over = {}) => ({ chainId: '1500', tokenSymbol: 'USDC', amount: '206.1', partnerFee: '2.0400', partnerFeeBps: 100, ...over });
+
+test('fee guard: 1% of 204 is 2.04, total 206.04, rest of the deposit is the bridge fee', () => {
+  const r = checkBitrefillPricing({ invoiceAmount: '204', source: feeSource() });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.pricing, { original: '204', serviceFee: '2.04', feeBps: 100, callerPays: '206.04', bridgeFee: '0.06' });
+});
+
+test('fee guard: accepts the 4 dp round-up payment-api quotes, refuses anything above it', () => {
+  assert.equal(checkBitrefillPricing({ invoiceAmount: '204.37', source: feeSource({ amount: '206.5', partnerFee: '2.0437' }) }).ok, true);
+  assert.equal(checkBitrefillPricing({ invoiceAmount: '1.000001', source: feeSource({ amount: '1.02', partnerFee: '0.0101' }) }).ok, true);
+  const over = checkBitrefillPricing({ invoiceAmount: '204.37', source: feeSource({ amount: '206.5', partnerFee: '2.0438' }) });
+  assert.equal(over.ok, false);
+  assert.equal(over.code, 'BITREFILL_FEE_MISMATCH');
+});
+
+test('fee guard: rates above 100 bps, unreadable fees and short deposits are refused', () => {
+  for (const over of [
+    { partnerFeeBps: 101, partnerFee: '2.0604' },
+    { partnerFeeBps: 1.5 },
+    { partnerFee: undefined },
+    { partnerFee: '-1' },
+    { amount: '206.03' },
+  ]) {
+    const r = checkBitrefillPricing({ invoiceAmount: '204', source: feeSource(over) });
+    assert.equal(r.ok, false, JSON.stringify(over));
+    assert.equal(r.code, 'BITREFILL_FEE_MISMATCH');
+  }
+});
+
+test('fee guard: an order created before the fee reports a zero fee', () => {
+  const r = checkBitrefillPricing({ invoiceAmount: '7.9', source: { chainId: '1500', tokenSymbol: 'USDC', amount: '7.931' } });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.pricing, { original: '7.9', serviceFee: '0', feeBps: 0, callerPays: '7.9', bridgeFee: '0.031' });
+});
+
+test('fee guard: router figures must match the live order', () => {
+  const ok = checkBitrefillPricing({ invoiceAmount: '204', source: feeSource(), routerPricing: { original: '204', serviceFee: '2.04', feeBps: 100, callerPays: '206.04' } });
+  assert.equal(ok.ok, true);
+  const drift = checkBitrefillPricing({ invoiceAmount: '204', source: feeSource(), routerPricing: { original: '204', serviceFee: '1.00', feeBps: 100, callerPays: '205' } });
+  assert.equal(drift.ok, false);
+  assert.ok(drift.details.drift.some((d) => d.field === 'serviceFee'));
+});
+
+function feeOrder() {
+  const p = clone(readFixture('payment-bitrefill-unpaid-stellar.json'));
+  p.source.amount = '8.0100000';
+  p.source.partnerFee = '0.0790';
+  p.source.partnerFeeBps = 100;
+  return p;
+}
+function feeCreate() {
+  return { ...clone(readFixture('bitrefill-create-response.json')), original: '7.9', serviceFee: '0.079', feeBps: 100, callerPays: '7.979' };
+}
+
+test('create flow: shows the service fee and total, and names it in the confirmation warning', async () => {
+  await withEnv(
+    [
+      ['/create-invoice', () => json(feeCreate())],
+      [`/payments/${ID}`, () => json(feeOrder())],
+    ],
+    async () => {
+      const { payload, exitCode } = await capture(() => runBitrefill(ARGS));
+      assert.equal(exitCode, 0, JSON.stringify(payload));
+      assert.deepEqual(payload.pricing, { original: '7.9', serviceFee: '0.079', feeBps: 100, callerPays: '7.979', bridgeFee: '0.031' });
+      assert.ok(payload.confirmation.warnings.some((w) => w.includes('1% Rozo service fee (0.079 USDC)')));
+    },
+  );
+});
+
+test('create flow: a fee the user would not see aborts before any deposit is shown', async () => {
+  const order = feeOrder();
+  order.source.partnerFee = '0.5000';
+  await withEnv(
+    [
+      ['/create-invoice', () => json(feeCreate())],
+      [`/payments/${ID}`, () => json(order)],
+    ],
+    async () => {
+      const { payload, exitCode } = await capture(() => runBitrefill([...ARGS, '--confirm']));
+      assert.notEqual(exitCode, 0);
+      assert.equal(payload.error.code, 'BITREFILL_FEE_MISMATCH');
+      assert.equal(payload.deposit, undefined);
+    },
+  );
 });

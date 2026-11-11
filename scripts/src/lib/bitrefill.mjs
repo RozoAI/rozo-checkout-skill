@@ -13,10 +13,11 @@
  *   INVALID_AMOUNT          amount not a positive USDC decimal with ≤ 6 dp
  *   INVOICE_EXPIRING        less than BITREFILL_MIN_EXPIRY_MS left (or unparsable)
  *   BITREFILL_ECHO_MISMATCH router / intent disagrees with what was asked for
+ *   BITREFILL_FEE_MISMATCH  service fee rate/amount not what the user is shown
  */
 
 import { SkillError } from './output.mjs';
-import { normalizeDecimal } from './guards.mjs';
+import { normalizeDecimal, MAX_SERVICE_FEE_BPS } from './guards.mjs';
 import { parseDeadline } from './expiry.mjs';
 
 export const PROVIDER_BITREFILL = 'bitrefill';
@@ -46,7 +47,8 @@ export const BITREFILL_ROUTER_HINTS = {
   INVALID_INPUT: 'The router rejected the invoice details (400). Check the invoice id, address, amount and expiry against Bitrefill.',
   INVALID_ADDRESS: 'The router rejected the receiving address. Copy it again from the Bitrefill invoice.',
   INVALID_AMOUNT: 'The router rejected the amount. Use the exact USDC amount Bitrefill shows.',
-  AMOUNT_OUT_OF_RANGE: 'The amount is outside what the router accepts for Bitrefill invoices.',
+  AMOUNT_OUT_OF_RANGE: 'The amount is outside what the router accepts for Bitrefill invoices (at most 1050 USDC invoice amount).',
+  FEE_MISMATCH: 'The router could not price this order with the Bitrefill service fee. Nothing to pay; retry later with a new Bitrefill invoice.',
   INVOICE_EXPIRING: 'The invoice expires too soon (or too far out) for the router. Create a fresh Bitrefill invoice.',
   BLOCKED_ADDRESS: 'The router refused this receiving address. Do not pay it; report it.',
   UNSUPPORTED_SOURCE: 'The router does not accept this coin for Bitrefill invoices. Choose another coin.',
@@ -212,6 +214,88 @@ export function verifyBitrefillDestination({ requested, payment }) {
         addressVerified: false,
       }
     : { ok: true, code: null, reason: null, drift, addressVerified: true };
+}
+
+/** Plain decimal -> BigInt at 18 dp, or null. Used only to compare amounts. */
+function dec18(v) {
+  if (typeof v === 'number') v = String(v);
+  if (typeof v !== 'string' || !/^\d+(?:\.\d{1,18})?$/.test(v.trim())) return null;
+  const [w, f = ''] = v.trim().split('.');
+  return BigInt(w) * 10n ** 18n + BigInt(f.padEnd(18, '0'));
+}
+function fmt18(n) {
+  const w = n / 10n ** 18n;
+  const f = (n % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, '');
+  return f ? `${w}.${f}` : `${w}`;
+}
+
+/**
+ * Bitrefill service fee (router 2026-11-11: 1% of the invoice, charged by
+ * payment-api as a partner fee and echoed on the order as source.partnerFee /
+ * source.partnerFeeBps). The LIVE order is the source of truth; the router's
+ * create response, when it carries pricing, must agree with it.
+ *
+ *   - no partnerFeeBps on the order: an order created before the fee; fee 0.
+ *   - feeBps an integer 0..MAX_SERVICE_FEE_BPS (100);
+ *   - serviceFee >= 0 and no larger than payment-api's rounding of that rate
+ *     allows (invoice x bps, rounded UP to 4 decimals);
+ *   - callerPays = invoice + serviceFee exactly;
+ *   - for a stablecoin deposit, the deposit must cover callerPays; the rest is
+ *     the bridge fee, shown separately, so no part of the deposit is unexplained.
+ *
+ * @returns {{ok:true, pricing:{original, serviceFee, feeBps, callerPays, bridgeFee}} |
+ *           {ok:false, code:'BITREFILL_FEE_MISMATCH', reason, details}}
+ */
+export function checkBitrefillPricing({ invoiceAmount, source, routerPricing = null }) {
+  const bad = (reason, details = {}) => ({ ok: false, code: 'BITREFILL_FEE_MISMATCH', reason, details });
+  const original = dec18(invoiceAmount);
+  if (original === null) return bad('Invoice amount is not a plain decimal.');
+  const hasBps = source && source.partnerFeeBps !== undefined && source.partnerFeeBps !== null;
+  let feeBps = 0;
+  let fee = 0n;
+  if (hasBps) {
+    feeBps = source.partnerFeeBps;
+    if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps > MAX_SERVICE_FEE_BPS) {
+      return bad(`Service fee rate ${source.partnerFeeBps} bps is outside 0..${MAX_SERVICE_FEE_BPS} bps; this CLI does not accept it.`);
+    }
+    const f = dec18(source.partnerFee);
+    if (f === null) return bad('The order carries a fee rate but no readable service fee.', { partnerFee: source.partnerFee ?? null });
+    // ceil(original * bps / 10000) to 4 dp (10^14 at 18 dp).
+    const step = 10n ** 14n;
+    const raw = original * BigInt(feeBps);
+    const max = ((raw + 10_000n * step - 1n) / (10_000n * step)) * step;
+    if (f > max) {
+      return bad(`Service fee ${source.partnerFee} is more than ${feeBps} bps of ${invoiceAmount} allows.`, { max: fmt18(max) });
+    }
+    fee = f;
+  }
+  const callerPays = original + fee;
+  const pricing = {
+    original: fmt18(original),
+    serviceFee: fmt18(fee),
+    feeBps,
+    callerPays: fmt18(callerPays),
+    bridgeFee: null,
+  };
+  if (routerPricing && routerPricing.serviceFee !== undefined) {
+    const drift = [];
+    for (const k of ['original', 'serviceFee', 'callerPays']) {
+      const r = dec18(routerPricing[k]);
+      if (r === null || fmt18(r) !== pricing[k]) drift.push({ field: k, router: routerPricing[k] ?? null, order: pricing[k] });
+    }
+    if (routerPricing.feeBps !== feeBps) drift.push({ field: 'feeBps', router: routerPricing.feeBps ?? null, order: feeBps });
+    if (drift.length) return bad('The router\'s fee figures differ from the live order.', { drift });
+  }
+  const token = String(source?.tokenSymbol ?? '').toUpperCase();
+  const stable = String(source?.chainId) !== 'lightning' && (token === 'USDC' || token === 'USDT');
+  if (stable) {
+    const dep = dec18(source?.amount);
+    if (dep === null || dep < callerPays) {
+      return bad('The deposit does not cover the invoice plus the service fee.', { deposit: source?.amount ?? null, callerPays: pricing.callerPays });
+    }
+    pricing.bridgeFee = fmt18(dep - callerPays);
+  }
+  return { ok: true, pricing };
 }
 
 /**

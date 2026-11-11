@@ -56768,7 +56768,8 @@ var BITREFILL_ROUTER_HINTS = {
   INVALID_INPUT: "The router rejected the invoice details (400). Check the invoice id, address, amount and expiry against Bitrefill.",
   INVALID_ADDRESS: "The router rejected the receiving address. Copy it again from the Bitrefill invoice.",
   INVALID_AMOUNT: "The router rejected the amount. Use the exact USDC amount Bitrefill shows.",
-  AMOUNT_OUT_OF_RANGE: "The amount is outside what the router accepts for Bitrefill invoices.",
+  AMOUNT_OUT_OF_RANGE: "The amount is outside what the router accepts for Bitrefill invoices (at most 1050 USDC invoice amount).",
+  FEE_MISMATCH: "The router could not price this order with the Bitrefill service fee. Nothing to pay; retry later with a new Bitrefill invoice.",
   INVOICE_EXPIRING: "The invoice expires too soon (or too far out) for the router. Create a fresh Bitrefill invoice.",
   BLOCKED_ADDRESS: "The router refused this receiving address. Do not pay it; report it.",
   UNSUPPORTED_SOURCE: "The router does not accept this coin for Bitrefill invoices. Choose another coin."
@@ -56899,6 +56900,67 @@ function verifyBitrefillDestination({ requested, payment }) {
     addressVerified: false
   } : { ok: true, code: null, reason: null, drift, addressVerified: true };
 }
+function dec18(v) {
+  if (typeof v === "number") v = String(v);
+  if (typeof v !== "string" || !/^\d+(?:\.\d{1,18})?$/.test(v.trim())) return null;
+  const [w, f = ""] = v.trim().split(".");
+  return BigInt(w) * 10n ** 18n + BigInt(f.padEnd(18, "0"));
+}
+function fmt18(n) {
+  const w = n / 10n ** 18n;
+  const f = (n % 10n ** 18n).toString().padStart(18, "0").replace(/0+$/, "");
+  return f ? `${w}.${f}` : `${w}`;
+}
+function checkBitrefillPricing({ invoiceAmount, source, routerPricing = null }) {
+  const bad = (reason, details = {}) => ({ ok: false, code: "BITREFILL_FEE_MISMATCH", reason, details });
+  const original = dec18(invoiceAmount);
+  if (original === null) return bad("Invoice amount is not a plain decimal.");
+  const hasBps = source && source.partnerFeeBps !== void 0 && source.partnerFeeBps !== null;
+  let feeBps = 0;
+  let fee = 0n;
+  if (hasBps) {
+    feeBps = source.partnerFeeBps;
+    if (!Number.isInteger(feeBps) || feeBps < 0 || feeBps > MAX_SERVICE_FEE_BPS) {
+      return bad(`Service fee rate ${source.partnerFeeBps} bps is outside 0..${MAX_SERVICE_FEE_BPS} bps; this CLI does not accept it.`);
+    }
+    const f = dec18(source.partnerFee);
+    if (f === null) return bad("The order carries a fee rate but no readable service fee.", { partnerFee: source.partnerFee ?? null });
+    const step2 = 10n ** 14n;
+    const raw = original * BigInt(feeBps);
+    const max = (raw + 10000n * step2 - 1n) / (10000n * step2) * step2;
+    if (f > max) {
+      return bad(`Service fee ${source.partnerFee} is more than ${feeBps} bps of ${invoiceAmount} allows.`, { max: fmt18(max) });
+    }
+    fee = f;
+  }
+  const callerPays = original + fee;
+  const pricing = {
+    original: fmt18(original),
+    serviceFee: fmt18(fee),
+    feeBps,
+    callerPays: fmt18(callerPays),
+    bridgeFee: null
+  };
+  if (routerPricing && routerPricing.serviceFee !== void 0) {
+    const drift = [];
+    for (const k of ["original", "serviceFee", "callerPays"]) {
+      const r = dec18(routerPricing[k]);
+      if (r === null || fmt18(r) !== pricing[k]) drift.push({ field: k, router: routerPricing[k] ?? null, order: pricing[k] });
+    }
+    if (routerPricing.feeBps !== feeBps) drift.push({ field: "feeBps", router: routerPricing.feeBps ?? null, order: feeBps });
+    if (drift.length) return bad("The router's fee figures differ from the live order.", { drift });
+  }
+  const token = String(source?.tokenSymbol ?? "").toUpperCase();
+  const stable = String(source?.chainId) !== "lightning" && (token === "USDC" || token === "USDT");
+  if (stable) {
+    const dep = dec18(source?.amount);
+    if (dep === null || dep < callerPays) {
+      return bad("The deposit does not cover the invoice plus the service fee.", { deposit: source?.amount ?? null, callerPays: pricing.callerPays });
+    }
+    pricing.bridgeFee = fmt18(dep - callerPays);
+  }
+  return { ok: true, pricing };
+}
 function duplicateInvoicePaymentId(err) {
   if (err?.code !== "DUPLICATE_INVOICE") return null;
   const body = err?.details?.body;
@@ -56973,6 +57035,7 @@ async function main3(argv) {
   let created = null;
   let rozoPaymentId;
   let resumed = false;
+  let routerPricing = null;
   try {
     created = await createBitrefillInvoice({
       invoice,
@@ -56985,12 +57048,14 @@ async function main3(argv) {
     if (!existing) throw explainRouterError(err);
     rozoPaymentId = assertRozoPaymentId(existing);
     resumed = true;
+    routerPricing = err?.details?.body ?? null;
   }
   if (created) {
     if (created.ok === false || !created.rozoPaymentId) {
       throw new SkillError(created?.error || "CREATE_FAILED", created?.message || "create-invoice returned no rozoPaymentId.");
     }
     rozoPaymentId = assertRozoPaymentId(created.rozoPaymentId);
+    routerPricing = created;
     const echo = verifyBitrefillCreate({ requested: invoice, created });
     if (!echo.ok) {
       abort("verify-create", echo.code, echo.reason, {
@@ -57021,6 +57086,14 @@ async function main3(argv) {
       fields: { rozoPaymentId, invoiceId: invoice.invoiceId }
     });
   }
+  const fee = checkBitrefillPricing({ invoiceAmount: invoice.amount, source, routerPricing });
+  if (!fee.ok) {
+    abort("fee-guard", fee.code, fee.reason, {
+      details: fee.details,
+      fields: { rozoPaymentId, invoiceId: invoice.invoiceId }
+    }, "Do not fund this order. Let it expire unfunded.");
+  }
+  const pricing = fee.pricing;
   const guard = reuseGuard({ payment, requested, reused: resumed });
   if (!guard.ok) {
     emit(
@@ -57092,6 +57165,10 @@ async function main3(argv) {
     rozoPaymentId,
     merchant: "Bitrefill",
     invoice: { amount: invoice.amount, currency: "USDC" },
+    // What the user pays on top of the invoice. original = Bitrefill receives,
+    // serviceFee = Rozo's fee (feeBps of the invoice), callerPays = both,
+    // bridgeFee = the rest of the deposit (stablecoin deposits only).
+    pricing,
     bitrefill: {
       invoiceId: invoice.invoiceId,
       addressMasked: maskAddress2(invoice.address),
@@ -57141,12 +57218,12 @@ async function main3(argv) {
     confirmation: {
       required: tier,
       satisfied: confirmed,
-      note: confirmed ? "Confirmation recorded. The send scripts will verify it against the live deposit data." : "BINDING CONFIRMATION POINT. Present the Bitrefill invoice id, the USDC amount Bitrefill receives, the coin and exact amount to send, the masked deposit address and the expiry, and get an explicit yes. Then re-run with --confirm to release the full deposit details.",
+      note: confirmed ? "Confirmation recorded. The send scripts will verify it against the live deposit data." : "BINDING CONFIRMATION POINT. Present the Bitrefill invoice id, the USDC amount Bitrefill receives, the Rozo service fee (pricing.serviceFee, pricing.feeBps bps) and the bridge fee, the coin and exact amount to send, the masked deposit address and the expiry, and get an explicit yes. Then re-run with --confirm to release the full deposit details.",
       warnings: [
         "Wrong token, wrong network, or wrong amount is usually unrecoverable.",
         memoRequirement,
         "Send exactly once. A second send to the same one-time address is not guaranteed to be credited.",
-        "The deposit amount can exceed the invoice: it includes the bridge and network fees."
+        pricing.feeBps > 0 ? `The deposit exceeds the invoice: it adds a ${pricing.feeBps / 100}% Rozo service fee (${pricing.serviceFee} USDC) and the bridge fee.` : "The deposit amount can exceed the invoice: it includes the bridge and network fees."
       ]
     },
     blacklist: { checked: true, addressesInList: blacklist.entries.length, digest: blacklist.provenance.addressesSha256 },

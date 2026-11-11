@@ -145,7 +145,12 @@ Stripe checkout is not supported by this skill.
 
    There is no quote step: mpprouter creates a Rozo exactOut order delivering
    exactly that USDC amount to the Bitrefill address (the skill never writes to
-   payment-api directly). The deposit you send is that amount plus bridge fees.
+   payment-api directly). The deposit you send is that amount plus a 1% Rozo
+   service fee on the invoice amount plus the bridge fee (a 204 USDC invoice:
+   service fee 2.04, 206.04 before the bridge fee). The output's `pricing`
+   block lists `original`, `serviceFee`, `feeBps`, `callerPays` and
+   `bridgeFee`; show all of them at the confirmation. Bitrefill invoices are
+   paid with USDC or USDT only (no native coins, no Lightning).
 3. Rails, all hard aborts: the address must be a 0x EVM address, the amount a
    positive USDC decimal (≤ 6 dp) of at most 1050 USDC (the invoice amount
    Bitrefill receives, not your deposit; enforced by the router as
@@ -157,7 +162,11 @@ Stripe checkout is not supported by this skill.
    the compromised-address list. The router's response and the live order must
    echo the same invoice id, address and amount (`BITREFILL_ECHO_MISMATCH`
    otherwise) before any deposit is shown or any send happens. Re-running for
-   the same invoice resumes its order (router `DUPLICATE_INVOICE`).
+   the same invoice resumes its order (router `DUPLICATE_INVOICE`). The fee
+   comes from the live order: a rate above 100 bps, a fee larger than that
+   rate allows, a router figure that differs from the order, or a deposit
+   that does not cover invoice plus fee aborts with `BITREFILL_FEE_MISMATCH`
+   before any deposit is shown.
 4. Same binding confirmation and `--send` rules as a Coinbase link. Status:
    `rozo-checkout status <rozoPaymentId>` reports `settled` once the Rozo
    payout to the Bitrefill address completes (`payment_payout_completed`, or
@@ -166,7 +175,8 @@ Stripe checkout is not supported by this skill.
 
 Router errors to relay as-is: `BITREFILL_DISABLED`, `INVALID_ADDRESS`,
 `INVALID_AMOUNT`, `AMOUNT_OUT_OF_RANGE`, `INVOICE_EXPIRING`, `BLOCKED_ADDRESS`,
-`UNSUPPORTED_SOURCE`, `INVALID_INPUT` (400), and `BITREFILL_NOT_CONFIGURED` /
+`UNSUPPORTED_SOURCE`, `INVALID_INPUT` (400), `FEE_MISMATCH` (502: the order
+was not priced with the service fee; do not fund it), and `BITREFILL_NOT_CONFIGURED` /
 `RETRY_LATER` (503: nothing was created, retry later).
 
 ## OpenRouter top-up — when there is no link yet

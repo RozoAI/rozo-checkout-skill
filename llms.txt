@@ -49,7 +49,8 @@ Key files and .env must be chmod 600 and untracked by git.
 
 Also supported: a Bitrefill invoice created with "USDC on Base" (Stripe is not supported).
 No quote step; mpprouter creates an exactOut order paying exactly that amount to the
-Bitrefill address:
+Bitrefill address. Rozo charges a 1% service fee on the invoice amount (response fields
+original, serviceFee, feeBps, callerPays; deposit = callerPays + bridge fee). USDC/USDT sources only:
 
   npx @rozoai/checkout pay --bitrefill-invoice <id> --to <0x…> --amount 7.90 --expires-at <ISO> --with usdc-stellar
 

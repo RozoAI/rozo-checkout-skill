@@ -47,6 +47,7 @@ import {
   validateBitrefillInput,
   verifyBitrefillCreate,
   verifyBitrefillDestination,
+  checkBitrefillPricing,
   duplicateInvoicePaymentId,
   explainRouterError,
   checkBitrefillExpiry,
@@ -124,6 +125,7 @@ async function main(argv) {
   let created = null;
   let rozoPaymentId;
   let resumed = false;
+  let routerPricing = null;
   try {
     created = await createBitrefillInvoice({
       invoice,
@@ -136,6 +138,7 @@ async function main(argv) {
     if (!existing) throw explainRouterError(err);
     rozoPaymentId = assertRozoPaymentId(existing);
     resumed = true;
+    routerPricing = err?.details?.body ?? null;
   }
 
   // --- 4. the router must echo the invoice -------------------------------
@@ -144,6 +147,7 @@ async function main(argv) {
       throw new SkillError(created?.error || 'CREATE_FAILED', created?.message || 'create-invoice returned no rozoPaymentId.');
     }
     rozoPaymentId = assertRozoPaymentId(created.rozoPaymentId);
+    routerPricing = created;
     const echo = verifyBitrefillCreate({ requested: invoice, created });
     if (!echo.ok) {
       abort('verify-create', echo.code, echo.reason, {
@@ -178,6 +182,16 @@ async function main(argv) {
       fields: { rozoPaymentId, invoiceId: invoice.invoiceId },
     });
   }
+
+  // Service fee: the live order decides; the router's figures must agree.
+  const fee = checkBitrefillPricing({ invoiceAmount: invoice.amount, source, routerPricing });
+  if (!fee.ok) {
+    abort('fee-guard', fee.code, fee.reason, {
+      details: fee.details,
+      fields: { rozoPaymentId, invoiceId: invoice.invoiceId },
+    }, 'Do not fund this order. Let it expire unfunded.');
+  }
+  const pricing = fee.pricing;
 
   const guard = reuseGuard({ payment, requested, reused: resumed });
   if (!guard.ok) {
@@ -268,6 +282,10 @@ async function main(argv) {
     rozoPaymentId,
     merchant: 'Bitrefill',
     invoice: { amount: invoice.amount, currency: 'USDC' },
+    // What the user pays on top of the invoice. original = Bitrefill receives,
+    // serviceFee = Rozo's fee (feeBps of the invoice), callerPays = both,
+    // bridgeFee = the rest of the deposit (stablecoin deposits only).
+    pricing,
     bitrefill: {
       invoiceId: invoice.invoiceId,
       addressMasked: maskAddress(invoice.address),
@@ -322,13 +340,16 @@ async function main(argv) {
       note: confirmed
         ? 'Confirmation recorded. The send scripts will verify it against the live deposit data.'
         : 'BINDING CONFIRMATION POINT. Present the Bitrefill invoice id, the USDC amount Bitrefill receives, ' +
+          'the Rozo service fee (pricing.serviceFee, pricing.feeBps bps) and the bridge fee, ' +
           'the coin and exact amount to send, the masked deposit address and the expiry, and get an explicit yes. ' +
           'Then re-run with --confirm to release the full deposit details.',
       warnings: [
         'Wrong token, wrong network, or wrong amount is usually unrecoverable.',
         memoRequirement,
         'Send exactly once. A second send to the same one-time address is not guaranteed to be credited.',
-        'The deposit amount can exceed the invoice: it includes the bridge and network fees.',
+        pricing.feeBps > 0
+          ? `The deposit exceeds the invoice: it adds a ${pricing.feeBps / 100}% Rozo service fee (${pricing.serviceFee} USDC) and the bridge fee.`
+          : 'The deposit amount can exceed the invoice: it includes the bridge and network fees.',
       ],
     },
     blacklist: { checked: true, addressesInList: blacklist.entries.length, digest: blacklist.provenance.addressesSha256 },
