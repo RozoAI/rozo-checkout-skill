@@ -147,7 +147,10 @@ Stripe checkout is not supported by this skill.
    exactly that USDC amount to the Bitrefill address (the skill never writes to
    payment-api directly). The deposit you send is that amount plus bridge fees.
 3. Rails, all hard aborts: the address must be a 0x EVM address, the amount a
-   positive USDC decimal (≤ 6 dp), `--expires-at` is required (the invoice
+   positive USDC decimal (≤ 6 dp) of at most 1050 USDC (the invoice amount
+   Bitrefill receives, not your deposit; enforced by the router as
+   `AMOUNT_OUT_OF_RANGE`, so cards up to the ~1,000 USD tier fit),
+   `--expires-at` is required (the invoice
    expiry, ≤ 60 min out); at least 5 minutes must remain to create an order and
    2 minutes to show the deposit or send (the invoice expiry is the only clock
    used), and neither the Bitrefill address nor the deposit address may be on
