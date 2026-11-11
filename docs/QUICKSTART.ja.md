@@ -31,7 +31,7 @@ npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLI
 表示され、既定の通貨はありません。
 
 ネイティブコインは、インボイスの見積もりに含まれている場合のみ使えます（上限 $3,500、Ethereum の ETH は最低 $1）。
-受取額固定（exact-out）なので、表示された数量を価格固定の期限（約 1 時間）までに正確に送り、ガス代として同じコインを少し残してください。
+受取額固定（exact-out）なので、表示された数量を価格固定の期限（約 1 時間。OpenRouter の支払いリンク自体は作成から約 24 時間支払い可能です）までに正確に送り、ガス代として同じコインを少し残してください。
 オンチェーンの BTC と Tron には対応していません。
 Zcash の ZEC（Beta）は https://checkout.rozo.ai/zec を使ってください。この CLI では ZEC の注文は作れません。
 
@@ -95,7 +95,7 @@ node scripts/dist/quote.js --url "$LINK"
 node scripts/dist/create-order.js --url "$LINK" --chain 900 --token USDT
 ```
 
-資金は動かず、入金のない注文はそのまま期限切れになります。この段階では完全な
+資金は動かず、入金のない注文はそのまま期限切れになります。注文の有効期限は約 1 時間ですが、OpenRouter の支払いリンクは作成から約 24 時間支払い可能です（`coinbaseExpiryIso`）。注文が期限切れになっても、同じリンクで新しい注文を作れます。この段階では完全な
 入金アドレス (deposit address) は**伏せられます** — まず確認用にマスクされたサマリーが返ります。
 
 ```json
