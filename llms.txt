@@ -150,6 +150,8 @@ private key (EVM and Solana only); every other path is keyless.
    -> { ok, reused, linkId, rozoPaymentId, paymentLink, expiresAt, source, ... }
    Optional "email":"you@example.com" in the body stores a contact email with a
    newly created order (a malformed value returns 400 INVALID_EMAIL).
+   Check that original, serviceFee, feeBps and callerPays are the same as the quote
+   and that callerPays = original + serviceFee; abort on any difference.
    WARNING: if an unexpired order already exists for this link it is REUSED as-is,
    even with a different chain/token than you asked for. Always verify the returned
    source matches your request; abort on mismatch.
@@ -171,7 +173,9 @@ private key (EVM and Solana only); every other path is keyless.
 4) Poll until settled:
    curl "https://apiserver.mpprouter.dev/v1/services/rozo-agent-api/invoice-status?payment_id=<linkId>"
    and re-GET the payments/<rozoPaymentId> URL above. The Coinbase link is settled
-   only when the router reports paid / coinbase.settled — an intents status of
+   only when coinbase.settled is true (v3 PAYMENT_SESSION_STATUS_CAPTURE_SUCCEEDED,
+   v1 usageCount >= maxUsage). The router reporting paid alone means the funder
+   paid and Coinbase has not captured yet: keep polling. An intents status of
    payment_completed alone is the bridge lifecycle, not final settlement.
 
 ## x402: pay any x402 API from a prepaid balance
