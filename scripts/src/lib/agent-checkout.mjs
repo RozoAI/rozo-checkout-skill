@@ -380,78 +380,63 @@ export function pidAlive(pid) {
 function readLock(file) {
   try {
     const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return rec && typeof rec.token === 'string' ? rec : null;
+    return rec && typeof rec.token === 'string' && Number.isInteger(rec.pid) ? rec : null;
   } catch {
     return null;
   }
 }
 
 /**
- * Remove the lock only if it is still the instance with `token`: move it
- * aside atomically, check the token, and put it back if it was not ours.
- */
-function removeLockIfToken(lock, token) {
-  const aside = `${lock}.${crypto.randomBytes(6).toString('hex')}.old`;
-  try {
-    fs.renameSync(lock, aside);
-  } catch {
-    return false; // already gone
-  }
-  const seen = readLock(aside);
-  if (seen?.token === token) {
-    fs.rmSync(aside, { force: true });
-    return true;
-  }
-  try {
-    fs.linkSync(aside, lock); // restore someone else's lock, never overwrite
-  } catch {
-    // a newer lock already took the name; that one stands
-  }
-  fs.rmSync(aside, { force: true });
-  return false;
-}
-
-/**
- * Exclusive bind lock in the credential dir. The file records pid and a
- * random token. A lock is reclaimed only when it is older than
- * BIND_LOCK_STALE_MS AND its pid is gone, and only the observed instance is
- * removed. Release removes the lock only while it still carries our token.
- * Returns the release function.
+ * Exclusive bind lock in the credential dir (O_EXCL create). The file records
+ * pid and a random token. Nobody but its holder ever removes it: release
+ * deletes it only while it still carries our token, and an existing lock is
+ * never reclaimed automatically. A lock whose pid is alive, or that is younger
+ * than BIND_LOCK_STALE_MS, means BIND_IN_PROGRESS; any other lock (dead pid,
+ * unreadable, old format) is BIND_LOCK_STALE with the command to remove it
+ * by hand once no bind is running. Returns the release function.
  */
 export function acquireBindLock(dir, { now = Date.now } = {}) {
   const lock = path.join(dir, BIND_LOCK_NAME);
   const token = crypto.randomBytes(16).toString('hex');
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let fd;
+  try {
+    fd = fs.openSync(lock, 'wx', 0o600);
+  } catch (err) {
+    if (err?.code !== 'EEXIST') throw err;
+    let age = 0;
     try {
-      const fd = fs.openSync(lock, 'wx', 0o600);
-      try {
-        fs.writeSync(fd, `${JSON.stringify({ pid: process.pid, token, at: new Date(now()).toISOString() })}\n`);
-      } finally {
-        fs.closeSync(fd);
-      }
-      return () => {
-        removeLockIfToken(lock, token);
-      };
-    } catch (err) {
-      if (err?.code !== 'EEXIST') throw err;
-      if (attempt > 0) break;
-      let age;
-      try {
-        age = now() - fs.statSync(lock).mtimeMs;
-      } catch {
-        continue; // vanished between open and stat: retry once
-      }
-      const held = readLock(lock);
-      if (age > BIND_LOCK_STALE_MS && held && !pidAlive(Number(held.pid))) {
-        if (removeLockIfToken(lock, held.token)) continue;
-      }
-      break;
+      age = now() - fs.statSync(lock).mtimeMs;
+    } catch {
+      age = 0; // vanished just now: its holder released it; treat as busy, rerun
     }
+    const held = readLock(lock);
+    if ((held && pidAlive(held.pid)) || age < BIND_LOCK_STALE_MS) {
+      throw new SkillError(
+        'BIND_IN_PROGRESS',
+        `Another bind is running (${lock}). Wait for it to finish, then rerun; nothing was claimed.`,
+      );
+    }
+    throw new SkillError(
+      'BIND_LOCK_STALE',
+      `A bind lock was left behind by a run that is no longer active: ${lock}. ` +
+        `Make sure no rozo-checkout bind is running, then remove it with: rm '${lock}' . Nothing was claimed.`,
+      { lockPath: lock },
+    );
   }
-  throw new SkillError(
-    'BIND_IN_PROGRESS',
-    `Another bind is running (${lock}). Wait for it to finish; nothing was claimed.`,
-  );
+  try {
+    fs.writeSync(fd, `${JSON.stringify({ pid: process.pid, token, at: new Date(now()).toISOString() })}\n`);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    // Only our own instance: nobody else removes this file, so if it still
+    // carries our token it is ours.
+    if (readLock(lock)?.token === token) fs.rmSync(lock, { force: true });
+  };
 }
 
 /** Prepare and commit in one go (used where no network call sits between). */

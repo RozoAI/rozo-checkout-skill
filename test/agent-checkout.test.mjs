@@ -547,7 +547,7 @@ async function deadPid() {
   return spawnSync(process.execPath, ['-e', '0']).pid;
 }
 
-test('a held bind lock refuses a second bind; a stale lock is reclaimed only when its pid is gone', async () => {
+test('an existing bind lock is never removed: busy while alive or young, stale otherwise', async () => {
   resetMock();
   mock.routes['POST /v1/agent-checkout/bind-requests/claim'] = claimOk;
   const box = sandbox();
@@ -556,28 +556,33 @@ test('a held bind lock refuses a second bind; a stale lock is reclaimed only whe
   const lock = path.join(dir, '.agent-checkout-bind.lock');
   const old = new Date(Date.now() - 60 * 60_000);
   const dead = await deadPid();
-
-  // Fresh lock, holder gone: still refused (not old enough).
-  fs.writeFileSync(lock, JSON.stringify({ pid: dead, token: 'fresh-dead' }));
-  let r = await runCli(['bind', '-', '--json'], { box, input: BIND_CODE });
-  assert.equal(JSON.parse(r.stdout).error.code, 'BIND_IN_PROGRESS');
-
-  // Old lock, holder alive (this test process): still refused.
-  fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, token: 'old-alive' }));
-  fs.utimesSync(lock, old, old);
-  r = await runCli(['bind', '-', '--json'], { box, input: BIND_CODE });
-  assert.equal(JSON.parse(r.stdout).error.code, 'BIND_IN_PROGRESS');
-  assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).token, 'old-alive');
+  const cases = [
+    ['young, dead pid', JSON.stringify({ pid: dead, token: 't1' }), false, 'BIND_IN_PROGRESS'],
+    ['old, alive pid', JSON.stringify({ pid: process.pid, token: 't2' }), true, 'BIND_IN_PROGRESS'],
+    ['old, dead pid', JSON.stringify({ pid: dead, token: 't3' }), true, 'BIND_LOCK_STALE'],
+    ['old, plain text (old format)', '1 2026-11-17T00:00:00Z', true, 'BIND_LOCK_STALE'],
+    ['old, empty (crashed mid-write)', '', true, 'BIND_LOCK_STALE'],
+    ['young, empty', '', false, 'BIND_IN_PROGRESS'],
+  ];
+  for (const [label, content, isOld, code] of cases) {
+    fs.writeFileSync(lock, content);
+    if (isOld) fs.utimesSync(lock, old, old);
+    const r = await runCli(['bind', '-', '--json'], { box, input: BIND_CODE });
+    const p = JSON.parse(r.stdout);
+    assert.equal(p.error.code, code, label);
+    assert.equal(fs.readFileSync(lock, 'utf8'), content, `${label}: lock untouched`);
+    if (code === 'BIND_LOCK_STALE') {
+      assert.ok(p.error.message.includes(lock), label);
+      assert.ok(p.error.message.includes(`rm '${lock}'`), label);
+    }
+  }
   assert.equal(mock.calls.length, 0);
 
-  // Old lock, holder gone: reclaimed, bind succeeds, our lock is released.
-  fs.writeFileSync(lock, JSON.stringify({ pid: dead, token: 'old-dead' }));
-  fs.utimesSync(lock, old, old);
-  r = await runCli(['bind', '-', '--json'], { box, input: BIND_CODE });
-  assert.equal(JSON.parse(r.stdout).success, true, r.stdout);
-  assert.equal(mock.calls.length, 1);
+  // Removed by hand: the next bind works and releases its own lock.
+  fs.rmSync(lock);
+  const ok = await runCli(['bind', '-', '--json'], { box, input: BIND_CODE });
+  assert.equal(JSON.parse(ok.stdout).success, true, ok.stdout);
   assert.equal(fs.existsSync(lock), false);
-  assert.deepEqual(fs.readdirSync(dir).filter((f) => f.includes('.lock')), []);
 });
 
 test('bind lock release removes only our own instance', async () => {
@@ -592,7 +597,7 @@ test('bind lock release removes only our own instance', async () => {
   fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, token: 'someone-else' }));
   release();
   assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).token, 'someone-else');
-  assert.deepEqual(fs.readdirSync(dir).filter((f) => f.endsWith('.old')), []);
+  assert.deepEqual(fs.readdirSync(dir), [BIND_LOCK_NAME]);
   // A second acquirer is refused while that lock stands.
   assert.throws(() => acquireBindLock(dir), (e) => e.code === 'BIND_IN_PROGRESS');
   fs.rmSync(lock);

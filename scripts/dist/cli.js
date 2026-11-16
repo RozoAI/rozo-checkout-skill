@@ -60424,65 +60424,51 @@ function pidAlive(pid) {
 function readLock(file) {
   try {
     const rec = JSON.parse(fs8.readFileSync(file, "utf8"));
-    return rec && typeof rec.token === "string" ? rec : null;
+    return rec && typeof rec.token === "string" && Number.isInteger(rec.pid) ? rec : null;
   } catch {
     return null;
   }
 }
-function removeLockIfToken(lock, token) {
-  const aside = `${lock}.${crypto9.randomBytes(6).toString("hex")}.old`;
-  try {
-    fs8.renameSync(lock, aside);
-  } catch {
-    return false;
-  }
-  const seen = readLock(aside);
-  if (seen?.token === token) {
-    fs8.rmSync(aside, { force: true });
-    return true;
-  }
-  try {
-    fs8.linkSync(aside, lock);
-  } catch {
-  }
-  fs8.rmSync(aside, { force: true });
-  return false;
-}
 function acquireBindLock(dir, { now = Date.now } = {}) {
   const lock = path8.join(dir, BIND_LOCK_NAME);
   const token = crypto9.randomBytes(16).toString("hex");
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let fd;
+  try {
+    fd = fs8.openSync(lock, "wx", 384);
+  } catch (err) {
+    if (err?.code !== "EEXIST") throw err;
+    let age = 0;
     try {
-      const fd = fs8.openSync(lock, "wx", 384);
-      try {
-        fs8.writeSync(fd, `${JSON.stringify({ pid: process.pid, token, at: new Date(now()).toISOString() })}
-`);
-      } finally {
-        fs8.closeSync(fd);
-      }
-      return () => {
-        removeLockIfToken(lock, token);
-      };
-    } catch (err) {
-      if (err?.code !== "EEXIST") throw err;
-      if (attempt > 0) break;
-      let age;
-      try {
-        age = now() - fs8.statSync(lock).mtimeMs;
-      } catch {
-        continue;
-      }
-      const held = readLock(lock);
-      if (age > BIND_LOCK_STALE_MS && held && !pidAlive(Number(held.pid))) {
-        if (removeLockIfToken(lock, held.token)) continue;
-      }
-      break;
+      age = now() - fs8.statSync(lock).mtimeMs;
+    } catch {
+      age = 0;
     }
+    const held = readLock(lock);
+    if (held && pidAlive(held.pid) || age < BIND_LOCK_STALE_MS) {
+      throw new SkillError(
+        "BIND_IN_PROGRESS",
+        `Another bind is running (${lock}). Wait for it to finish, then rerun; nothing was claimed.`
+      );
+    }
+    throw new SkillError(
+      "BIND_LOCK_STALE",
+      `A bind lock was left behind by a run that is no longer active: ${lock}. Make sure no rozo-checkout bind is running, then remove it with: rm '${lock}' . Nothing was claimed.`,
+      { lockPath: lock }
+    );
   }
-  throw new SkillError(
-    "BIND_IN_PROGRESS",
-    `Another bind is running (${lock}). Wait for it to finish; nothing was claimed.`
-  );
+  try {
+    fs8.writeSync(fd, `${JSON.stringify({ pid: process.pid, token, at: new Date(now()).toISOString() })}
+`);
+    fs8.fsyncSync(fd);
+  } finally {
+    fs8.closeSync(fd);
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    if (readLock(lock)?.token === token) fs8.rmSync(lock, { force: true });
+  };
 }
 function readCredential(env = process.env) {
   const file = credentialPath(env);
