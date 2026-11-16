@@ -300,11 +300,22 @@ export function prepareCredentialWrite({ force = false, env = process.env } = {}
   if (process.platform !== 'win32' && (fs.statSync(dir).mode & 0o077) !== 0) {
     throw new SkillError('CREDENTIAL_DIR_PERMISSIONS', `${dir} is not private (0700); nothing was claimed.`);
   }
-  if (!force && credentialExists(env)) {
-    throw new SkillError('CREDENTIAL_EXISTS', `A credential already exists at ${file}. Pass --force to replace it.`);
+  // One bind at a time: the code is single use, so a second concurrent run
+  // must not claim it too. The lock is held until commit or abort.
+  const releaseLock = acquireBindLock(dir);
+  let tmp;
+  let fd = null;
+  try {
+    if (!force && credentialExists(env)) {
+      throw new SkillError('CREDENTIAL_EXISTS', `A credential already exists at ${file}. Pass --force to replace it.`);
+    }
+    tmp = path.join(dir, `.agent-checkout-credential.${crypto.randomBytes(6).toString('hex')}.tmp`);
+    fd = fs.openSync(tmp, 'wx', 0o600);
+  } catch (err) {
+    releaseLock();
+    throw err;
   }
-  const tmp = path.join(dir, `.agent-checkout-credential.${crypto.randomBytes(6).toString('hex')}.tmp`);
-  let fd = fs.openSync(tmp, 'wx', 0o600);
+  let released = false;
   const cleanup = () => {
     if (fd !== null) {
       try {
@@ -318,6 +329,10 @@ export function prepareCredentialWrite({ force = false, env = process.env } = {}
       fs.unlinkSync(tmp);
     } catch {
       // already gone
+    }
+    if (!released) {
+      released = true;
+      releaseLock();
     }
   };
   return {
@@ -345,6 +360,53 @@ export function prepareCredentialWrite({ force = false, env = process.env } = {}
       return file;
     },
   };
+}
+
+export const BIND_LOCK_NAME = '.agent-checkout-bind.lock';
+/** A lock older than this is from a crashed run and may be taken over. */
+export const BIND_LOCK_STALE_MS = 10 * 60_000;
+
+/** Exclusive bind lock in the credential dir. Returns its release function. */
+export function acquireBindLock(dir, { now = Date.now } = {}) {
+  const lock = path.join(dir, BIND_LOCK_NAME);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = fs.openSync(lock, 'wx', 0o600);
+      try {
+        fs.writeSync(fd, `${process.pid} ${new Date(now()).toISOString()}\n`);
+      } finally {
+        fs.closeSync(fd);
+      }
+      return () => {
+        try {
+          fs.unlinkSync(lock);
+        } catch {
+          // already gone
+        }
+      };
+    } catch (err) {
+      if (err?.code !== 'EEXIST') throw err;
+      let age = 0;
+      try {
+        age = now() - fs.statSync(lock).mtimeMs;
+      } catch {
+        continue; // vanished between open and stat: retry once
+      }
+      if (attempt === 0 && age > BIND_LOCK_STALE_MS) {
+        try {
+          fs.unlinkSync(lock);
+        } catch {
+          // someone else took it over
+        }
+        continue;
+      }
+      break;
+    }
+  }
+  throw new SkillError(
+    'BIND_IN_PROGRESS',
+    `Another bind is running (${lock}). Wait for it to finish; nothing was claimed.`,
+  );
 }
 
 /** Prepare and commit in one go (used where no network call sits between). */
@@ -395,16 +457,22 @@ export function readCredential(env = process.env) {
 // Idempotency keys, one per invoice (and binding), so a rerun is a replay
 // ---------------------------------------------------------------------------
 
-function idempotencyFile(invoiceId, env = process.env) {
+/**
+ * One record per (binding, invoice): the file name carries the binding
+ * fingerprint, so a rebind gets a fresh record through the same exclusive
+ * create instead of replacing the old one in place.
+ */
+function idempotencyFile(invoiceId, fingerprint, env = process.env) {
   if (!/^[A-Za-z0-9_-]{4,200}$/.test(invoiceId)) {
     throw new SkillError('BAD_LINK', 'Refusing to build a state path from that invoice id.');
   }
-  return path.join(stateRoot(), 'agent-checkout', `${invoiceId}.json`);
+  const binding = fingerprint && FINGERPRINT_RE.test(fingerprint) ? fingerprint : 'unbound';
+  return path.join(stateRoot(), 'agent-checkout', `${binding}--${invoiceId}.json`);
 }
 
-export function readIdempotencyRecord(invoiceId, env = process.env) {
+export function readIdempotencyRecord(invoiceId, fingerprint, env = process.env) {
   try {
-    const rec = JSON.parse(fs.readFileSync(idempotencyFile(invoiceId, env), 'utf8'));
+    const rec = JSON.parse(fs.readFileSync(idempotencyFile(invoiceId, fingerprint, env), 'utf8'));
     if (rec && IDEMPOTENCY_KEY_RE.test(rec.idempotencyKey || '')) return rec;
   } catch {
     // absent or unreadable: a fresh key is made
@@ -412,20 +480,20 @@ export function readIdempotencyRecord(invoiceId, env = process.env) {
   return null;
 }
 
-export function writeIdempotencyRecord(invoiceId, record, env = process.env) {
-  writeAtomic(idempotencyFile(invoiceId, env), { invoiceId, ...record });
+export function writeIdempotencyRecord(invoiceId, fingerprint, record, env = process.env) {
+  writeAtomic(idempotencyFile(invoiceId, fingerprint, env), { invoiceId, fingerprint: fingerprint ?? null, ...record });
 }
 
 /**
- * Create the per-invoice record only if none exists (temp file + link, so a
- * reader never sees a half-written file). Returns the record that won: ours,
- * or the one a concurrent run saved first.
+ * Create the (binding, invoice) record only if none exists (temp file + link,
+ * so a reader never sees a half-written file). Returns the record that won:
+ * ours, or the one a concurrent run saved first.
  */
-export function claimIdempotencyRecord(invoiceId, record, env = process.env) {
-  const file = idempotencyFile(invoiceId, env);
+export function claimIdempotencyRecord(invoiceId, fingerprint, record, env = process.env) {
+  const file = idempotencyFile(invoiceId, fingerprint, env);
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const full = { invoiceId, ...record };
+  const full = { invoiceId, fingerprint: fingerprint ?? null, ...record };
   const tmp = path.join(dir, `.${path.basename(file)}.${crypto.randomBytes(6).toString('hex')}.tmp`);
   const fd = fs.openSync(tmp, 'wx', 0o600);
   try {
@@ -439,7 +507,7 @@ export function claimIdempotencyRecord(invoiceId, record, env = process.env) {
     return { record: full, won: true };
   } catch (err) {
     if (err?.code !== 'EEXIST') throw err;
-    const existing = readIdempotencyRecord(invoiceId, env);
+    const existing = readIdempotencyRecord(invoiceId, fingerprint, env);
     if (existing) return { record: existing, won: false };
     throw new SkillError('STATE_UNREADABLE', `Could not read ${file}; remove it or pass --idempotency-key.`);
   } finally {
@@ -452,28 +520,22 @@ export function claimIdempotencyRecord(invoiceId, record, env = process.env) {
 }
 
 /**
- * The key to send: an explicit one wins; else the saved one for this invoice
- * and binding; else a new one, claimed atomically before the request goes out
- * so concurrent runs for the same invoice all use the same key.
+ * The key to send: an explicit one wins; else the saved one for this binding
+ * and invoice; else a new one, claimed atomically before the request goes out
+ * so concurrent runs all use the same key.
  */
 export function resolveIdempotencyKey({ invoiceId, explicit, fingerprint, env = process.env }) {
   const fp = fingerprint ?? null;
-  const saved = readIdempotencyRecord(invoiceId, env);
-  const fresh = (key) => ({ idempotencyKey: key, fingerprint: fp, createdAt: new Date().toISOString() });
+  const saved = readIdempotencyRecord(invoiceId, fp, env);
   if (explicit) {
-    if (!saved || saved.idempotencyKey !== explicit) writeIdempotencyRecord(invoiceId, fresh(explicit), env);
+    if (!saved || saved.idempotencyKey !== explicit) {
+      writeIdempotencyRecord(invoiceId, fp, { idempotencyKey: explicit, createdAt: new Date().toISOString() }, env);
+    }
     return { key: explicit, reused: Boolean(saved && saved.idempotencyKey === explicit), generated: false };
   }
-  if (saved && (saved.fingerprint ?? null) === fp) {
-    return { key: saved.idempotencyKey, reused: true, generated: false };
-  }
+  if (saved) return { key: saved.idempotencyKey, reused: true, generated: false };
   const key = `cli_${crypto.randomUUID()}`;
-  if (saved) {
-    // A record from another binding: replace it (a new binding is a new request).
-    writeIdempotencyRecord(invoiceId, fresh(key), env);
-    return { key, reused: false, generated: true };
-  }
-  const { record, won } = claimIdempotencyRecord(invoiceId, fresh(key), env);
+  const { record, won } = claimIdempotencyRecord(invoiceId, fp, { idempotencyKey: key, createdAt: new Date().toISOString() }, env);
   return { key: record.idempotencyKey, reused: !won, generated: won };
 }
 

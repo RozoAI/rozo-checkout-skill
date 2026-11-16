@@ -113,12 +113,9 @@ export async function runRequest(opts, { fetchImpl, env = process.env } = {}) {
   }
   const request = summarizeRequest(res.json.request);
   if (request?.spendRequestId) {
-    const saved = readIdempotencyRecord(opts.invoice.invoiceId, env);
-    writeIdempotencyRecord(
-      opts.invoice.invoiceId,
-      { ...(saved || {}), idempotencyKey: key, fingerprint: rec.fingerprint ?? null, spendRequestId: request.spendRequestId },
-      env,
-    );
+    const fp = rec.fingerprint ?? null;
+    const saved = readIdempotencyRecord(opts.invoice.invoiceId, fp, env);
+    writeIdempotencyRecord(opts.invoice.invoiceId, fp, { ...(saved || {}), idempotencyKey: key, spendRequestId: request.spendRequestId }, env);
   }
   const pendingQuote = res.status === 202;
   return {

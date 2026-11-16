@@ -299,7 +299,7 @@ test('request: generated idempotency key is persisted per invoice and reused on 
   assert.equal(a.request.totalDebitUsdc, '10.15');
   assert.match(a.note, /Nothing is paid until your owner approves/);
 
-  const saved = JSON.parse(fs.readFileSync(path.join(box.stateDir, 'agent-checkout', 'pl_01testlinkagentcheckout.json'), 'utf8'));
+  const saved = JSON.parse(fs.readFileSync(path.join(box.stateDir, 'agent-checkout', `${FINGERPRINT}--pl_01testlinkagentcheckout.json`), 'utf8'));
   assert.equal(saved.idempotencyKey, a.idempotencyKey);
   assert.equal(saved.spendRequestId, 'sr_0123456789abcdef');
 
@@ -493,8 +493,10 @@ test('claimIdempotencyRecord: the first claim wins, later claims read it back', 
   const saved = process.env.ROZO_CHECKOUT_STATE_DIR;
   process.env.ROZO_CHECKOUT_STATE_DIR = box.stateDir;
   try {
-    const a = claimIdempotencyRecord('pl_01claimtest', { idempotencyKey: 'cli_first_key_1' });
-    const b = claimIdempotencyRecord('pl_01claimtest', { idempotencyKey: 'cli_second_key_2' });
+    const a = claimIdempotencyRecord('pl_01claimtest', FINGERPRINT, { idempotencyKey: 'cli_first_key_1' });
+    const b = claimIdempotencyRecord('pl_01claimtest', FINGERPRINT, { idempotencyKey: 'cli_second_key_2' });
+    const other = claimIdempotencyRecord('pl_01claimtest', 'ac_ffffffffffff', { idempotencyKey: 'cli_other_binding' });
+    assert.equal(other.won, true);
     assert.equal(a.won, true);
     assert.equal(b.won, false);
     assert.equal(b.record.idempotencyKey, 'cli_first_key_1');
@@ -524,4 +526,57 @@ test('a failed claim leaves no temp file and no credential', async () => {
   assert.equal(JSON.parse(r.stdout).error.code, 'AC_DISABLED');
   const dir = path.dirname(credFile(box));
   assert.deepEqual(fs.readdirSync(dir).filter((f) => f.includes('agent-checkout-credential')), []);
+});
+
+test('concurrent binds: only one claims the single-use code', async () => {
+  resetMock();
+  mock.routes['POST /v1/agent-checkout/bind-requests/claim'] = claimOk;
+  const box = sandbox();
+  const runs = await Promise.all(Array.from({ length: 5 }, () => runCli(['bind', '-', '--json'], { box, input: BIND_CODE })));
+  const payloads = runs.map((r) => JSON.parse(r.stdout));
+  assert.equal(mock.calls.length, 1);
+  assert.equal(payloads.filter((p) => p.success).length, 1);
+  for (const p of payloads.filter((x) => !x.success)) assert.ok(['BIND_IN_PROGRESS', 'CREDENTIAL_EXISTS'].includes(p.error.code), p.error.code);
+  assert.equal(JSON.parse(fs.readFileSync(credFile(box), 'utf8')).credential, CREDENTIAL);
+  const dir = path.dirname(credFile(box));
+  assert.deepEqual(fs.readdirSync(dir).filter((f) => f.endsWith('.tmp') || f.endsWith('.lock')), []);
+});
+
+test('a held bind lock refuses a second bind without claiming; a stale lock is taken over', async () => {
+  resetMock();
+  mock.routes['POST /v1/agent-checkout/bind-requests/claim'] = claimOk;
+  const box = sandbox();
+  const dir = path.dirname(credFile(box));
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const lock = path.join(dir, '.agent-checkout-bind.lock');
+  fs.writeFileSync(lock, '1 now');
+  const held = await runCli(['bind', '-', '--json'], { box, input: BIND_CODE });
+  assert.equal(JSON.parse(held.stdout).error.code, 'BIND_IN_PROGRESS');
+  assert.equal(mock.calls.length, 0);
+  assert.equal(fs.existsSync(lock), true);
+
+  const old = new Date(Date.now() - 60 * 60_000);
+  fs.utimesSync(lock, old, old);
+  const stale = await runCli(['bind', '-', '--json'], { box, input: BIND_CODE });
+  assert.equal(JSON.parse(stale.stdout).success, true, stale.stdout);
+  assert.equal(mock.calls.length, 1);
+  assert.equal(fs.existsSync(lock), false);
+});
+
+test('after a rebind, concurrent requests share one new key and the old record is untouched', async () => {
+  resetMock();
+  mock.routes['POST /v1/agent-checkout/requests'] = { status: 201, body: { replay: false, request: requestView() } };
+  const box = sandbox();
+  writeCred(box);
+  const args = ['request', LINK, '--context', 'same', '--json'];
+  const first = JSON.parse((await runCli(args, { box })).stdout).idempotencyKey;
+  const oldFile = path.join(box.stateDir, 'agent-checkout', `${FINGERPRINT}--pl_01testlinkagentcheckout.json`);
+  const oldBefore = fs.readFileSync(oldFile, 'utf8');
+
+  writeCred(box, 0o600, { version: 1, credential: CREDENTIAL.slice(0, -4) + 'ZZZZ', fingerprint: 'ac_ffffffffffff' });
+  const runs = await Promise.all(Array.from({ length: 5 }, () => runCli(args, { box })));
+  const keys = new Set(runs.map((r) => JSON.parse(r.stdout).idempotencyKey));
+  assert.equal(keys.size, 1);
+  assert.notEqual([...keys][0], first);
+  assert.equal(fs.readFileSync(oldFile, 'utf8'), oldBefore);
 });
