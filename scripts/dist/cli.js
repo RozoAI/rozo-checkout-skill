@@ -60695,6 +60695,228 @@ function summarizeRequest(r) {
   };
 }
 
+// scripts/src/lib/client-report.mjs
+var REPORT_URL = "https://apiserver.mpprouter.dev/v1/checkout/client-report";
+var REPORT_CLIENT = "rozo-checkout-cli";
+var REPORT_TIMEOUT_MS = 2e3;
+var MAX_REPORT_BYTES = 2048;
+var OUTCOMES = /* @__PURE__ */ new Set(["succeeded", "refused", "failed", "abandoned", "unconfirmed"]);
+var FLOWS = /* @__PURE__ */ new Set(["coinbase", "bitrefill", "x402"]);
+var REPORT_KEYS = ["client", "version", "outcome", "code", "flow", "rozoPaymentId"];
+var REPORT_CODES = /* @__PURE__ */ new Set([
+  "ALREADY_SENT",
+  "AMOUNT_PRECISION",
+  "AWAITING_DEPOSIT",
+  "BAD_ADDRESS_FAMILY",
+  "BAD_AMOUNT",
+  "BAD_BITREFILL_INVOICE",
+  "BAD_CHOICE",
+  "BAD_DECIMALS",
+  "BAD_DEPOSIT_ADDRESS",
+  "BAD_ENV_FILE",
+  "BAD_INVOICE_AMOUNT",
+  "BAD_KEY_FORMAT",
+  "BAD_KEYPAIR_FILE",
+  "BAD_KEYSTORE",
+  "BAD_LINK",
+  "BAD_PAYER_ADDRESS",
+  "BAD_PRESET",
+  "BAD_ROZO_PAYMENT_ID",
+  "BAD_SATS",
+  "BAD_USD_REQUIRED",
+  "BAD_VALUE",
+  "BITREFILL_ECHO_MISMATCH",
+  "BLACKLIST_HIT",
+  "BLACKLIST_UNAVAILABLE",
+  "BOLT11_TOO_SHORT",
+  "CANCELLED",
+  "CAP_PER_TX",
+  "CONFIRMATION_REQUIRED",
+  "CONFIRMATION_STALE",
+  "CONFLICTING_FLAGS",
+  "CREATE_DRIFT",
+  "CREATE_FAILED",
+  "DECIMALS_MISMATCH",
+  "DEPOSIT_ACCOUNT_MISMATCH",
+  "DEPOSIT_ACCOUNT_MISSING",
+  "DEPOSIT_ACCOUNT_NOT_WALLET",
+  "DEPOSIT_BELOW_RENT",
+  "DEPOSIT_CHANGED",
+  "DEPOSIT_INCOMPLETE",
+  "DEPOSIT_MEMO_REQUIRED",
+  "DEPOSIT_NOT_LIVE",
+  "ENV_FILE_MISSING",
+  "ENV_FILE_PERMISSIONS",
+  "EXPIRED",
+  "EXPIRY_UNPARSABLE",
+  "GAS_CHECK_UNAVAILABLE",
+  "HTTP_BAD_JSON",
+  "HTTP_TIMEOUT",
+  "HTTP_UNREACHABLE",
+  "INSUFFICIENT_BALANCE",
+  "INSUFFICIENT_GAS",
+  "INVALID_ADDRESS",
+  "INVALID_AMOUNT",
+  "INVALID_EMAIL",
+  "INVOICE_EXPIRING",
+  "INVOICE_EXPIRY_REQUIRED",
+  "INVOICE_UNSUPPORTED",
+  "KEYFILE_PERMISSIONS",
+  "KEYFILE_UNREADABLE",
+  "KEYSTORE_BAD_PASSPHRASE",
+  "KEYSTORE_PASSPHRASE_REQUIRED",
+  "LEGACY_COMMERCE_URL",
+  "LINK_NO_LONGER_PAYABLE",
+  "LINK_PAYABILITY_UNKNOWN",
+  "LOCK_TIMEOUT",
+  "MISSING_EXPECTED_AMOUNT",
+  "MISSING_KEY",
+  "MISSING_PRESET",
+  "MISSING_TARGET",
+  "NATIVE_AMOUNT_TOO_HIGH",
+  "NATIVE_AMOUNT_TOO_LOW",
+  "NATIVE_AMOUNT_UNKNOWN",
+  "NATIVE_NOT_AVAILABLE",
+  "NATIVE_NOT_OFFERED",
+  "NATIVE_TOKEN_ADDRESS_UNEXPECTED",
+  "NO_KEY_SOURCE",
+  "NO_ORDER_STATE",
+  "NO_RESULT",
+  "NO_RPC",
+  "NO_SEND_CLAIM",
+  "NO_TOKEN_ACCOUNT",
+  "NO_TOKEN_ADDRESS",
+  "NOT_CONFIRMED",
+  "NOT_NATIVE",
+  "ORDER_ALREADY_FUNDED",
+  "ORDER_ALREADY_PAID",
+  "ORDER_EXPIRED",
+  "ORDER_NEEDS_ATTENTION",
+  "ORDER_NOT_RESUMABLE",
+  "ORDER_STATE_UNKNOWN",
+  "PREPARED_TX_MISMATCH",
+  "PRICING_VIOLATION",
+  "RATE_LIMITED",
+  "REUSED_SOURCE_MISMATCH",
+  "RPC_CHAIN_MISMATCH",
+  "RPC_READ_FAILED",
+  "RPC_UNREACHABLE",
+  "RUNTIME_ERROR",
+  "SEND_NOT_OPTED_IN",
+  "SEND_UNSUPPORTED_CHAIN",
+  "STATE_CORRUPT",
+  "STATE_UNREADABLE",
+  "TOKEN_READ_FAILED",
+  "TRACKED_DOTENV",
+  "TRACKED_DOTENV_UNVERIFIABLE",
+  "TRACKED_KEYFILE",
+  "TX_FAILED",
+  "TX_REVERTED",
+  "TX_UNCONFIRMED",
+  "UNKNOWN_DECIMALS",
+  "UNSUPPORTED_SOURCE",
+  "USER_CANCELLED",
+  "WRONG_SENDER_SCRIPT",
+  "X402_BAD_CHALLENGE",
+  "X402_BAD_KEY",
+  "X402_BAD_SIGNATURE",
+  "X402_BAD_TOPUP",
+  "X402_NO_KEY",
+  "X402_NOT_402",
+  "X402_OVER_BUDGET",
+  "X402_PAYER_DISABLED",
+  "X402_PAYMENT_REJECTED",
+  "X402_REPLAY_FAILED",
+  "X402_TOPUP_MISMATCH",
+  "X402_TOPUP_SOURCE_UNSUPPORTED",
+  "X402_UNSUPPORTED",
+  "ZEC_ADDRESS_INVALID",
+  "ZEC_AMOUNT_TOO_HIGH",
+  "ZEC_AMOUNT_TOO_LOW",
+  "ZEC_AMOUNT_UNKNOWN",
+  "ZEC_NOT_OFFERED",
+  "ZEC_PAYMENT_URI_INVALID",
+  "ZEC_PAYMENT_URI_MISMATCH",
+  "ZEC_PAYMENT_URI_MISSING",
+  "ZEC_QUOTE_EXPIRED",
+  "ZEC_RECEIVE_MODE_MISMATCH",
+  "ZEC_SHIELDED_NOT_AVAILABLE",
+  "ZEC_SHIELDED_REQUIRED"
+]);
+var OTHER_CODE = "OTHER";
+var UUID_RE3 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function reportingEnabled(env = process.env) {
+  return env.ROZO_CHECKOUT_REPORT === "1" && env.ROZO_CHECKOUT_NO_REPORT !== "1";
+}
+function isUuid(value) {
+  return typeof value === "string" && UUID_RE3.test(value);
+}
+function buildReport({ outcome, code = null, flow = null, rozoPaymentId = null, version: version5 = PKG_VERSION }) {
+  if (!OUTCOMES.has(outcome)) return null;
+  let c2 = null;
+  if (outcome !== "succeeded" && code !== null && code !== void 0) {
+    c2 = REPORT_CODES.has(String(code)) ? String(code) : OTHER_CODE;
+  }
+  const report = {
+    client: REPORT_CLIENT,
+    version: String(version5),
+    outcome,
+    code: c2,
+    flow: FLOWS.has(flow) ? flow : null
+  };
+  if (isUuid(rozoPaymentId)) report.rozoPaymentId = rozoPaymentId.toLowerCase();
+  return report;
+}
+function isFailureCode(code) {
+  return /^(TX_|HTTP_)/.test(code) || ["RUNTIME_ERROR", "NO_RESULT", "BROADCAST_FAILED", "SEND_FAILED"].includes(code);
+}
+function classifyAttempt(trace, exitCode) {
+  if (!trace || trace.skip || exitCode === 2) return null;
+  if (exitCode === 3) return { outcome: "unconfirmed", code: trace.code ?? null };
+  if (exitCode === 0) {
+    if (trace.abandoned) return { outcome: "abandoned", code: "USER_CANCELLED" };
+    if (trace.settled || trace.sendConfirmed || trace.paid) return { outcome: "succeeded", code: null };
+    if (trace.flow === "x402") return null;
+    if (trace.sendUnconfirmed) return { outcome: "unconfirmed", code: "TX_UNCONFIRMED" };
+    return { outcome: "unconfirmed", code: "AWAITING_DEPOSIT" };
+  }
+  const code = trace.code || "RUNTIME_ERROR";
+  return { outcome: isFailureCode(code) ? "failed" : "refused", code };
+}
+async function sendReport(report, { env = process.env, fetchImpl = globalThis.fetch, timeoutMs = REPORT_TIMEOUT_MS } = {}) {
+  if (!report || !reportingEnabled(env) || typeof fetchImpl !== "function") return false;
+  const body = JSON.stringify(Object.fromEntries(REPORT_KEYS.filter((k) => k in report).map((k) => [k, report[k]])));
+  if (Buffer.byteLength(body) > MAX_REPORT_BYTES) return false;
+  const url = REPORT_URL;
+  const controller = new AbortController();
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(false);
+    }, timeoutMs);
+  });
+  const attempt = (async () => {
+    try {
+      const res = await fetchImpl(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", "user-agent": USER_AGENT },
+        body,
+        signal: controller.signal,
+        redirect: "error"
+      });
+      return res.status === 204 || res.ok;
+    } catch {
+      return false;
+    }
+  })();
+  try {
+    return await Promise.race([attempt, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // scripts/src/agent-checkout.mjs
 var CONFIRM_NOTE = "Ask your owner to confirm this agent in Discord. The credential works only after they confirm.";
 var NOTHING_PAID_NOTE = "Nothing is paid until your owner approves this request in Discord. This agent never pays and never sees a pay link.";
@@ -60853,8 +61075,40 @@ function printMoneyWarning(payload) {
   out(`  rozoPaymentId: ${payload.rozoPaymentId ?? "(unknown)"}`);
   out(red("  Keep those identifiers and have a human reconcile the payment."));
 }
+var attemptTrace = {};
+function noteFailure(payload) {
+  const code = payload?.error?.code;
+  if (code) attemptTrace.code = code;
+}
 async function step(fn, argv) {
-  return capture(() => fn(argv));
+  const result = await capture(() => fn(argv));
+  const p = result.payload;
+  if (isUuid(p?.rozoPaymentId) && !attemptTrace.rozoPaymentId) attemptTrace.rozoPaymentId = p.rozoPaymentId;
+  if (!p?.success) noteFailure(p);
+  return result;
+}
+async function withReport(flow, fn, { dryRun = false } = {}) {
+  attemptTrace = { flow, ...dryRun ? { skip: true } : {} };
+  let exitCode;
+  let thrown = null;
+  try {
+    exitCode = await fn();
+  } catch (err) {
+    thrown = err;
+    if (err instanceof CliError) attemptTrace.skip = true;
+    else if (err?.code) attemptTrace.code = err.code;
+    exitCode = EXIT_ERROR;
+  }
+  if (reportingEnabled()) {
+    try {
+      const c2 = classifyAttempt(attemptTrace, exitCode);
+      const report = c2 && buildReport({ ...c2, flow, rozoPaymentId: attemptTrace.rozoPaymentId, version: VERSION });
+      if (report) await sendReport(report);
+    } catch {
+    }
+  }
+  if (thrown) throw thrown;
+  return exitCode;
 }
 function targetToArgs(target) {
   if (isRozoPaymentId(target)) return ["--rozo-payment-id", target];
@@ -61341,6 +61595,7 @@ async function cmdPay(opts) {
             code: "INSUFFICIENT_BALANCE",
             message: `${short} holds ${formatNativeHeld(n)}; this order needs ${need}. Nothing was sent. The unfunded order simply expires. Choose another coin, or omit --payer to pay from a different wallet.`
           });
+          noteFailure(payload);
           if (opts.json) printJson(payload);
           else printError(payload);
           return EXIT_ERROR;
@@ -61362,12 +61617,14 @@ async function cmdPay(opts) {
         code: "CONFIRMATION_REQUIRED",
         message: "Not running on a terminal, so the payment cannot be confirmed interactively. Re-run with --yes once you have reviewed the amount and destination."
       });
+      noteFailure(payload);
       if (opts.json) printJson(payload);
       else printError(payload);
       return EXIT_ERROR;
     }
     const ok = await askYesNo(`  ${bold("Pay this?")} [y/N] `);
     if (!ok) {
+      attemptTrace.abandoned = true;
       out(dim("  Cancelled. The order was not funded and will simply expire."));
       out();
       return EXIT_OK;
@@ -61397,6 +61654,7 @@ async function cmdPay(opts) {
         code: "SEND_UNSUPPORTED_CHAIN",
         message: `--send is not available for ${deposit.chain}. Pay the deposit below from your own wallet instead.`
       });
+      noteFailure(payload);
       if (opts.json) printJson(payload);
       else {
         printError(payload);
@@ -61413,6 +61671,9 @@ async function cmdPay(opts) {
     if (!opts.json) out(dim(opts.dryRun ? "  Preparing (dry run)\u2026" : "  Sending\u2026"));
     const sent = await step(sender, sendArgs);
     sendResult = sent.payload;
+    if (opts.dryRun) attemptTrace.skip = true;
+    else if (sent.payload.success && sent.exitCode === EXIT_OK) attemptTrace.sendConfirmed = true;
+    else if (sent.exitCode === 3) attemptTrace.sendUnconfirmed = true;
     if (opts.json) {
       if (!sent.payload.success) {
         printJson({ success: false, step: "pay", order: confirmed.payload, send: sent.payload });
@@ -61454,6 +61715,7 @@ async function cmdPay(opts) {
     "--timeout",
     String(settlementWatchSeconds(opts, deposit))
   ]);
+  if (watched.payload?.state === "settled") attemptTrace.settled = true;
   if (opts.json) {
     printJson({
       success: Boolean(watched.payload?.success),
@@ -61565,6 +61827,9 @@ async function cmdX402(opts) {
         idempotencyKey: opts.idempotencyKey,
         dryRun: opts.dryRun
       });
+      if (payload?.dryRun) attemptTrace.skip = true;
+      else if (payload?.success && payload?.paid) attemptTrace.paid = true;
+      else if (!payload?.success) noteFailure(payload);
     }
   } catch (err2) {
     const failure = formatFailure(err2);
@@ -61575,6 +61840,7 @@ async function cmdX402(opts) {
         out(`  ${dim(`idempotencyKey ${failure.error.details.idempotencyKey} (reuse it with --idempotency-key to avoid a second charge)`)}`);
       }
     }
+    if (err2?.code) attemptTrace.code = err2.code;
     return err2?.code === "BAD_VALUE" || err2?.code === "BAD_PRESET" ? EXIT_USAGE : EXIT_ERROR;
   }
   const printable = x402Printable(payload);
@@ -61753,6 +62019,7 @@ async function main9() {
       }
       return EXIT_USAGE;
     }
+    if (x402opts.sub === "pay") return withReport("x402", () => cmdX402(x402opts), { dryRun: Boolean(x402opts.dryRun) });
     return cmdX402(x402opts);
   }
   let opts;
@@ -61793,7 +62060,9 @@ ${AC_HELP}` : HELP;
       return cmdResume(opts);
     case "pay":
       try {
-        return await cmdPay(opts);
+        return await withReport(opts.bitrefill ? "bitrefill" : "coinbase", () => cmdPay(opts), {
+          dryRun: Boolean(opts.dryRun)
+        });
       } catch (err) {
         if (err instanceof CliError) {
           const payload = formatFailure(err);
