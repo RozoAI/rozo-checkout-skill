@@ -19,10 +19,12 @@ import {
   sendReport,
   REPORT_KEYS,
   REPORT_CLIENT,
+  REPORT_URL,
 } from '../scripts/src/lib/client-report.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(here, '..', 'scripts', 'src', 'cli.mjs');
+const PRELOAD = path.join(here, 'fixtures', 'report-fetch-preload.mjs');
 const UUID = '0b9a6c3e-1d2f-4a5b-8c7d-112233445566';
 
 // ---------------------------------------------------------------------------
@@ -46,9 +48,15 @@ test('payload is allowlisted: extra fields such as addresses or amounts never ap
   for (const k of ['address', 'amount', 'txHash', 'email', 'to', 'from', 'link', 'url', 'message']) assert.equal(k in r, false);
 });
 
-test('payload rules: code null on success, bad code becomes UNKNOWN, bad id or flow dropped, bad outcome rejected', () => {
+test('payload rules: code null on success, codes outside the CLI enum become OTHER, bad id or flow dropped', () => {
   assert.equal(buildReport({ outcome: 'succeeded', code: 'WHATEVER' }).code, null);
-  assert.equal(buildReport({ outcome: 'refused', code: 'free text with 0xabc' }).code, 'UNKNOWN');
+  assert.equal(buildReport({ outcome: 'refused', code: 'free text with 0xabc' }).code, 'OTHER');
+  // Code-shaped upstream text is still not a CLI code.
+  assert.equal(buildReport({ outcome: 'refused', code: 'CUSTOMER_ALICE_AMOUNT_100' }).code, 'OTHER');
+  assert.equal(buildReport({ outcome: 'refused', code: 'LINK_NOT_PAYABLE' }).code, 'OTHER');
+  for (const c of ['CREATE_DRIFT', 'ORDER_ALREADY_FUNDED', 'DEPOSIT_CHANGED', 'REUSED_SOURCE_MISMATCH', 'TX_FAILED', 'TX_REVERTED', 'AWAITING_DEPOSIT', 'USER_CANCELLED', 'TX_UNCONFIRMED']) {
+    assert.equal(buildReport({ outcome: 'refused', code: c }).code, c);
+  }
   const r = buildReport({ outcome: 'refused', code: 'CREATE_DRIFT', rozoPaymentId: 'pl_notauuid', flow: 'paypal' });
   assert.equal('rozoPaymentId' in r, false);
   assert.equal(r.flow, null);
@@ -95,8 +103,17 @@ test('sendReport: no fetch when disabled, swallows network errors, never waits p
   assert.equal(await sendReport(report, { env: {}, fetchImpl: counting }), false);
   assert.equal(await sendReport(report, { env: { ROZO_CHECKOUT_REPORT: '1', ROZO_CHECKOUT_NO_REPORT: '1' }, fetchImpl: counting }), false);
   assert.equal(calls, 0);
-  assert.equal(await sendReport(report, { env: { ROZO_CHECKOUT_REPORT: '1' }, fetchImpl: counting }), true);
+  let sentTo = null;
+  const capturing = async (url) => {
+    calls++;
+    sentTo = url;
+    return { status: 204, ok: true };
+  };
+  assert.equal(await sendReport(report, { env: { ROZO_CHECKOUT_REPORT: '1', ROZO_CHECKOUT_REPORT_URL: 'http://evil.example/x' }, fetchImpl: capturing }), true);
   assert.equal(calls, 1);
+  // The destination is pinned: no env var can redirect it.
+  assert.equal(sentTo, REPORT_URL);
+  assert.equal(REPORT_URL, 'https://apiserver.mpprouter.dev/v1/checkout/client-report');
 
   const throwing = async () => {
     throw new Error('ECONNREFUSED');
@@ -125,7 +142,7 @@ const server = http.createServer((req, res) => {
       return;
     }
     res.writeHead(400, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: { code: 'LINK_NOT_PAYABLE', message: 'not payable' } }));
+    res.end(JSON.stringify({ error: { code: 'CUSTOMER_ALICE_AMOUNT_100', message: 'not payable' } }));
   });
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -141,7 +158,7 @@ function runPay(extraEnv) {
     ROZO_CHECKOUT_STATE_DIR: path.join(home, 'state'),
     ROZO_CHECKOUT_MPP_BASE: `${ORIGIN}/mpp`,
     ROZO_CHECKOUT_INTENTS_BASE: `${ORIGIN}/intents`,
-    ROZO_CHECKOUT_REPORT_URL: `${ORIGIN}/report`,
+    TEST_REPORT_SINK: `${ORIGIN}/report`,
     ROZO_CHECKOUT_ANON_ID: 'off',
     NO_COLOR: '1',
   };
@@ -151,7 +168,7 @@ function runPay(extraEnv) {
   return new Promise((resolve) => {
     execFile(
       process.execPath,
-      [CLI, 'pay', 'https://payments.coinbase.com/payment-links/pl_01reporttest', '--with', 'usdc-base', '--yes', '--json'],
+      ['--import', PRELOAD, CLI, 'pay', 'https://payments.coinbase.com/payment-links/pl_01reporttest', '--with', 'usdc-base', '--yes', '--json'],
       { cwd: home, env },
       (e, stdout, stderr) => {
         fs.rmSync(home, { recursive: true, force: true });
@@ -177,7 +194,9 @@ test('CLI: default off sends nothing; enabled sends one allowlisted report; outp
   const body = JSON.parse(reports()[0].body);
   assert.deepEqual(Object.keys(body).sort(), ['client', 'code', 'flow', 'outcome', 'version']);
   assert.equal(body.outcome, 'refused');
-  assert.equal(body.code, 'LINK_NOT_PAYABLE');
+  // The router's code-shaped text is not a CLI code, so it leaves as OTHER.
+  assert.equal(body.code, 'OTHER');
+  assert.equal(reports()[0].body.includes('ALICE'), false);
   assert.equal(body.flow, 'coinbase');
   assert.equal(body.client, 'rozo-checkout-cli');
   assert.equal(reports()[0].body.includes('pl_01reporttest'), false);
@@ -196,7 +215,7 @@ test('CLI: an unreachable report endpoint does not change output or exit code', 
 
   mock.calls = [];
   const base = await runPay({});
-  const broken = await runPay({ ROZO_CHECKOUT_REPORT: '1', ROZO_CHECKOUT_REPORT_URL: deadUrl });
+  const broken = await runPay({ ROZO_CHECKOUT_REPORT: '1', TEST_REPORT_SINK: deadUrl });
   assert.equal(broken.code, base.code);
   assert.equal(broken.stdout, base.stdout);
   assert.equal(broken.stderr.includes('ECONNREFUSED'), false);
