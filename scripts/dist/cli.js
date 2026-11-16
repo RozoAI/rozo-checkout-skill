@@ -20473,8 +20473,8 @@ var require_dist = __commonJS({
         constructor(failure, failures) {
           let cached2;
           const { message, explanation, ...rest } = failure;
-          const { path: path8 } = failure;
-          const msg = path8.length === 0 ? message : `At path: ${path8.join(".")} -- ${message}`;
+          const { path: path9 } = failure;
+          const msg = path9.length === 0 ? message : `At path: ${path9.join(".")} -- ${message}`;
           super(explanation ?? msg);
           if (explanation != null)
             this.cause = msg;
@@ -20519,15 +20519,15 @@ var require_dist = __commonJS({
         } else if (typeof result === "string") {
           result = { message: result };
         }
-        const { path: path8, branch } = context;
+        const { path: path9, branch } = context;
         const { type: type2 } = struct2;
         const { refinement, message = `Expected a value of type \`${type2}\`${refinement ? ` with refinement \`${refinement}\`` : ""}, but received: \`${print(value)}\`` } = result;
         return {
           value,
           type: type2,
           refinement,
-          key: path8[path8.length - 1],
-          path: path8,
+          key: path9[path9.length - 1],
+          path: path9,
           branch,
           ...result,
           message
@@ -20545,8 +20545,8 @@ var require_dist = __commonJS({
         }
       }
       function* run9(value, struct2, options = {}) {
-        const { path: path8 = [], branch = [value], coerce: coerce2 = false, mask: mask2 = false } = options;
-        const ctx = { path: path8, branch, mask: mask2 };
+        const { path: path9 = [], branch = [value], coerce: coerce2 = false, mask: mask2 = false } = options;
+        const ctx = { path: path9, branch, mask: mask2 };
         if (coerce2) {
           value = struct2.coercer(value, ctx);
         }
@@ -20558,7 +20558,7 @@ var require_dist = __commonJS({
         }
         for (let [k, v, s] of struct2.entries(value, ctx)) {
           const ts = run9(v, s, {
-            path: k === void 0 ? path8 : [...path8, k],
+            path: k === void 0 ? path9 : [...path9, k],
             branch: k === void 0 ? branch : [...branch, v],
             coerce: coerce2,
             mask: mask2,
@@ -22744,14 +22744,14 @@ var require_url_state_machine = __commonJS({
       return url.replace(/\u0009|\u000A|\u000D/g, "");
     }
     function shortenPath(url) {
-      const path8 = url.path;
-      if (path8.length === 0) {
+      const path9 = url.path;
+      if (path9.length === 0) {
         return;
       }
-      if (url.scheme === "file" && path8.length === 1 && isNormalizedWindowsDriveLetter(path8[0])) {
+      if (url.scheme === "file" && path9.length === 1 && isNormalizedWindowsDriveLetter(path9[0])) {
         return;
       }
-      path8.pop();
+      path9.pop();
     }
     function includesCredentials(url) {
       return url.username !== "" || url.password !== "";
@@ -25046,16 +25046,16 @@ var require_constants = __commonJS({
 // node_modules/node-gyp-build/node-gyp-build.js
 var require_node_gyp_build = __commonJS({
   "node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
-    var fs8 = __require("fs");
-    var path8 = __require("path");
-    var os6 = __require("os");
+    var fs9 = __require("fs");
+    var path9 = __require("path");
+    var os7 = __require("os");
     var runtimeRequire = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
     var vars = process.config && process.config.variables || {};
     var prebuildsOnly = !!process.env.PREBUILDS_ONLY;
     var abi2 = process.versions.modules;
     var runtime = isElectron() ? "electron" : isNwjs() ? "node-webkit" : "node";
-    var arch = process.env.npm_config_arch || os6.arch();
-    var platform = process.env.npm_config_platform || os6.platform();
+    var arch = process.env.npm_config_arch || os7.arch();
+    var platform = process.env.npm_config_platform || os7.platform();
     var libc = process.env.LIBC || (isAlpine(platform) ? "musl" : "glibc");
     var armv = process.env.ARM_VERSION || (arch === "arm64" ? "8" : vars.arm_version) || "";
     var uv = (process.versions.uv || "").split(".")[0];
@@ -25064,21 +25064,21 @@ var require_node_gyp_build = __commonJS({
       return runtimeRequire(load.resolve(dir));
     }
     load.resolve = load.path = function(dir) {
-      dir = path8.resolve(dir || ".");
+      dir = path9.resolve(dir || ".");
       try {
-        var name = runtimeRequire(path8.join(dir, "package.json")).name.toUpperCase().replace(/-/g, "_");
+        var name = runtimeRequire(path9.join(dir, "package.json")).name.toUpperCase().replace(/-/g, "_");
         if (process.env[name + "_PREBUILD"]) dir = process.env[name + "_PREBUILD"];
       } catch (err) {
       }
       if (!prebuildsOnly) {
-        var release = getFirst(path8.join(dir, "build/Release"), matchBuild);
+        var release = getFirst(path9.join(dir, "build/Release"), matchBuild);
         if (release) return release;
-        var debug = getFirst(path8.join(dir, "build/Debug"), matchBuild);
+        var debug = getFirst(path9.join(dir, "build/Debug"), matchBuild);
         if (debug) return debug;
       }
       var prebuild = resolve(dir);
       if (prebuild) return prebuild;
-      var nearby = resolve(path8.dirname(process.execPath));
+      var nearby = resolve(path9.dirname(process.execPath));
       if (nearby) return nearby;
       var target = [
         "platform=" + platform,
@@ -25095,26 +25095,26 @@ var require_node_gyp_build = __commonJS({
       ].filter(Boolean).join(" ");
       throw new Error("No native build was found for " + target + "\n    loaded from: " + dir + "\n");
       function resolve(dir2) {
-        var tuples = readdirSync(path8.join(dir2, "prebuilds")).map(parseTuple);
+        var tuples = readdirSync(path9.join(dir2, "prebuilds")).map(parseTuple);
         var tuple = tuples.filter(matchTuple(platform, arch)).sort(compareTuples)[0];
         if (!tuple) return;
-        var prebuilds = path8.join(dir2, "prebuilds", tuple.name);
+        var prebuilds = path9.join(dir2, "prebuilds", tuple.name);
         var parsed = readdirSync(prebuilds).map(parseTags);
         var candidates = parsed.filter(matchTags(runtime, abi2));
         var winner = candidates.sort(compareTags(runtime))[0];
-        if (winner) return path8.join(prebuilds, winner.file);
+        if (winner) return path9.join(prebuilds, winner.file);
       }
     };
     function readdirSync(dir) {
       try {
-        return fs8.readdirSync(dir);
+        return fs9.readdirSync(dir);
       } catch (err) {
         return [];
       }
     }
     function getFirst(dir, filter) {
       var files = readdirSync(dir).filter(filter);
-      return files[0] && path8.join(dir, files[0]);
+      return files[0] && path9.join(dir, files[0]);
     }
     function matchBuild(name) {
       return /\.node$/.test(name);
@@ -25201,7 +25201,7 @@ var require_node_gyp_build = __commonJS({
       return typeof window !== "undefined" && window.process && window.process.type === "renderer";
     }
     function isAlpine(platform2) {
-      return platform2 === "linux" && fs8.existsSync("/etc/alpine-release");
+      return platform2 === "linux" && fs9.existsSync("/etc/alpine-release");
     }
     load.parseTags = parseTags;
     load.matchTags = matchTags;
@@ -41511,6 +41511,8 @@ function redact(text) {
   });
   s = s.replace(/\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}/gi, "$1 <redacted>");
   s = s.replace(/\bak_[A-Za-z0-9_-]{8,}/g, "ak_<redacted>");
+  s = s.replace(/\bac_(live|test)_[A-Za-z0-9_-]{8,}/g, "ac_$1_<redacted>");
+  s = s.replace(/\bacbind_(live|test)_[A-Za-z0-9_-]{8,}/g, "acbind_$1_<redacted>");
   s = s.replace(
     /\b(api[-_]?key|apikey|access[-_]?token|auth[-_]?token|secret|token|password|passwd|pwd)\b(\s*[:=]\s*)("?)[A-Za-z0-9._~+/=-]{6,}\3/gi,
     "$1$2<redacted>"
@@ -59760,8 +59762,8 @@ function isTransient(err) {
   const status = err.details?.httpStatus;
   return status === 500 || status === 502 || status === 504 || status === 429;
 }
-async function x402Api(method, path8, { body, key, fetchImpl = globalThis.fetch, base = X402_BASE } = {}) {
-  const url = `${base.replace(/\/+$/, "")}${path8}`;
+async function x402Api(method, path9, { body, key, fetchImpl = globalThis.fetch, base = X402_BASE } = {}) {
+  const url = `${base.replace(/\/+$/, "")}${path9}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
   let res;
@@ -59783,7 +59785,7 @@ async function x402Api(method, path8, { body, key, fetchImpl = globalThis.fetch,
   } catch (err) {
     throw new SkillError(
       err?.name === "AbortError" ? "HTTP_TIMEOUT" : "HTTP_UNREACHABLE",
-      `${method} ${path8} failed: ${redact(err?.message || String(err))}`,
+      `${method} ${path9} failed: ${redact(err?.message || String(err))}`,
       { url: redactUrl(url) }
     );
   } finally {
@@ -59812,7 +59814,7 @@ async function x402Api(method, path8, { body, key, fetchImpl = globalThis.fetch,
     });
   }
   if (json === null || typeof json !== "object") {
-    throw new SkillError("HTTP_BAD_JSON", `${method} ${path8} returned a non-JSON body.`, { url: redactUrl(url) });
+    throw new SkillError("HTTP_BAD_JSON", `${method} ${path9} returned a non-JSON body.`, { url: redactUrl(url) });
   }
   return json;
 }
@@ -60126,6 +60128,549 @@ async function runPay({ url, method = "GET", headers = {}, body, maxUsd = DEFAUL
       note: 'The payment was signed but the endpoint did not return success. The seller may still have settled it; check "x402 balance" before trying again, and reuse --idempotency-key to avoid a second charge.'
     }
   };
+}
+
+// scripts/src/lib/agent-checkout.mjs
+import fs8 from "node:fs";
+import path8 from "node:path";
+import os6 from "node:os";
+import crypto9 from "node:crypto";
+var GATE_ENV = "ROZO_AGENT_CHECKOUT_BETA";
+var BASE_ENV = "ROZO_CHECKOUT_AC_BASE";
+var DEFAULT_BASE = "https://apiserver.mpprouter.dev/v1/agent-checkout";
+var NOT_AVAILABLE = "Agent Checkout is not available yet.";
+var AC_COMMANDS = ["bind", "binding-status", "request", "request-status"];
+var CREDENTIAL_RE = /^ac_(live|test)_[A-Za-z0-9_-]{43}$/;
+var BIND_CODE_RE = /^acbind_(live|test)_[A-Za-z0-9_-]{22}$/;
+var FINGERPRINT_RE = /^ac_[0-9a-f]{12}$/;
+var IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_.:-]{8,128}$/;
+var SPEND_REQUEST_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
+var API_TIMEOUT_MS2 = 2e4;
+var CONTEXT_MAX = 2e3;
+var DISPLAY_NAME_MAX = 64;
+var DEFAULT_DISPLAY_NAME = "rozo-checkout CLI";
+function gateOn(env = process.env) {
+  return env[GATE_ENV] === "1";
+}
+function acBase(env = process.env) {
+  return (env[BASE_ENV] || DEFAULT_BASE).replace(/\/+$/, "");
+}
+function isAgentCheckoutArgv(argv) {
+  const first = argv.find((a) => !a.startsWith("-"));
+  return AC_COMMANDS.includes(first);
+}
+var BOOLEAN2 = /* @__PURE__ */ new Set(["json", "force", "help"]);
+var VALUE2 = /* @__PURE__ */ new Set(["name", "context", "funding", "idempotency-key"]);
+var ALLOWED2 = {
+  bind: /* @__PURE__ */ new Set(["json", "force", "help", "name"]),
+  "binding-status": /* @__PURE__ */ new Set(["json", "help"]),
+  request: /* @__PURE__ */ new Set(["json", "help", "context", "funding", "idempotency-key"]),
+  "request-status": /* @__PURE__ */ new Set(["json", "help"])
+};
+var AC_HELP = `AGENT CHECKOUT (beta; ${GATE_ENV}=1)
+  An agent asks its owner to approve a payment. Nothing is paid until the
+  owner approves in Discord.
+
+  rozo-checkout bind [<bindCode> | -] [--name <displayName>] [--force]
+      Bind this agent to an owner with the code from the Discord settings page.
+      Pass - (or nothing) to read the code from stdin. The credential is saved
+      to ~/.rozo-checkout/agent-checkout-credential (mode 0600) and never shown.
+  rozo-checkout binding-status
+  rozo-checkout request <coinbase link> --context "<why>" [--funding auto|per_payment]
+                        [--idempotency-key <key>]
+      Ask the owner to approve paying a Coinbase payment link. Rerun the same
+      command to retry; it reuses the same idempotency key.
+  rozo-checkout request-status <spendRequestId>
+  Add --json for machine-readable output.`;
+function parseAgentCheckoutArgs(argv) {
+  const positional = [];
+  const flags = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--") {
+      positional.push(...argv.slice(i + 1));
+      break;
+    }
+    if (a.startsWith("--")) {
+      let key = a.slice(2);
+      let value;
+      const eq = key.indexOf("=");
+      if (eq !== -1) {
+        value = key.slice(eq + 1);
+        key = key.slice(0, eq);
+      }
+      if (BOOLEAN2.has(key)) {
+        flags[key] = value === void 0 ? true : value !== "false";
+        continue;
+      }
+      if (VALUE2.has(key)) {
+        if (value === void 0) {
+          value = argv[i + 1];
+          if (value === void 0 || value.startsWith("--")) {
+            throw new CliError("MISSING_VALUE", `--${key} needs a value.`);
+          }
+          i++;
+        }
+        flags[key] = value;
+        continue;
+      }
+      throw new CliError("UNKNOWN_FLAG", `Unknown flag --${key}.`);
+    }
+    positional.push(a);
+  }
+  const command = positional.shift();
+  if (!AC_COMMANDS.includes(command)) {
+    throw new CliError("UNKNOWN_COMMAND", `Expected one of: ${AC_COMMANDS.join(", ")}.`);
+  }
+  for (const k of Object.keys(flags)) {
+    if (!ALLOWED2[command].has(k)) throw new CliError("UNKNOWN_FLAG", `--${k} does not apply to ${command}.`);
+  }
+  const opts = { command, json: Boolean(flags.json), help: Boolean(flags.help) };
+  if (opts.help) return opts;
+  if (command === "bind") {
+    if (positional.length > 1) throw new CliError("USAGE", "bind takes one bind code.");
+    opts.bindCodeArg = positional[0] ?? null;
+    opts.force = Boolean(flags.force);
+    opts.displayName = validateDisplayName(flags.name ?? DEFAULT_DISPLAY_NAME);
+  } else if (command === "binding-status") {
+    if (positional.length) throw new CliError("USAGE", "binding-status takes no arguments.");
+  } else if (command === "request") {
+    if (positional.length !== 1) throw new CliError("USAGE", "request needs exactly one Coinbase payment link.");
+    opts.invoice = parseInvoice(positional[0]);
+    opts.context = validateContext(flags.context);
+    if (flags.funding !== void 0) {
+      if (!["auto", "per_payment"].includes(flags.funding)) {
+        throw new CliError("BAD_FUNDING", "--funding must be auto or per_payment.");
+      }
+      opts.fundingPreference = flags.funding;
+    }
+    if (flags["idempotency-key"] !== void 0) {
+      if (!IDEMPOTENCY_KEY_RE.test(flags["idempotency-key"])) {
+        throw new CliError("BAD_IDEMPOTENCY_KEY", "Idempotency key must be 8 to 128 of A-Z a-z 0-9 _ . : -");
+      }
+      opts.idempotencyKey = flags["idempotency-key"];
+    }
+  } else if (command === "request-status") {
+    if (positional.length !== 1 || !SPEND_REQUEST_ID_RE.test(positional[0])) {
+      throw new CliError("USAGE", "request-status needs one spendRequestId.");
+    }
+    opts.spendRequestId = positional[0];
+  }
+  return opts;
+}
+function validateDisplayName(name) {
+  const s = String(name ?? "").trim();
+  if (!s || s.length > DISPLAY_NAME_MAX || /[\u0000-\u001f\u007f]/.test(s)) {
+    throw new CliError("BAD_NAME", `--name must be 1 to ${DISPLAY_NAME_MAX} printable characters.`);
+  }
+  return s;
+}
+function validateContext(context) {
+  const s = typeof context === "string" ? context.trim() : "";
+  if (!s) throw new CliError("CONTEXT_REQUIRED", '--context "<why you want to pay>" is required; your owner reads it.');
+  if (s.length > CONTEXT_MAX) throw new CliError("CONTEXT_TOO_LONG", `--context is limited to ${CONTEXT_MAX} characters.`);
+  return s;
+}
+function parseInvoice(value) {
+  let linkId;
+  try {
+    ({ linkId } = extractLinkId(value));
+  } catch (err) {
+    throw new CliError("INVOICE_UNSUPPORTED", "request supports Coinbase payment links only (pl_* or paymentSession_*).");
+  }
+  const s = String(value).trim();
+  if (/^https?:\/\//i.test(s)) {
+    let u;
+    try {
+      u = new URL(s);
+    } catch {
+      throw new CliError("INVOICE_UNSUPPORTED", "That is not a valid Coinbase payment link URL.");
+    }
+    if (u.protocol !== "https:" || u.hostname !== "payments.coinbase.com") {
+      throw new CliError("INVOICE_UNSUPPORTED", "request supports payments.coinbase.com links only.");
+    }
+  }
+  const kind = linkId.startsWith("pl_") ? "payment-links" : "payment-sessions";
+  return { url: `https://payments.coinbase.com/${kind}/${linkId}`, invoiceId: linkId };
+}
+function validateBindCode(code) {
+  const s = String(code ?? "").trim();
+  if (!BIND_CODE_RE.test(s)) {
+    throw new SkillError("BIND_CODE_INVALID", "That does not look like a bind code (acbind_live_\u2026). Copy it again from the Discord settings page.");
+  }
+  return s;
+}
+function credentialDir(env = process.env) {
+  return env.ROZO_CHECKOUT_STATE_DIR ? path8.dirname(stateRoot()) : path8.join(os6.homedir(), ".rozo-checkout");
+}
+function credentialPath(env = process.env) {
+  return path8.join(credentialDir(env), "agent-checkout-credential");
+}
+function maskCredential(credential) {
+  const m = String(credential ?? "").match(/^(ac_(?:live|test)_)/);
+  const s = String(credential ?? "");
+  if (!m || s.length < m[1].length + 8) return "<redacted>";
+  return `${m[1]}\u2026${s.slice(-4)}`;
+}
+function ensurePrivateDir(dir) {
+  fs8.mkdirSync(dir, { recursive: true, mode: 448 });
+  if (process.platform !== "win32") {
+    const st = fs8.statSync(dir);
+    if ((st.mode & 63) !== 0) fs8.chmodSync(dir, 448);
+  }
+}
+function credentialExists(env = process.env) {
+  try {
+    fs8.lstatSync(credentialPath(env));
+    return true;
+  } catch {
+    return false;
+  }
+}
+function saveCredential(record, { force = false, env = process.env } = {}) {
+  if (!CREDENTIAL_RE.test(record?.credential || "")) {
+    throw new SkillError("CREDENTIAL_INVALID", "The router returned a credential in an unexpected format; nothing was saved.");
+  }
+  const file = credentialPath(env);
+  ensurePrivateDir(path8.dirname(file));
+  const tmp = path8.join(path8.dirname(file), `.agent-checkout-credential.${crypto9.randomBytes(6).toString("hex")}.tmp`);
+  const fd = fs8.openSync(tmp, "wx", 384);
+  try {
+    fs8.writeFileSync(fd, `${JSON.stringify({ version: 1, ...record }, null, 2)}
+`, "utf8");
+    fs8.fsyncSync(fd);
+  } finally {
+    fs8.closeSync(fd);
+  }
+  try {
+    if (force) {
+      fs8.renameSync(tmp, file);
+    } else {
+      fs8.linkSync(tmp, file);
+      fs8.unlinkSync(tmp);
+    }
+  } catch (err) {
+    try {
+      fs8.unlinkSync(tmp);
+    } catch {
+    }
+    if (err?.code === "EEXIST") {
+      throw new SkillError("CREDENTIAL_EXISTS", `A credential already exists at ${file}. Pass --force to replace it.`);
+    }
+    throw err;
+  }
+  return file;
+}
+function readCredential(env = process.env) {
+  const file = credentialPath(env);
+  let st;
+  try {
+    st = fs8.lstatSync(file);
+  } catch {
+    throw new SkillError("NOT_BOUND", "This agent is not bound yet. Run: rozo-checkout bind");
+  }
+  if (!st.isFile()) {
+    throw new SkillError("CREDENTIAL_FILE_INVALID", `${file} is not a regular file; refusing to read it.`);
+  }
+  if (process.platform !== "win32") {
+    if ((st.mode & 63) !== 0) {
+      throw new SkillError(
+        "CREDENTIAL_FILE_PERMISSIONS",
+        `${file} is readable by other users (mode ${(st.mode & 511).toString(8)}). Run: chmod 600 ${file}. Nothing was sent.`
+      );
+    }
+    if (typeof process.getuid === "function" && st.uid !== process.getuid()) {
+      throw new SkillError("CREDENTIAL_FILE_PERMISSIONS", `${file} is owned by another user; refusing to use it.`);
+    }
+  }
+  let rec;
+  try {
+    rec = JSON.parse(fs8.readFileSync(file, "utf8"));
+  } catch {
+    throw new SkillError("CREDENTIAL_FILE_INVALID", `${file} is not a valid credential file. Bind again with --force.`);
+  }
+  if (!rec || typeof rec !== "object" || !CREDENTIAL_RE.test(rec.credential || "")) {
+    throw new SkillError("CREDENTIAL_FILE_INVALID", `${file} does not hold a valid credential. Bind again with --force.`);
+  }
+  if (rec.fingerprint !== void 0 && rec.fingerprint !== null && !FINGERPRINT_RE.test(rec.fingerprint)) {
+    throw new SkillError("CREDENTIAL_FILE_INVALID", `${file} has a malformed fingerprint. Bind again with --force.`);
+  }
+  return rec;
+}
+function idempotencyFile(invoiceId, env = process.env) {
+  if (!/^[A-Za-z0-9_-]{4,200}$/.test(invoiceId)) {
+    throw new SkillError("BAD_LINK", "Refusing to build a state path from that invoice id.");
+  }
+  return path8.join(stateRoot(), "agent-checkout", `${invoiceId}.json`);
+}
+function readIdempotencyRecord(invoiceId, env = process.env) {
+  try {
+    const rec = JSON.parse(fs8.readFileSync(idempotencyFile(invoiceId, env), "utf8"));
+    if (rec && IDEMPOTENCY_KEY_RE.test(rec.idempotencyKey || "")) return rec;
+  } catch {
+  }
+  return null;
+}
+function writeIdempotencyRecord(invoiceId, record, env = process.env) {
+  writeAtomic(idempotencyFile(invoiceId, env), { invoiceId, ...record });
+}
+function resolveIdempotencyKey({ invoiceId, explicit, fingerprint, env = process.env }) {
+  const saved = readIdempotencyRecord(invoiceId, env);
+  if (explicit) {
+    if (!saved || saved.idempotencyKey !== explicit) {
+      writeIdempotencyRecord(invoiceId, { idempotencyKey: explicit, fingerprint: fingerprint ?? null, createdAt: (/* @__PURE__ */ new Date()).toISOString() }, env);
+    }
+    return { key: explicit, reused: Boolean(saved && saved.idempotencyKey === explicit), generated: false };
+  }
+  if (saved && (saved.fingerprint ?? null) === (fingerprint ?? null)) {
+    return { key: saved.idempotencyKey, reused: true, generated: false };
+  }
+  const key = `cli_${crypto9.randomUUID()}`;
+  writeIdempotencyRecord(invoiceId, { idempotencyKey: key, fingerprint: fingerprint ?? null, createdAt: (/* @__PURE__ */ new Date()).toISOString() }, env);
+  return { key, reused: false, generated: true };
+}
+var ERROR_MESSAGES = {
+  UNAUTHORIZED: "The router did not accept this agent credential: your owner has not confirmed the binding in Discord yet, or it was revoked. Run binding-status, or bind again with a new code.",
+  NOT_FOUND: "Not found: no such spend request for this agent, or Agent Checkout is not switched on at the router yet.",
+  IDEMPOTENCY_CONFLICT: "This idempotency key was already used for a different request (another --context or --funding). Rerun with the original details, or pass a new --idempotency-key.",
+  INVOICE_IN_PROGRESS: "A spend request for this invoice is already in progress.",
+  AC_DISABLED: "Agent Checkout is switched off right now. Nothing was requested and nothing was paid.",
+  AC_NOT_CONFIGURED: "Agent Checkout is not configured at the router yet. Nothing was requested and nothing was paid.",
+  AC_UNAVAILABLE: "Agent Checkout is temporarily unavailable. Nothing was paid; try again later.",
+  RETRY_LATER: "The router asked to retry later. Rerun the same command; it reuses the same idempotency key.",
+  RATE_LIMITED: "Rate limited. Wait and rerun the same command.",
+  BIND_CODE_INVALID: "The bind code was not accepted: wrong, expired or already used. Get a new one from the Discord settings page.",
+  INVOICE_UNSUPPORTED: "This invoice is not supported. Agent Checkout takes Coinbase payment links only for now.",
+  INVOICE_EXPIRING: "This invoice expires too soon to ask your owner. Get a fresh payment link.",
+  CONTEXT_REQUIRED: "A --context is required.",
+  OWNER_NOT_ALLOWED: "Your owner is not allowed to use Agent Checkout yet.",
+  LINE_ITEMS_MISMATCH: "Line items do not match the invoice.",
+  INVALID_INPUT: "The router rejected the input."
+};
+async function acApi(method, apiPath, { body, credential, idempotencyKey, fetchImpl = globalThis.fetch, env = process.env } = {}) {
+  const url = `${acBase(env)}${apiPath}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS2);
+  let res;
+  let text;
+  try {
+    res = await fetchImpl(url, {
+      method,
+      headers: {
+        accept: "application/json",
+        "user-agent": USER_AGENT,
+        "x-rozo-client": ATTRIBUTION_CLIENT,
+        ...credential ? { authorization: `Bearer ${credential}` } : {},
+        ...idempotencyKey ? { "idempotency-key": idempotencyKey } : {},
+        ...body !== void 0 ? { "content-type": "application/json" } : {}
+      },
+      body: body !== void 0 ? JSON.stringify(body) : void 0,
+      signal: controller.signal,
+      redirect: "error"
+    });
+    text = await res.text();
+  } catch (err) {
+    throw new SkillError(
+      err?.name === "AbortError" ? "HTTP_TIMEOUT" : "HTTP_UNREACHABLE",
+      `${method} ${apiPath} failed: ${redact(err?.message || String(err))}`,
+      { url: redactUrl(url) }
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+  if (res.ok) {
+    if (json === null || typeof json !== "object") {
+      throw new SkillError("HTTP_BAD_JSON", "Agent Checkout returned a non-JSON body.", { httpStatus: res.status });
+    }
+    return { status: res.status, json };
+  }
+  const code = typeof json?.error?.code === "string" && json.error.code || typeof json?.code === "string" && json.code || (typeof json?.error === "string" && /^[A-Z][A-Z0-9_]+$/.test(json.error) ? json.error : null) || `HTTP_${res.status}`;
+  const details = { httpStatus: res.status };
+  const retryMs = parseRetryAfter(res.headers?.get?.("retry-after"));
+  if (retryMs !== null) details.retryAfterSeconds = Math.ceil(retryMs / 1e3);
+  if (code === "INVOICE_IN_PROGRESS") {
+    if (json?.spendRequestId) details.spendRequestId = String(json.spendRequestId);
+    if (json?.displayRef) details.displayRef = String(json.displayRef);
+    if (json?.error?.spendRequestId) details.spendRequestId = String(json.error.spendRequestId);
+    if (json?.error?.displayRef) details.displayRef = String(json.error.displayRef);
+  }
+  throw new SkillError(code, ERROR_MESSAGES[code] || `Agent Checkout returned HTTP ${res.status}.`, details);
+}
+var STATUS_TEXT = {
+  created: "Created; the quote is not ready yet. Rerun the same request command later.",
+  pending_approval: "Waiting for your owner to approve in Discord. Nothing has been paid.",
+  approved: "Approved by your owner; payment has not started yet.",
+  awaiting_payment: "Approved; waiting for the owner to pay on the payment page.",
+  paying: "Payment in progress.",
+  succeeded: "Paid.",
+  denied: "Your owner denied this request. Nothing was paid.",
+  expired: "Expired before it was approved and paid. Nothing was paid.",
+  canceled: "Canceled. Nothing was paid.",
+  failed: "Failed. Ask your owner to check Discord.",
+  manual_review: "Held for manual review by Rozo."
+};
+var BINDING_TEXT = {
+  pending_confirm: "Waiting for your owner to confirm this agent in Discord.",
+  active: "Active: this agent can ask its owner to approve payments.",
+  revoked: "Revoked by the owner. Bind again with a new code.",
+  rejected: "Rejected by the owner. Bind again with a new code."
+};
+function formatUsdcAtomic(atomic) {
+  if (typeof atomic !== "string" || !/^\d+$/.test(atomic)) return null;
+  const s = atomic.padStart(7, "0");
+  const whole = s.slice(0, -6).replace(/^0+(?=\d)/, "");
+  const frac = s.slice(-6).replace(/0+$/, "");
+  return frac ? `${whole}.${frac.padEnd(2, "0")}` : `${whole}.00`;
+}
+function summarizeRequest(r) {
+  if (!r || typeof r !== "object") return null;
+  const pick2 = (k) => r[k] === void 0 ? null : r[k];
+  return {
+    spendRequestId: pick2("spendRequestId"),
+    displayRef: pick2("displayRef"),
+    status: pick2("status"),
+    statusReason: pick2("statusReason"),
+    environment: pick2("environment"),
+    provider: pick2("provider"),
+    invoiceId: pick2("invoiceId"),
+    merchantDisplay: pick2("merchantDisplay"),
+    merchantVerified: pick2("merchantVerified"),
+    invoiceAmount: pick2("invoiceAmount"),
+    invoiceCurrency: pick2("invoiceCurrency"),
+    feeUsdc: formatUsdcAtomic(r.feeAtomic),
+    totalDebitUsdc: formatUsdcAtomic(r.totalDebitAtomic),
+    fundingMode: pick2("fundingMode"),
+    approvalExpiresAt: pick2("approvalExpiresAt"),
+    quoteExpiresAt: pick2("quoteExpiresAt"),
+    merchantPaymentStatus: pick2("merchantPaymentStatus"),
+    merchantDeliveryStatus: pick2("merchantDeliveryStatus"),
+    createdAt: pick2("createdAt"),
+    updatedAt: pick2("updatedAt"),
+    statusText: STATUS_TEXT[r.status] ?? null
+  };
+}
+
+// scripts/src/agent-checkout.mjs
+var CONFIRM_NOTE = "Ask your owner to confirm this agent in Discord. The credential works only after they confirm.";
+var NOTHING_PAID_NOTE = "Nothing is paid until your owner approves this request in Discord. This agent never pays and never sees a pay link.";
+async function readAllStdin(stream = process.stdin) {
+  let data = "";
+  for await (const chunk of stream) {
+    data += chunk;
+    if (data.length > 4096) break;
+  }
+  return data;
+}
+async function runBind(opts, { readCode, fetchImpl, env = process.env } = {}) {
+  if (!opts.force && credentialExists(env)) {
+    throw new SkillError(
+      "CREDENTIAL_EXISTS",
+      `A credential already exists at ${credentialPath(env)}. Pass --force to replace it.`
+    );
+  }
+  const fromArgv = opts.bindCodeArg && opts.bindCodeArg !== "-";
+  const raw = fromArgv ? opts.bindCodeArg : await readCode();
+  const bindCode = validateBindCode(raw);
+  const { json } = await acApi("POST", "/bind-requests/claim", {
+    body: { bindCode, displayName: opts.displayName },
+    fetchImpl,
+    env
+  });
+  if (!CREDENTIAL_RE.test(json?.credential || "")) {
+    throw new SkillError("CREDENTIAL_INVALID", "The router returned a credential in an unexpected format; nothing was saved.");
+  }
+  const fingerprint = FINGERPRINT_RE.test(json.fingerprint || "") ? json.fingerprint : null;
+  const file = saveCredential(
+    {
+      credential: json.credential,
+      fingerprint,
+      bindRequestId: typeof json.bindRequestId === "string" ? json.bindRequestId : null,
+      claimedAt: (/* @__PURE__ */ new Date()).toISOString()
+    },
+    { force: Boolean(opts.force), env }
+  );
+  return {
+    success: true,
+    status: typeof json.status === "string" ? json.status : "claimed",
+    credentialMasked: maskCredential(json.credential),
+    fingerprint,
+    bindRequestId: typeof json.bindRequestId === "string" ? json.bindRequestId : null,
+    confirmExpiresAt: typeof json.confirmExpiresAt === "string" ? json.confirmExpiresAt : null,
+    storedAt: file,
+    note: CONFIRM_NOTE,
+    ...fromArgv ? { tip: "Next time pipe the code in (rozo-checkout bind -) to keep it out of shell history." } : {}
+  };
+}
+async function runBindingStatus(_opts, { fetchImpl, env = process.env } = {}) {
+  const rec = readCredential(env);
+  const { json } = await acApi("GET", "/binding", { credential: rec.credential, fetchImpl, env });
+  const status = typeof json.status === "string" ? json.status : null;
+  return {
+    success: true,
+    status,
+    statusText: BINDING_TEXT[status] ?? null,
+    fingerprint: FINGERPRINT_RE.test(json.fingerprint || "") ? json.fingerprint : rec.fingerprint ?? null,
+    credentialMasked: maskCredential(rec.credential)
+  };
+}
+async function runRequest(opts, { fetchImpl, env = process.env } = {}) {
+  const rec = readCredential(env);
+  const { key, reused, generated } = resolveIdempotencyKey({
+    invoiceId: opts.invoice.invoiceId,
+    explicit: opts.idempotencyKey,
+    fingerprint: rec.fingerprint ?? null,
+    env
+  });
+  const body = {
+    invoice: opts.invoice.url,
+    context: opts.context,
+    entry: "cli",
+    ...opts.fundingPreference ? { fundingPreference: opts.fundingPreference } : {}
+  };
+  let res;
+  try {
+    res = await acApi("POST", "/requests", { body, credential: rec.credential, idempotencyKey: key, fetchImpl, env });
+  } catch (err) {
+    if (err instanceof SkillError) err.details = { ...err.details || {}, idempotencyKey: key };
+    throw err;
+  }
+  const request2 = summarizeRequest(res.json.request);
+  if (request2?.spendRequestId) {
+    const saved = readIdempotencyRecord(opts.invoice.invoiceId, env);
+    writeIdempotencyRecord(
+      opts.invoice.invoiceId,
+      { ...saved || {}, idempotencyKey: key, fingerprint: rec.fingerprint ?? null, spendRequestId: request2.spendRequestId },
+      env
+    );
+  }
+  const pendingQuote = res.status === 202;
+  return {
+    success: true,
+    httpStatus: res.status,
+    replay: Boolean(res.json.replay),
+    pendingQuote,
+    ...res.json.quoteError ? { quoteError: String(res.json.quoteError) } : {},
+    idempotencyKey: key,
+    idempotencyKeyReused: reused,
+    idempotencyKeyGenerated: generated,
+    request: request2,
+    note: pendingQuote ? "The quote is not ready yet. Rerun this same command later; it reuses the same idempotency key. " + NOTHING_PAID_NOTE : NOTHING_PAID_NOTE
+  };
+}
+async function runRequestStatus(opts, { fetchImpl, env = process.env } = {}) {
+  const rec = readCredential(env);
+  const { json } = await acApi("GET", `/requests/${encodeURIComponent(opts.spendRequestId)}`, {
+    credential: rec.credential,
+    fetchImpl,
+    env
+  });
+  return { success: true, request: summarizeRequest(json.request) };
 }
 
 // scripts/src/cli.mjs
@@ -60963,7 +61508,106 @@ async function cmdX402(opts) {
   process.stdout.write("\n");
   return payload.success ? EXIT_OK : EXIT_ERROR;
 }
+async function readBindCode() {
+  if (!process.stdin.isTTY) return (await readAllStdin()).trim();
+  const rl = readline2.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  try {
+    process.stdout.write("Bind code (input hidden): ");
+    rl._writeToOutput = () => {
+    };
+    const answer = await new Promise((resolve) => rl.question("", resolve));
+    process.stdout.write("\n");
+    return answer.trim();
+  } finally {
+    rl.close();
+  }
+}
+function printSpendRequest(r) {
+  if (!r) return;
+  out(`  Request   ${bold(r.displayRef || r.spendRequestId || "?")}${r.displayRef && r.spendRequestId ? dim(`  (${r.spendRequestId})`) : ""}`);
+  out(`  Status    ${bold(r.status || "?")}`);
+  if (r.statusText) out(`            ${r.statusText}`);
+  if (r.merchantDisplay) out(`  Merchant  ${r.merchantDisplay}${r.merchantVerified ? " (verified)" : ""}`);
+  if (r.invoiceAmount) out(`  Invoice   ${r.invoiceAmount} ${r.invoiceCurrency || ""}`.trimEnd());
+  if (r.feeUsdc) out(`  Fee       ${r.feeUsdc} USDC`);
+  if (r.totalDebitUsdc) out(`  Total     ${r.totalDebitUsdc} USDC`);
+  if (r.approvalExpiresAt) out(`  Approve by ${r.approvalExpiresAt}`);
+}
+async function cmdAgentCheckout(argv) {
+  const wantsJson = argv.includes("--json");
+  if (!gateOn()) {
+    if (wantsJson) printJson({ success: false, error: { code: "NOT_AVAILABLE", message: NOT_AVAILABLE } });
+    else out(NOT_AVAILABLE);
+    return EXIT_ERROR;
+  }
+  let opts;
+  try {
+    opts = parseAgentCheckoutArgs(argv);
+  } catch (err) {
+    const payload2 = formatFailure(err);
+    if (wantsJson) printJson(payload2);
+    else {
+      printError(payload2);
+      out(dim("\n  rozo-checkout --help for usage."));
+    }
+    return EXIT_USAGE;
+  }
+  if (opts.help) {
+    if (opts.json) printJson({ success: true, help: AC_HELP, version: VERSION });
+    else out(AC_HELP);
+    return EXIT_OK;
+  }
+  const flows = {
+    bind: () => runBind(opts, { readCode: readBindCode }),
+    "binding-status": () => runBindingStatus(opts),
+    request: () => runRequest(opts),
+    "request-status": () => runRequestStatus(opts)
+  };
+  let payload;
+  try {
+    payload = redactDeep(await flows[opts.command]());
+  } catch (err) {
+    const failure = formatFailure(err);
+    if (opts.json) printJson(failure);
+    else {
+      printError(failure);
+      const d = failure.error.details || {};
+      if (d.spendRequestId) out(`  Existing request: ${d.displayRef || ""} ${d.spendRequestId}`.trimEnd());
+      if (d.idempotencyKey) out(dim(`  Idempotency key ${d.idempotencyKey}`));
+      if (d.retryAfterSeconds) out(dim(`  Retry after ${d.retryAfterSeconds}s.`));
+    }
+    return EXIT_ERROR;
+  }
+  if (opts.json) {
+    printJson(payload);
+    return EXIT_OK;
+  }
+  out();
+  if (opts.command === "bind") {
+    out(`  ${green("Claimed")} credential ${payload.credentialMasked}  fingerprint ${bold(payload.fingerprint || "?")}`);
+    out(`  Saved to ${payload.storedAt} (mode 0600)`);
+    if (payload.confirmExpiresAt) out(`  Confirm before ${payload.confirmExpiresAt}`);
+    out(`  ${yellow(payload.note)}`);
+    if (payload.tip) out(dim(`  ${payload.tip}`));
+  } else if (opts.command === "binding-status") {
+    out(`  Binding   ${bold(payload.status || "?")}  fingerprint ${payload.fingerprint || "?"}  credential ${payload.credentialMasked}`);
+    if (payload.statusText) out(`  ${payload.statusText}`);
+  } else if (opts.command === "request") {
+    printSpendRequest(payload.request);
+    out(dim(`  Idempotency key ${payload.idempotencyKey}${payload.idempotencyKeyReused ? " (reused)" : ""}`));
+    if (payload.replay) out(dim("  Same request as before (replay)."));
+    out(`  ${yellow(payload.note)}`);
+    if (payload.request?.spendRequestId) out(dim(`  Then: rozo-checkout request-status ${payload.request.spendRequestId}`));
+  } else {
+    printSpendRequest(payload.request);
+  }
+  out();
+  return EXIT_OK;
+}
 async function main9() {
+  if (isAgentCheckoutArgv(process.argv.slice(2))) {
+    return cmdAgentCheckout(process.argv.slice(2));
+  }
   if (isX402Argv(process.argv.slice(2))) {
     let x402opts;
     try {
@@ -60995,10 +61639,14 @@ async function main9() {
     throw err;
   }
   switch (opts.command) {
-    case "help":
-      if (opts.json) printJson({ success: true, help: HELP, version: VERSION });
-      else out(HELP);
+    case "help": {
+      const help = gateOn() ? `${HELP}
+
+${AC_HELP}` : HELP;
+      if (opts.json) printJson({ success: true, help, version: VERSION });
+      else out(help);
       return EXIT_OK;
+    }
     case "version":
       if (opts.json) printJson({ success: true, version: VERSION });
       else out(VERSION);

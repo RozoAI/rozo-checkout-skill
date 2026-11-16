@@ -56,6 +56,14 @@ import { run as runSendEvm } from './send-evm.mjs';
 import { run as runSendSol } from './send-sol.mjs';
 import { parseX402Args, isX402Argv, X402_HELP } from './lib/x402-args.mjs';
 import { runTopup, runPay, runBalance, parseHeaderFlags } from './x402.mjs';
+import {
+  AC_HELP,
+  NOT_AVAILABLE,
+  gateOn as agentCheckoutOn,
+  isAgentCheckoutArgv,
+  parseAgentCheckoutArgs,
+} from './lib/agent-checkout.mjs';
+import { runBind, runBindingStatus, runRequest, runRequestStatus, readAllStdin } from './agent-checkout.mjs';
 
 class SkillErrorLike extends Error {
   constructor(code, message) {
@@ -1112,8 +1120,114 @@ async function cmdX402(opts) {
 }
 
 // ---------------------------------------------------------------------------
+// Agent Checkout (beta, off unless ROZO_AGENT_CHECKOUT_BETA=1)
+// ---------------------------------------------------------------------------
+
+/** Read the bind code without echoing it (TTY) or from piped stdin. */
+async function readBindCode() {
+  if (!process.stdin.isTTY) return (await readAllStdin()).trim();
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+  try {
+    process.stdout.write('Bind code (input hidden): ');
+    rl._writeToOutput = () => {};
+    const answer = await new Promise((resolve) => rl.question('', resolve));
+    process.stdout.write('\n');
+    return answer.trim();
+  } finally {
+    rl.close();
+  }
+}
+
+function printSpendRequest(r) {
+  if (!r) return;
+  out(`  Request   ${bold(r.displayRef || r.spendRequestId || '?')}${r.displayRef && r.spendRequestId ? dim(`  (${r.spendRequestId})`) : ''}`);
+  out(`  Status    ${bold(r.status || '?')}`);
+  if (r.statusText) out(`            ${r.statusText}`);
+  if (r.merchantDisplay) out(`  Merchant  ${r.merchantDisplay}${r.merchantVerified ? ' (verified)' : ''}`);
+  if (r.invoiceAmount) out(`  Invoice   ${r.invoiceAmount} ${r.invoiceCurrency || ''}`.trimEnd());
+  if (r.feeUsdc) out(`  Fee       ${r.feeUsdc} USDC`);
+  if (r.totalDebitUsdc) out(`  Total     ${r.totalDebitUsdc} USDC`);
+  if (r.approvalExpiresAt) out(`  Approve by ${r.approvalExpiresAt}`);
+}
+
+async function cmdAgentCheckout(argv) {
+  const wantsJson = argv.includes('--json');
+  if (!agentCheckoutOn()) {
+    if (wantsJson) printJson({ success: false, error: { code: 'NOT_AVAILABLE', message: NOT_AVAILABLE } });
+    else out(NOT_AVAILABLE);
+    return EXIT_ERROR;
+  }
+  let opts;
+  try {
+    opts = parseAgentCheckoutArgs(argv);
+  } catch (err) {
+    const payload = formatFailure(err);
+    if (wantsJson) printJson(payload);
+    else {
+      printError(payload);
+      out(dim('\n  rozo-checkout --help for usage.'));
+    }
+    return EXIT_USAGE;
+  }
+  if (opts.help) {
+    if (opts.json) printJson({ success: true, help: AC_HELP, version: VERSION });
+    else out(AC_HELP);
+    return EXIT_OK;
+  }
+  const flows = {
+    bind: () => runBind(opts, { readCode: readBindCode }),
+    'binding-status': () => runBindingStatus(opts),
+    request: () => runRequest(opts),
+    'request-status': () => runRequestStatus(opts),
+  };
+  let payload;
+  try {
+    payload = redactDeep(await flows[opts.command]());
+  } catch (err) {
+    const failure = formatFailure(err);
+    if (opts.json) printJson(failure);
+    else {
+      printError(failure);
+      const d = failure.error.details || {};
+      if (d.spendRequestId) out(`  Existing request: ${d.displayRef || ''} ${d.spendRequestId}`.trimEnd());
+      if (d.idempotencyKey) out(dim(`  Idempotency key ${d.idempotencyKey}`));
+      if (d.retryAfterSeconds) out(dim(`  Retry after ${d.retryAfterSeconds}s.`));
+    }
+    return EXIT_ERROR;
+  }
+  if (opts.json) {
+    printJson(payload);
+    return EXIT_OK;
+  }
+  out();
+  if (opts.command === 'bind') {
+    out(`  ${green('Claimed')} credential ${payload.credentialMasked}  fingerprint ${bold(payload.fingerprint || '?')}`);
+    out(`  Saved to ${payload.storedAt} (mode 0600)`);
+    if (payload.confirmExpiresAt) out(`  Confirm before ${payload.confirmExpiresAt}`);
+    out(`  ${yellow(payload.note)}`);
+    if (payload.tip) out(dim(`  ${payload.tip}`));
+  } else if (opts.command === 'binding-status') {
+    out(`  Binding   ${bold(payload.status || '?')}  fingerprint ${payload.fingerprint || '?'}  credential ${payload.credentialMasked}`);
+    if (payload.statusText) out(`  ${payload.statusText}`);
+  } else if (opts.command === 'request') {
+    printSpendRequest(payload.request);
+    out(dim(`  Idempotency key ${payload.idempotencyKey}${payload.idempotencyKeyReused ? ' (reused)' : ''}`));
+    if (payload.replay) out(dim('  Same request as before (replay).'));
+    out(`  ${yellow(payload.note)}`);
+    if (payload.request?.spendRequestId) out(dim(`  Then: rozo-checkout request-status ${payload.request.spendRequestId}`));
+  } else {
+    printSpendRequest(payload.request);
+  }
+  out();
+  return EXIT_OK;
+}
+
+// ---------------------------------------------------------------------------
 
 async function main() {
+  if (isAgentCheckoutArgv(process.argv.slice(2))) {
+    return cmdAgentCheckout(process.argv.slice(2));
+  }
   if (isX402Argv(process.argv.slice(2))) {
     let x402opts;
     try {
@@ -1146,10 +1260,13 @@ async function main() {
   }
 
   switch (opts.command) {
-    case 'help':
-      if (opts.json) printJson({ success: true, help: HELP, version: VERSION });
-      else out(HELP);
+    case 'help': {
+      // Agent Checkout is listed only when its beta gate is on.
+      const help = agentCheckoutOn() ? `${HELP}\n\n${AC_HELP}` : HELP;
+      if (opts.json) printJson({ success: true, help, version: VERSION });
+      else out(help);
       return EXIT_OK;
+    }
     case 'version':
       if (opts.json) printJson({ success: true, version: VERSION });
       else out(VERSION);
