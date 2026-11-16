@@ -60352,11 +60352,20 @@ function prepareCredentialWrite({ force = false, env = process.env } = {}) {
   if (process.platform !== "win32" && (fs8.statSync(dir).mode & 63) !== 0) {
     throw new SkillError("CREDENTIAL_DIR_PERMISSIONS", `${dir} is not private (0700); nothing was claimed.`);
   }
-  if (!force && credentialExists(env)) {
-    throw new SkillError("CREDENTIAL_EXISTS", `A credential already exists at ${file}. Pass --force to replace it.`);
+  const releaseLock = acquireBindLock(dir);
+  let tmp;
+  let fd = null;
+  try {
+    if (!force && credentialExists(env)) {
+      throw new SkillError("CREDENTIAL_EXISTS", `A credential already exists at ${file}. Pass --force to replace it.`);
+    }
+    tmp = path8.join(dir, `.agent-checkout-credential.${crypto9.randomBytes(6).toString("hex")}.tmp`);
+    fd = fs8.openSync(tmp, "wx", 384);
+  } catch (err) {
+    releaseLock();
+    throw err;
   }
-  const tmp = path8.join(dir, `.agent-checkout-credential.${crypto9.randomBytes(6).toString("hex")}.tmp`);
-  let fd = fs8.openSync(tmp, "wx", 384);
+  let released = false;
   const cleanup = () => {
     if (fd !== null) {
       try {
@@ -60368,6 +60377,10 @@ function prepareCredentialWrite({ force = false, env = process.env } = {}) {
     try {
       fs8.unlinkSync(tmp);
     } catch {
+    }
+    if (!released) {
+      released = true;
+      releaseLock();
     }
   };
   return {
@@ -60396,6 +60409,48 @@ function prepareCredentialWrite({ force = false, env = process.env } = {}) {
       return file;
     }
   };
+}
+var BIND_LOCK_NAME = ".agent-checkout-bind.lock";
+var BIND_LOCK_STALE_MS = 10 * 6e4;
+function acquireBindLock(dir, { now = Date.now } = {}) {
+  const lock = path8.join(dir, BIND_LOCK_NAME);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = fs8.openSync(lock, "wx", 384);
+      try {
+        fs8.writeSync(fd, `${process.pid} ${new Date(now()).toISOString()}
+`);
+      } finally {
+        fs8.closeSync(fd);
+      }
+      return () => {
+        try {
+          fs8.unlinkSync(lock);
+        } catch {
+        }
+      };
+    } catch (err) {
+      if (err?.code !== "EEXIST") throw err;
+      let age = 0;
+      try {
+        age = now() - fs8.statSync(lock).mtimeMs;
+      } catch {
+        continue;
+      }
+      if (attempt === 0 && age > BIND_LOCK_STALE_MS) {
+        try {
+          fs8.unlinkSync(lock);
+        } catch {
+        }
+        continue;
+      }
+      break;
+    }
+  }
+  throw new SkillError(
+    "BIND_IN_PROGRESS",
+    `Another bind is running (${lock}). Wait for it to finish; nothing was claimed.`
+  );
 }
 function readCredential(env = process.env) {
   const file = credentialPath(env);
@@ -60433,28 +60488,29 @@ function readCredential(env = process.env) {
   }
   return rec;
 }
-function idempotencyFile(invoiceId, env = process.env) {
+function idempotencyFile(invoiceId, fingerprint, env = process.env) {
   if (!/^[A-Za-z0-9_-]{4,200}$/.test(invoiceId)) {
     throw new SkillError("BAD_LINK", "Refusing to build a state path from that invoice id.");
   }
-  return path8.join(stateRoot(), "agent-checkout", `${invoiceId}.json`);
+  const binding = fingerprint && FINGERPRINT_RE.test(fingerprint) ? fingerprint : "unbound";
+  return path8.join(stateRoot(), "agent-checkout", `${binding}--${invoiceId}.json`);
 }
-function readIdempotencyRecord(invoiceId, env = process.env) {
+function readIdempotencyRecord(invoiceId, fingerprint, env = process.env) {
   try {
-    const rec = JSON.parse(fs8.readFileSync(idempotencyFile(invoiceId, env), "utf8"));
+    const rec = JSON.parse(fs8.readFileSync(idempotencyFile(invoiceId, fingerprint, env), "utf8"));
     if (rec && IDEMPOTENCY_KEY_RE.test(rec.idempotencyKey || "")) return rec;
   } catch {
   }
   return null;
 }
-function writeIdempotencyRecord(invoiceId, record, env = process.env) {
-  writeAtomic(idempotencyFile(invoiceId, env), { invoiceId, ...record });
+function writeIdempotencyRecord(invoiceId, fingerprint, record, env = process.env) {
+  writeAtomic(idempotencyFile(invoiceId, fingerprint, env), { invoiceId, fingerprint: fingerprint ?? null, ...record });
 }
-function claimIdempotencyRecord(invoiceId, record, env = process.env) {
-  const file = idempotencyFile(invoiceId, env);
+function claimIdempotencyRecord(invoiceId, fingerprint, record, env = process.env) {
+  const file = idempotencyFile(invoiceId, fingerprint, env);
   const dir = path8.dirname(file);
   fs8.mkdirSync(dir, { recursive: true, mode: 448 });
-  const full = { invoiceId, ...record };
+  const full = { invoiceId, fingerprint: fingerprint ?? null, ...record };
   const tmp = path8.join(dir, `.${path8.basename(file)}.${crypto9.randomBytes(6).toString("hex")}.tmp`);
   const fd = fs8.openSync(tmp, "wx", 384);
   try {
@@ -60469,7 +60525,7 @@ function claimIdempotencyRecord(invoiceId, record, env = process.env) {
     return { record: full, won: true };
   } catch (err) {
     if (err?.code !== "EEXIST") throw err;
-    const existing = readIdempotencyRecord(invoiceId, env);
+    const existing = readIdempotencyRecord(invoiceId, fingerprint, env);
     if (existing) return { record: existing, won: false };
     throw new SkillError("STATE_UNREADABLE", `Could not read ${file}; remove it or pass --idempotency-key.`);
   } finally {
@@ -60481,21 +60537,16 @@ function claimIdempotencyRecord(invoiceId, record, env = process.env) {
 }
 function resolveIdempotencyKey({ invoiceId, explicit, fingerprint, env = process.env }) {
   const fp = fingerprint ?? null;
-  const saved = readIdempotencyRecord(invoiceId, env);
-  const fresh = (key2) => ({ idempotencyKey: key2, fingerprint: fp, createdAt: (/* @__PURE__ */ new Date()).toISOString() });
+  const saved = readIdempotencyRecord(invoiceId, fp, env);
   if (explicit) {
-    if (!saved || saved.idempotencyKey !== explicit) writeIdempotencyRecord(invoiceId, fresh(explicit), env);
+    if (!saved || saved.idempotencyKey !== explicit) {
+      writeIdempotencyRecord(invoiceId, fp, { idempotencyKey: explicit, createdAt: (/* @__PURE__ */ new Date()).toISOString() }, env);
+    }
     return { key: explicit, reused: Boolean(saved && saved.idempotencyKey === explicit), generated: false };
   }
-  if (saved && (saved.fingerprint ?? null) === fp) {
-    return { key: saved.idempotencyKey, reused: true, generated: false };
-  }
+  if (saved) return { key: saved.idempotencyKey, reused: true, generated: false };
   const key = `cli_${crypto9.randomUUID()}`;
-  if (saved) {
-    writeIdempotencyRecord(invoiceId, fresh(key), env);
-    return { key, reused: false, generated: true };
-  }
-  const { record, won } = claimIdempotencyRecord(invoiceId, fresh(key), env);
+  const { record, won } = claimIdempotencyRecord(invoiceId, fp, { idempotencyKey: key, createdAt: (/* @__PURE__ */ new Date()).toISOString() }, env);
   return { key: record.idempotencyKey, reused: !won, generated: won };
 }
 var ERROR_MESSAGES = {
@@ -60789,12 +60840,9 @@ async function runRequest(opts, { fetchImpl, env = process.env } = {}) {
   }
   const request2 = summarizeRequest(res.json.request);
   if (request2?.spendRequestId) {
-    const saved = readIdempotencyRecord(opts.invoice.invoiceId, env);
-    writeIdempotencyRecord(
-      opts.invoice.invoiceId,
-      { ...saved || {}, idempotencyKey: key, fingerprint: rec.fingerprint ?? null, spendRequestId: request2.spendRequestId },
-      env
-    );
+    const fp = rec.fingerprint ?? null;
+    const saved = readIdempotencyRecord(opts.invoice.invoiceId, fp, env);
+    writeIdempotencyRecord(opts.invoice.invoiceId, fp, { ...saved || {}, idempotencyKey: key, spendRequestId: request2.spendRequestId }, env);
   }
   const pendingQuote = res.status === 202;
   return {
