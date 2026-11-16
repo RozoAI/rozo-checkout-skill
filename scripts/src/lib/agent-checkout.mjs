@@ -366,39 +366,84 @@ export const BIND_LOCK_NAME = '.agent-checkout-bind.lock';
 /** A lock older than this is from a crashed run and may be taken over. */
 export const BIND_LOCK_STALE_MS = 10 * 60_000;
 
-/** Exclusive bind lock in the credential dir. Returns its release function. */
+/** True unless the pid provably no longer exists (ESRCH). */
+export function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err?.code !== 'ESRCH'; // EPERM: alive, owned by someone else
+  }
+}
+
+function readLock(file) {
+  try {
+    const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return rec && typeof rec.token === 'string' ? rec : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remove the lock only if it is still the instance with `token`: move it
+ * aside atomically, check the token, and put it back if it was not ours.
+ */
+function removeLockIfToken(lock, token) {
+  const aside = `${lock}.${crypto.randomBytes(6).toString('hex')}.old`;
+  try {
+    fs.renameSync(lock, aside);
+  } catch {
+    return false; // already gone
+  }
+  const seen = readLock(aside);
+  if (seen?.token === token) {
+    fs.rmSync(aside, { force: true });
+    return true;
+  }
+  try {
+    fs.linkSync(aside, lock); // restore someone else's lock, never overwrite
+  } catch {
+    // a newer lock already took the name; that one stands
+  }
+  fs.rmSync(aside, { force: true });
+  return false;
+}
+
+/**
+ * Exclusive bind lock in the credential dir. The file records pid and a
+ * random token. A lock is reclaimed only when it is older than
+ * BIND_LOCK_STALE_MS AND its pid is gone, and only the observed instance is
+ * removed. Release removes the lock only while it still carries our token.
+ * Returns the release function.
+ */
 export function acquireBindLock(dir, { now = Date.now } = {}) {
   const lock = path.join(dir, BIND_LOCK_NAME);
+  const token = crypto.randomBytes(16).toString('hex');
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const fd = fs.openSync(lock, 'wx', 0o600);
       try {
-        fs.writeSync(fd, `${process.pid} ${new Date(now()).toISOString()}\n`);
+        fs.writeSync(fd, `${JSON.stringify({ pid: process.pid, token, at: new Date(now()).toISOString() })}\n`);
       } finally {
         fs.closeSync(fd);
       }
       return () => {
-        try {
-          fs.unlinkSync(lock);
-        } catch {
-          // already gone
-        }
+        removeLockIfToken(lock, token);
       };
     } catch (err) {
       if (err?.code !== 'EEXIST') throw err;
-      let age = 0;
+      if (attempt > 0) break;
+      let age;
       try {
         age = now() - fs.statSync(lock).mtimeMs;
       } catch {
         continue; // vanished between open and stat: retry once
       }
-      if (attempt === 0 && age > BIND_LOCK_STALE_MS) {
-        try {
-          fs.unlinkSync(lock);
-        } catch {
-          // someone else took it over
-        }
-        continue;
+      const held = readLock(lock);
+      if (age > BIND_LOCK_STALE_MS && held && !pidAlive(Number(held.pid))) {
+        if (removeLockIfToken(lock, held.token)) continue;
       }
       break;
     }
