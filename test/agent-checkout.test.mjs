@@ -542,24 +542,62 @@ test('concurrent binds: only one claims the single-use code', async () => {
   assert.deepEqual(fs.readdirSync(dir).filter((f) => f.endsWith('.tmp') || f.endsWith('.lock')), []);
 });
 
-test('a held bind lock refuses a second bind without claiming; a stale lock is taken over', async () => {
+async function deadPid() {
+  const { spawnSync } = await import('node:child_process');
+  return spawnSync(process.execPath, ['-e', '0']).pid;
+}
+
+test('a held bind lock refuses a second bind; a stale lock is reclaimed only when its pid is gone', async () => {
   resetMock();
   mock.routes['POST /v1/agent-checkout/bind-requests/claim'] = claimOk;
   const box = sandbox();
   const dir = path.dirname(credFile(box));
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const lock = path.join(dir, '.agent-checkout-bind.lock');
-  fs.writeFileSync(lock, '1 now');
-  const held = await runCli(['bind', '-', '--json'], { box, input: BIND_CODE });
-  assert.equal(JSON.parse(held.stdout).error.code, 'BIND_IN_PROGRESS');
-  assert.equal(mock.calls.length, 0);
-  assert.equal(fs.existsSync(lock), true);
-
   const old = new Date(Date.now() - 60 * 60_000);
+  const dead = await deadPid();
+
+  // Fresh lock, holder gone: still refused (not old enough).
+  fs.writeFileSync(lock, JSON.stringify({ pid: dead, token: 'fresh-dead' }));
+  let r = await runCli(['bind', '-', '--json'], { box, input: BIND_CODE });
+  assert.equal(JSON.parse(r.stdout).error.code, 'BIND_IN_PROGRESS');
+
+  // Old lock, holder alive (this test process): still refused.
+  fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, token: 'old-alive' }));
   fs.utimesSync(lock, old, old);
-  const stale = await runCli(['bind', '-', '--json'], { box, input: BIND_CODE });
-  assert.equal(JSON.parse(stale.stdout).success, true, stale.stdout);
+  r = await runCli(['bind', '-', '--json'], { box, input: BIND_CODE });
+  assert.equal(JSON.parse(r.stdout).error.code, 'BIND_IN_PROGRESS');
+  assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).token, 'old-alive');
+  assert.equal(mock.calls.length, 0);
+
+  // Old lock, holder gone: reclaimed, bind succeeds, our lock is released.
+  fs.writeFileSync(lock, JSON.stringify({ pid: dead, token: 'old-dead' }));
+  fs.utimesSync(lock, old, old);
+  r = await runCli(['bind', '-', '--json'], { box, input: BIND_CODE });
+  assert.equal(JSON.parse(r.stdout).success, true, r.stdout);
   assert.equal(mock.calls.length, 1);
+  assert.equal(fs.existsSync(lock), false);
+  assert.deepEqual(fs.readdirSync(dir).filter((f) => f.includes('.lock')), []);
+});
+
+test('bind lock release removes only our own instance', async () => {
+  const { acquireBindLock, BIND_LOCK_NAME } = await import('../scripts/src/lib/agent-checkout.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rozo-ac-lock-'));
+  const lock = path.join(dir, BIND_LOCK_NAME);
+  const release = acquireBindLock(dir);
+  const mine = JSON.parse(fs.readFileSync(lock, 'utf8'));
+  assert.equal(mine.pid, process.pid);
+  assert.match(mine.token, /^[0-9a-f]{32}$/);
+  // Someone else's lock replaced ours: releasing must leave it in place.
+  fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, token: 'someone-else' }));
+  release();
+  assert.equal(JSON.parse(fs.readFileSync(lock, 'utf8')).token, 'someone-else');
+  assert.deepEqual(fs.readdirSync(dir).filter((f) => f.endsWith('.old')), []);
+  // A second acquirer is refused while that lock stands.
+  assert.throws(() => acquireBindLock(dir), (e) => e.code === 'BIND_IN_PROGRESS');
+  fs.rmSync(lock);
+  const release2 = acquireBindLock(dir);
+  release2();
   assert.equal(fs.existsSync(lock), false);
 });
 

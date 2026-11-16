@@ -60412,37 +60412,69 @@ function prepareCredentialWrite({ force = false, env = process.env } = {}) {
 }
 var BIND_LOCK_NAME = ".agent-checkout-bind.lock";
 var BIND_LOCK_STALE_MS = 10 * 6e4;
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err?.code !== "ESRCH";
+  }
+}
+function readLock(file) {
+  try {
+    const rec = JSON.parse(fs8.readFileSync(file, "utf8"));
+    return rec && typeof rec.token === "string" ? rec : null;
+  } catch {
+    return null;
+  }
+}
+function removeLockIfToken(lock, token) {
+  const aside = `${lock}.${crypto9.randomBytes(6).toString("hex")}.old`;
+  try {
+    fs8.renameSync(lock, aside);
+  } catch {
+    return false;
+  }
+  const seen = readLock(aside);
+  if (seen?.token === token) {
+    fs8.rmSync(aside, { force: true });
+    return true;
+  }
+  try {
+    fs8.linkSync(aside, lock);
+  } catch {
+  }
+  fs8.rmSync(aside, { force: true });
+  return false;
+}
 function acquireBindLock(dir, { now = Date.now } = {}) {
   const lock = path8.join(dir, BIND_LOCK_NAME);
+  const token = crypto9.randomBytes(16).toString("hex");
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const fd = fs8.openSync(lock, "wx", 384);
       try {
-        fs8.writeSync(fd, `${process.pid} ${new Date(now()).toISOString()}
+        fs8.writeSync(fd, `${JSON.stringify({ pid: process.pid, token, at: new Date(now()).toISOString() })}
 `);
       } finally {
         fs8.closeSync(fd);
       }
       return () => {
-        try {
-          fs8.unlinkSync(lock);
-        } catch {
-        }
+        removeLockIfToken(lock, token);
       };
     } catch (err) {
       if (err?.code !== "EEXIST") throw err;
-      let age = 0;
+      if (attempt > 0) break;
+      let age;
       try {
         age = now() - fs8.statSync(lock).mtimeMs;
       } catch {
         continue;
       }
-      if (attempt === 0 && age > BIND_LOCK_STALE_MS) {
-        try {
-          fs8.unlinkSync(lock);
-        } catch {
-        }
-        continue;
+      const held = readLock(lock);
+      if (age > BIND_LOCK_STALE_MS && held && !pidAlive(Number(held.pid))) {
+        if (removeLockIfToken(lock, held.token)) continue;
       }
       break;
     }
