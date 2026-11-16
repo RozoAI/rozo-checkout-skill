@@ -60152,9 +60152,27 @@ var DEFAULT_DISPLAY_NAME = "rozo-checkout CLI";
 function gateOn(env = process.env) {
   return env[GATE_ENV] === "1";
 }
+var TRUSTED_ORIGIN = "https://apiserver.mpprouter.dev";
+var LOOPBACK_HOSTS = /* @__PURE__ */ new Set(["127.0.0.1", "localhost", "[::1]"]);
 function acBase(env = process.env) {
-  return (env[BASE_ENV] || DEFAULT_BASE).replace(/\/+$/, "");
+  const raw = String(env[BASE_ENV] || DEFAULT_BASE).replace(/\/+$/, "");
+  let u;
+  try {
+    u = new URL(raw);
+  } catch {
+    u = null;
+  }
+  const trusted = u && !u.username && !u.password && !u.search && !u.hash && (u.protocol === "https:" && u.origin === TRUSTED_ORIGIN || (u.protocol === "http:" || u.protocol === "https:") && LOOPBACK_HOSTS.has(u.hostname));
+  if (!trusted) {
+    throw new SkillError(
+      "AC_BASE_UNTRUSTED",
+      `${BASE_ENV} must be ${TRUSTED_ORIGIN}/\u2026 (or a loopback host for testing). Nothing was read or sent.`
+    );
+  }
+  return raw;
 }
+var UPSTREAM_CODE_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
+var DISPLAY_REF_RE = /^[A-Za-z0-9_-]{1,64}$/;
 function isAgentCheckoutArgv(argv) {
   const first = argv.find((a) => !a.startsWith("-"));
   return AC_COMMANDS.includes(first);
@@ -60327,39 +60345,57 @@ function credentialExists(env = process.env) {
     return false;
   }
 }
-function saveCredential(record, { force = false, env = process.env } = {}) {
-  if (!CREDENTIAL_RE.test(record?.credential || "")) {
-    throw new SkillError("CREDENTIAL_INVALID", "The router returned a credential in an unexpected format; nothing was saved.");
-  }
+function prepareCredentialWrite({ force = false, env = process.env } = {}) {
   const file = credentialPath(env);
-  ensurePrivateDir(path8.dirname(file));
-  const tmp = path8.join(path8.dirname(file), `.agent-checkout-credential.${crypto9.randomBytes(6).toString("hex")}.tmp`);
-  const fd = fs8.openSync(tmp, "wx", 384);
-  try {
-    fs8.writeFileSync(fd, `${JSON.stringify({ version: 1, ...record }, null, 2)}
-`, "utf8");
-    fs8.fsyncSync(fd);
-  } finally {
-    fs8.closeSync(fd);
+  const dir = path8.dirname(file);
+  ensurePrivateDir(dir);
+  if (process.platform !== "win32" && (fs8.statSync(dir).mode & 63) !== 0) {
+    throw new SkillError("CREDENTIAL_DIR_PERMISSIONS", `${dir} is not private (0700); nothing was claimed.`);
   }
-  try {
-    if (force) {
-      fs8.renameSync(tmp, file);
-    } else {
-      fs8.linkSync(tmp, file);
-      fs8.unlinkSync(tmp);
+  if (!force && credentialExists(env)) {
+    throw new SkillError("CREDENTIAL_EXISTS", `A credential already exists at ${file}. Pass --force to replace it.`);
+  }
+  const tmp = path8.join(dir, `.agent-checkout-credential.${crypto9.randomBytes(6).toString("hex")}.tmp`);
+  let fd = fs8.openSync(tmp, "wx", 384);
+  const cleanup = () => {
+    if (fd !== null) {
+      try {
+        fs8.closeSync(fd);
+      } catch {
+      }
+      fd = null;
     }
-  } catch (err) {
     try {
       fs8.unlinkSync(tmp);
     } catch {
     }
-    if (err?.code === "EEXIST") {
-      throw new SkillError("CREDENTIAL_EXISTS", `A credential already exists at ${file}. Pass --force to replace it.`);
+  };
+  return {
+    file,
+    abort: cleanup,
+    commit(record) {
+      try {
+        if (!CREDENTIAL_RE.test(record?.credential || "")) {
+          throw new SkillError("CREDENTIAL_INVALID", "The router returned a credential in an unexpected format; nothing was saved.");
+        }
+        fs8.writeFileSync(fd, `${JSON.stringify({ version: 1, ...record }, null, 2)}
+`, "utf8");
+        fs8.fsyncSync(fd);
+        fs8.closeSync(fd);
+        fd = null;
+        if (force) fs8.renameSync(tmp, file);
+        else fs8.linkSync(tmp, file);
+      } catch (err) {
+        cleanup();
+        if (err?.code === "EEXIST") {
+          throw new SkillError("CREDENTIAL_EXISTS", `A credential already exists at ${file}. Pass --force to replace it.`);
+        }
+        throw err;
+      }
+      cleanup();
+      return file;
     }
-    throw err;
-  }
-  return file;
+  };
 }
 function readCredential(env = process.env) {
   const file = credentialPath(env);
@@ -60414,20 +60450,53 @@ function readIdempotencyRecord(invoiceId, env = process.env) {
 function writeIdempotencyRecord(invoiceId, record, env = process.env) {
   writeAtomic(idempotencyFile(invoiceId, env), { invoiceId, ...record });
 }
-function resolveIdempotencyKey({ invoiceId, explicit, fingerprint, env = process.env }) {
-  const saved = readIdempotencyRecord(invoiceId, env);
-  if (explicit) {
-    if (!saved || saved.idempotencyKey !== explicit) {
-      writeIdempotencyRecord(invoiceId, { idempotencyKey: explicit, fingerprint: fingerprint ?? null, createdAt: (/* @__PURE__ */ new Date()).toISOString() }, env);
+function claimIdempotencyRecord(invoiceId, record, env = process.env) {
+  const file = idempotencyFile(invoiceId, env);
+  const dir = path8.dirname(file);
+  fs8.mkdirSync(dir, { recursive: true, mode: 448 });
+  const full = { invoiceId, ...record };
+  const tmp = path8.join(dir, `.${path8.basename(file)}.${crypto9.randomBytes(6).toString("hex")}.tmp`);
+  const fd = fs8.openSync(tmp, "wx", 384);
+  try {
+    fs8.writeFileSync(fd, `${JSON.stringify(full, null, 2)}
+`, "utf8");
+    fs8.fsyncSync(fd);
+  } finally {
+    fs8.closeSync(fd);
+  }
+  try {
+    fs8.linkSync(tmp, file);
+    return { record: full, won: true };
+  } catch (err) {
+    if (err?.code !== "EEXIST") throw err;
+    const existing = readIdempotencyRecord(invoiceId, env);
+    if (existing) return { record: existing, won: false };
+    throw new SkillError("STATE_UNREADABLE", `Could not read ${file}; remove it or pass --idempotency-key.`);
+  } finally {
+    try {
+      fs8.unlinkSync(tmp);
+    } catch {
     }
+  }
+}
+function resolveIdempotencyKey({ invoiceId, explicit, fingerprint, env = process.env }) {
+  const fp = fingerprint ?? null;
+  const saved = readIdempotencyRecord(invoiceId, env);
+  const fresh = (key2) => ({ idempotencyKey: key2, fingerprint: fp, createdAt: (/* @__PURE__ */ new Date()).toISOString() });
+  if (explicit) {
+    if (!saved || saved.idempotencyKey !== explicit) writeIdempotencyRecord(invoiceId, fresh(explicit), env);
     return { key: explicit, reused: Boolean(saved && saved.idempotencyKey === explicit), generated: false };
   }
-  if (saved && (saved.fingerprint ?? null) === (fingerprint ?? null)) {
+  if (saved && (saved.fingerprint ?? null) === fp) {
     return { key: saved.idempotencyKey, reused: true, generated: false };
   }
   const key = `cli_${crypto9.randomUUID()}`;
-  writeIdempotencyRecord(invoiceId, { idempotencyKey: key, fingerprint: fingerprint ?? null, createdAt: (/* @__PURE__ */ new Date()).toISOString() }, env);
-  return { key, reused: false, generated: true };
+  if (saved) {
+    writeIdempotencyRecord(invoiceId, fresh(key), env);
+    return { key, reused: false, generated: true };
+  }
+  const { record, won } = claimIdempotencyRecord(invoiceId, fresh(key), env);
+  return { key: record.idempotencyKey, reused: !won, generated: won };
 }
 var ERROR_MESSAGES = {
   UNAUTHORIZED: "The router did not accept this agent credential: your owner has not confirmed the binding in Discord yet, or it was revoked. Run binding-status, or bind again with a new code.",
@@ -60490,15 +60559,16 @@ async function acApi(method, apiPath, { body, credential, idempotencyKey, fetchI
     }
     return { status: res.status, json };
   }
-  const code = typeof json?.error?.code === "string" && json.error.code || typeof json?.code === "string" && json.code || (typeof json?.error === "string" && /^[A-Z][A-Z0-9_]+$/.test(json.error) ? json.error : null) || `HTTP_${res.status}`;
+  const rawCode = typeof json?.error?.code === "string" && json.error.code || typeof json?.code === "string" && json.code || typeof json?.error === "string" && json.error || null;
+  const code = rawCode === null ? `HTTP_${res.status}` : UPSTREAM_CODE_RE.test(rawCode) ? rawCode : "UPSTREAM_ERROR";
   const details = { httpStatus: res.status };
   const retryMs = parseRetryAfter(res.headers?.get?.("retry-after"));
   if (retryMs !== null) details.retryAfterSeconds = Math.ceil(retryMs / 1e3);
   if (code === "INVOICE_IN_PROGRESS") {
-    if (json?.spendRequestId) details.spendRequestId = String(json.spendRequestId);
-    if (json?.displayRef) details.displayRef = String(json.displayRef);
-    if (json?.error?.spendRequestId) details.spendRequestId = String(json.error.spendRequestId);
-    if (json?.error?.displayRef) details.displayRef = String(json.error.displayRef);
+    const id = json?.error?.spendRequestId ?? json?.spendRequestId;
+    const ref = json?.error?.displayRef ?? json?.displayRef;
+    if (typeof id === "string" && SPEND_REQUEST_ID_RE.test(id)) details.spendRequestId = id;
+    if (typeof ref === "string" && DISPLAY_REF_RE.test(ref)) details.displayRef = ref;
   }
   throw new SkillError(code, ERROR_MESSAGES[code] || `Agent Checkout returned HTTP ${res.status}.`, details);
 }
@@ -60650,46 +60720,40 @@ async function readAllStdin(stream = process.stdin) {
   return data;
 }
 async function runBind(opts, { readCode, fetchImpl, env = process.env } = {}) {
-  if (!opts.force && credentialExists(env)) {
-    throw new SkillError(
-      "CREDENTIAL_EXISTS",
-      `A credential already exists at ${credentialPath(env)}. Pass --force to replace it.`
-    );
-  }
-  const fromArgv = opts.bindCodeArg && opts.bindCodeArg !== "-";
-  const raw = fromArgv ? opts.bindCodeArg : await readCode();
-  const bindCode = validateBindCode(raw);
-  const { json } = await acApi("POST", "/bind-requests/claim", {
-    body: { bindCode, displayName: opts.displayName },
-    fetchImpl,
-    env
-  });
-  if (!CREDENTIAL_RE.test(json?.credential || "")) {
-    throw new SkillError("CREDENTIAL_INVALID", "The router returned a credential in an unexpected format; nothing was saved.");
-  }
-  const fingerprint = FINGERPRINT_RE.test(json.fingerprint || "") ? json.fingerprint : null;
-  const file = saveCredential(
-    {
-      credential: json.credential,
+  acBase(env);
+  const writer = prepareCredentialWrite({ force: Boolean(opts.force), env });
+  try {
+    const fromArgv = opts.bindCodeArg && opts.bindCodeArg !== "-";
+    const raw = fromArgv ? opts.bindCodeArg : await readCode();
+    const bindCode = validateBindCode(raw);
+    const { json } = await acApi("POST", "/bind-requests/claim", {
+      body: { bindCode, displayName: opts.displayName },
+      fetchImpl,
+      env
+    });
+    if (!CREDENTIAL_RE.test(json?.credential || "")) {
+      throw new SkillError("CREDENTIAL_INVALID", "The router returned a credential in an unexpected format; nothing was saved.");
+    }
+    const fingerprint = FINGERPRINT_RE.test(json.fingerprint || "") ? json.fingerprint : null;
+    const bindRequestId = typeof json.bindRequestId === "string" && /^[0-9a-f-]{36}$/i.test(json.bindRequestId) ? json.bindRequestId : null;
+    const file = writer.commit({ credential: json.credential, fingerprint, bindRequestId, claimedAt: (/* @__PURE__ */ new Date()).toISOString() });
+    return {
+      success: true,
+      status: ["claimed", "pending_confirm"].includes(json.status) ? json.status : "claimed",
+      credentialMasked: maskCredential(json.credential),
       fingerprint,
-      bindRequestId: typeof json.bindRequestId === "string" ? json.bindRequestId : null,
-      claimedAt: (/* @__PURE__ */ new Date()).toISOString()
-    },
-    { force: Boolean(opts.force), env }
-  );
-  return {
-    success: true,
-    status: typeof json.status === "string" ? json.status : "claimed",
-    credentialMasked: maskCredential(json.credential),
-    fingerprint,
-    bindRequestId: typeof json.bindRequestId === "string" ? json.bindRequestId : null,
-    confirmExpiresAt: typeof json.confirmExpiresAt === "string" ? json.confirmExpiresAt : null,
-    storedAt: file,
-    note: CONFIRM_NOTE,
-    ...fromArgv ? { tip: "Next time pipe the code in (rozo-checkout bind -) to keep it out of shell history." } : {}
-  };
+      bindRequestId,
+      confirmExpiresAt: typeof json.confirmExpiresAt === "string" && !Number.isNaN(Date.parse(json.confirmExpiresAt)) ? json.confirmExpiresAt : null,
+      storedAt: file,
+      note: CONFIRM_NOTE,
+      ...fromArgv ? { tip: "Next time pipe the code in (rozo-checkout bind -) to keep it out of shell history." } : {}
+    };
+  } finally {
+    writer.abort();
+  }
 }
 async function runBindingStatus(_opts, { fetchImpl, env = process.env } = {}) {
+  acBase(env);
   const rec = readCredential(env);
   const { json } = await acApi("GET", "/binding", { credential: rec.credential, fetchImpl, env });
   const status = typeof json.status === "string" ? json.status : null;
@@ -60702,6 +60766,7 @@ async function runBindingStatus(_opts, { fetchImpl, env = process.env } = {}) {
   };
 }
 async function runRequest(opts, { fetchImpl, env = process.env } = {}) {
+  acBase(env);
   const rec = readCredential(env);
   const { key, reused, generated } = resolveIdempotencyKey({
     invoiceId: opts.invoice.invoiceId,
@@ -60746,6 +60811,7 @@ async function runRequest(opts, { fetchImpl, env = process.env } = {}) {
   };
 }
 async function runRequestStatus(opts, { fetchImpl, env = process.env } = {}) {
+  acBase(env);
   const rec = readCredential(env);
   const { json } = await acApi("GET", `/requests/${encodeURIComponent(opts.spendRequestId)}`, {
     credential: rec.credential,
@@ -61693,7 +61759,7 @@ async function cmdAgentCheckout(argv) {
   try {
     payload = redactDeep(await flows[opts.command]());
   } catch (err) {
-    const failure = formatFailure(err);
+    const failure = redactDeep(formatFailure(err));
     if (opts.json) printJson(failure);
     else {
       printError(failure);

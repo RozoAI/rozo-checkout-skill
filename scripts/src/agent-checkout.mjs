@@ -8,11 +8,10 @@
 import { SkillError } from './lib/output.mjs';
 import {
   acApi,
-  credentialExists,
-  credentialPath,
+  acBase,
   maskCredential,
+  prepareCredentialWrite,
   readCredential,
-  saveCredential,
   validateBindCode,
   resolveIdempotencyKey,
   readIdempotencyRecord,
@@ -38,50 +37,46 @@ export async function readAllStdin(stream = process.stdin) {
 }
 
 export async function runBind(opts, { readCode, fetchImpl, env = process.env } = {}) {
-  // Check before the claim: the bind code is single use, so a claim whose
-  // credential cannot be saved would be lost.
-  if (!opts.force && credentialExists(env)) {
-    throw new SkillError(
-      'CREDENTIAL_EXISTS',
-      `A credential already exists at ${credentialPath(env)}. Pass --force to replace it.`,
-    );
-  }
-  const fromArgv = opts.bindCodeArg && opts.bindCodeArg !== '-';
-  const raw = fromArgv ? opts.bindCodeArg : await readCode();
-  const bindCode = validateBindCode(raw);
+  acBase(env); // refuse an untrusted router before the code is even read
+  // Prepare the write before the claim: the bind code is single use, so a
+  // claim whose credential cannot be saved would be lost. This creates and
+  // checks the private dir, refuses an existing file (unless --force), and
+  // opens an exclusive 0600 temp file.
+  const writer = prepareCredentialWrite({ force: Boolean(opts.force), env });
+  try {
+    const fromArgv = opts.bindCodeArg && opts.bindCodeArg !== '-';
+    const raw = fromArgv ? opts.bindCodeArg : await readCode();
+    const bindCode = validateBindCode(raw);
 
-  const { json } = await acApi('POST', '/bind-requests/claim', {
-    body: { bindCode, displayName: opts.displayName },
-    fetchImpl,
-    env,
-  });
-  if (!CREDENTIAL_RE.test(json?.credential || '')) {
-    throw new SkillError('CREDENTIAL_INVALID', 'The router returned a credential in an unexpected format; nothing was saved.');
-  }
-  const fingerprint = FINGERPRINT_RE.test(json.fingerprint || '') ? json.fingerprint : null;
-  const file = saveCredential(
-    {
-      credential: json.credential,
+    const { json } = await acApi('POST', '/bind-requests/claim', {
+      body: { bindCode, displayName: opts.displayName },
+      fetchImpl,
+      env,
+    });
+    if (!CREDENTIAL_RE.test(json?.credential || '')) {
+      throw new SkillError('CREDENTIAL_INVALID', 'The router returned a credential in an unexpected format; nothing was saved.');
+    }
+    const fingerprint = FINGERPRINT_RE.test(json.fingerprint || '') ? json.fingerprint : null;
+    const bindRequestId = typeof json.bindRequestId === 'string' && /^[0-9a-f-]{36}$/i.test(json.bindRequestId) ? json.bindRequestId : null;
+    const file = writer.commit({ credential: json.credential, fingerprint, bindRequestId, claimedAt: new Date().toISOString() });
+    return {
+      success: true,
+      status: ['claimed', 'pending_confirm'].includes(json.status) ? json.status : 'claimed',
+      credentialMasked: maskCredential(json.credential),
       fingerprint,
-      bindRequestId: typeof json.bindRequestId === 'string' ? json.bindRequestId : null,
-      claimedAt: new Date().toISOString(),
-    },
-    { force: Boolean(opts.force), env },
-  );
-  return {
-    success: true,
-    status: typeof json.status === 'string' ? json.status : 'claimed',
-    credentialMasked: maskCredential(json.credential),
-    fingerprint,
-    bindRequestId: typeof json.bindRequestId === 'string' ? json.bindRequestId : null,
-    confirmExpiresAt: typeof json.confirmExpiresAt === 'string' ? json.confirmExpiresAt : null,
-    storedAt: file,
-    note: CONFIRM_NOTE,
-    ...(fromArgv ? { tip: 'Next time pipe the code in (rozo-checkout bind -) to keep it out of shell history.' } : {}),
-  };
+      bindRequestId,
+      confirmExpiresAt: typeof json.confirmExpiresAt === 'string' && !Number.isNaN(Date.parse(json.confirmExpiresAt)) ? json.confirmExpiresAt : null,
+      storedAt: file,
+      note: CONFIRM_NOTE,
+      ...(fromArgv ? { tip: 'Next time pipe the code in (rozo-checkout bind -) to keep it out of shell history.' } : {}),
+    };
+  } finally {
+    writer.abort(); // no-op after a successful commit
+  }
 }
 
 export async function runBindingStatus(_opts, { fetchImpl, env = process.env } = {}) {
+  acBase(env); // refuse an untrusted router before the credential is read
   const rec = readCredential(env);
   const { json } = await acApi('GET', '/binding', { credential: rec.credential, fetchImpl, env });
   const status = typeof json.status === 'string' ? json.status : null;
@@ -95,6 +90,7 @@ export async function runBindingStatus(_opts, { fetchImpl, env = process.env } =
 }
 
 export async function runRequest(opts, { fetchImpl, env = process.env } = {}) {
+  acBase(env); // refuse an untrusted router before the credential is read
   const rec = readCredential(env);
   const { key, reused, generated } = resolveIdempotencyKey({
     invoiceId: opts.invoice.invoiceId,
@@ -142,6 +138,7 @@ export async function runRequest(opts, { fetchImpl, env = process.env } = {}) {
 }
 
 export async function runRequestStatus(opts, { fetchImpl, env = process.env } = {}) {
+  acBase(env); // refuse an untrusted router before the credential is read
   const rec = readCredential(env);
   const { json } = await acApi('GET', `/requests/${encodeURIComponent(opts.spendRequestId)}`, {
     credential: rec.credential,

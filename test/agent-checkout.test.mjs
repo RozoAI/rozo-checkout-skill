@@ -58,8 +58,8 @@ function sandbox() {
   return { home, stateDir: path.join(home, '.rozo-checkout', 'state') };
 }
 
-function runCli(args, { box, gate = true, input, cli = SRC_CLI } = {}) {
-  const env = { ...process.env, HOME: box.home, USERPROFILE: box.home, ROZO_CHECKOUT_STATE_DIR: box.stateDir, ROZO_CHECKOUT_AC_BASE: BASE, NO_COLOR: '1', ROZO_CHECKOUT_ANON_ID: 'off' };
+function runCli(args, { box, gate = true, input, cli = SRC_CLI, base = BASE } = {}) {
+  const env = { ...process.env, HOME: box.home, USERPROFILE: box.home, ROZO_CHECKOUT_STATE_DIR: box.stateDir, ROZO_CHECKOUT_AC_BASE: base, NO_COLOR: '1', ROZO_CHECKOUT_ANON_ID: 'off' };
   if (gate) env.ROZO_AGENT_CHECKOUT_BETA = '1';
   else delete env.ROZO_AGENT_CHECKOUT_BETA;
   return new Promise((resolve) => {
@@ -409,4 +409,119 @@ test('maskCredential and formatUsdcAtomic', async () => {
     url: 'https://payments.coinbase.com/payment-sessions/paymentSession_abc-DEF_1',
     invoiceId: 'paymentSession_abc-DEF_1',
   });
+});
+
+// ---------------------------------------------------------------------------
+// Review fixes: trusted base, upstream code sanitizing, atomic key claim,
+// bind write prepared before the claim
+// ---------------------------------------------------------------------------
+
+test('an untrusted router base is refused before any secret is read or sent', async () => {
+  const { acBase } = await import('../scripts/src/lib/agent-checkout.mjs');
+  assert.equal(acBase({}), 'https://apiserver.mpprouter.dev/v1/agent-checkout');
+  assert.equal(acBase({ ROZO_CHECKOUT_AC_BASE: 'http://127.0.0.1:9/v1/agent-checkout' }), 'http://127.0.0.1:9/v1/agent-checkout');
+  assert.equal(acBase({ ROZO_CHECKOUT_AC_BASE: 'http://localhost:9/x' }), 'http://localhost:9/x');
+  for (const bad of [
+    'http://apiserver.mpprouter.dev/v1/agent-checkout',
+    'https://evil.example/v1/agent-checkout',
+    'https://apiserver.mpprouter.dev.evil.example/v1',
+    'https://user:pw@apiserver.mpprouter.dev/v1',
+    'http://10.0.0.1/v1',
+    'not a url',
+  ]) {
+    assert.throws(() => acBase({ ROZO_CHECKOUT_AC_BASE: bad }), (e) => e.code === 'AC_BASE_UNTRUSTED', bad);
+  }
+
+  resetMock();
+  mock.routes['POST /v1/agent-checkout/bind-requests/claim'] = claimOk;
+  const box = sandbox();
+  const evil = 'https://evil.example/v1/agent-checkout';
+  const bind = await runCli(['bind', '-', '--json'], { box, input: BIND_CODE, base: evil });
+  assert.equal(JSON.parse(bind.stdout).error.code, 'AC_BASE_UNTRUSTED');
+  assert.equal(fs.existsSync(credFile(box)), false);
+  writeCred(box);
+  for (const args of [['binding-status', '--json'], ['request', LINK, '--context', 'x', '--json'], ['request-status', 'sr_0123456789abcdef', '--json']]) {
+    const r = await runCli(args, { box, base: evil });
+    assert.equal(r.code, 1);
+    assert.equal(JSON.parse(r.stdout).error.code, 'AC_BASE_UNTRUSTED');
+  }
+  assert.equal(mock.calls.length, 0);
+});
+
+test('upstream error codes that are not code-shaped become UPSTREAM_ERROR and never leak', async () => {
+  const box = sandbox();
+  writeCred(box);
+  for (const raw of [CREDENTIAL, 'weird code', `ERR ${BIND_CODE}`, 'x'.repeat(200)]) {
+    resetMock();
+    mock.routes['GET /v1/agent-checkout/binding'] = { status: 400, body: { error: { code: raw } } };
+    for (const json of [true, false]) {
+      const r = await runCli(['binding-status', ...(json ? ['--json'] : [])], { box });
+      assert.equal(r.code, 1);
+      assert.equal(r.stdout.includes(raw), false, raw);
+      assert.equal(r.stdout.includes(CREDENTIAL), false);
+      assert.match(r.stdout, /UPSTREAM_ERROR/);
+    }
+  }
+  resetMock();
+  mock.routes['POST /v1/agent-checkout/requests'] = err(409, 'INVOICE_IN_PROGRESS', { spendRequestId: CREDENTIAL + '!', displayRef: 'bad ref with spaces' });
+  const r = await runCli(['request', LINK, '--context', 'x', '--json'], { box });
+  const p = JSON.parse(r.stdout);
+  assert.equal(p.error.code, 'INVOICE_IN_PROGRESS');
+  assert.equal(p.error.details.spendRequestId, undefined);
+  assert.equal(p.error.details.displayRef, undefined);
+  assert.equal(r.stdout.includes(CREDENTIAL), false);
+});
+
+test('concurrent request runs for the same invoice all use one idempotency key', async () => {
+  resetMock();
+  mock.routes['POST /v1/agent-checkout/requests'] = { status: 201, body: { replay: false, request: requestView() } };
+  const box = sandbox();
+  writeCred(box);
+  const args = ['request', LINK, '--context', 'same', '--json'];
+  const runs = await Promise.all(Array.from({ length: 6 }, () => runCli(args, { box })));
+  const keys = new Set(runs.map((r) => JSON.parse(r.stdout).idempotencyKey));
+  assert.equal(keys.size, 1, [...keys].join(','));
+  assert.equal(new Set(mock.calls.map((c) => c.headers['idempotency-key'])).size, 1);
+  assert.equal(runs.filter((r) => JSON.parse(r.stdout).idempotencyKeyGenerated).length, 1);
+  const dir = path.join(box.stateDir, 'agent-checkout');
+  assert.deepEqual(fs.readdirSync(dir).filter((f) => f.endsWith('.tmp')), []);
+});
+
+test('claimIdempotencyRecord: the first claim wins, later claims read it back', async () => {
+  const { claimIdempotencyRecord } = await import('../scripts/src/lib/agent-checkout.mjs');
+  const box = sandbox();
+  const saved = process.env.ROZO_CHECKOUT_STATE_DIR;
+  process.env.ROZO_CHECKOUT_STATE_DIR = box.stateDir;
+  try {
+    const a = claimIdempotencyRecord('pl_01claimtest', { idempotencyKey: 'cli_first_key_1' });
+    const b = claimIdempotencyRecord('pl_01claimtest', { idempotencyKey: 'cli_second_key_2' });
+    assert.equal(a.won, true);
+    assert.equal(b.won, false);
+    assert.equal(b.record.idempotencyKey, 'cli_first_key_1');
+  } finally {
+    if (saved === undefined) delete process.env.ROZO_CHECKOUT_STATE_DIR;
+    else process.env.ROZO_CHECKOUT_STATE_DIR = saved;
+  }
+});
+
+test('bind prepares the secure write before claiming: an unusable dir burns no bind code', async () => {
+  resetMock();
+  mock.routes['POST /v1/agent-checkout/bind-requests/claim'] = claimOk;
+  const box = sandbox();
+  // The credential dir path is occupied by a regular file.
+  fs.writeFileSync(path.join(box.home, '.rozo-checkout'), 'not a dir');
+  const r = await runCli(['bind', '-', '--json'], { box, input: BIND_CODE });
+  assert.equal(r.code, 1);
+  assert.equal(JSON.parse(r.stdout).success, false);
+  assert.equal(mock.calls.length, 0);
+});
+
+test('a failed claim leaves no temp file and no credential', async () => {
+  resetMock();
+  mock.routes['POST /v1/agent-checkout/bind-requests/claim'] = err(503, 'AC_DISABLED');
+  const box = sandbox();
+  const r = await runCli(['bind', '-', '--json'], { box, input: BIND_CODE });
+  assert.equal(JSON.parse(r.stdout).error.code, 'AC_DISABLED');
+  const dir = path.dirname(credFile(box));
+  assert.deepEqual(fs.readdirSync(dir).filter((f) => f.includes('agent-checkout-credential')), []);
 });
