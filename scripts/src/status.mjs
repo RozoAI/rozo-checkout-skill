@@ -13,7 +13,8 @@
  * pay-in/payout view (payments/<id>) — and maps them onto one taxonomy:
  *
  *   awaiting_deposit | payin_detected | payin_confirmed | bridging |
- *   paying_coinbase  | settled | expired_unfunded | underpaid |
+ *   paying_coinbase  | paying_merchant (Bitrefill funder) | settled |
+ *   expired_unfunded | underpaid |
  *   stuck_after_payment
  *
  * Money-detected rule: once any pay-in exists, this never reports a plain
@@ -29,7 +30,14 @@ import { classifyStatus, checkPayable } from './lib/guards.mjs';
 import { SUPPORT } from './lib/support.mjs';
 import { formatRemaining, checkExpiry, lightningWatchMs, DEFAULT_WATCH_MS, priceLockFor } from './lib/expiry.mjs';
 import { findByLinkId, readState } from './lib/state.mjs';
-import { providerFromPayment, earliestExpiry, intentBitrefillExpiry } from './lib/bitrefill.mjs';
+import {
+  providerFromPayment,
+  earliestExpiry,
+  intentBitrefillExpiry,
+  isBitrefillFunderOrder,
+  BITREFILL_LATE_PAYMENT_DETAIL,
+  BITREFILL_MIN_PAY_WINDOW_MS,
+} from './lib/bitrefill.mjs';
 import { SCHEMA_VERSION, paymentOutcomeFor, nextActionFor } from './lib/receipt.mjs';
 
 const POLL_INTERVAL_MS = 10_000;
@@ -84,6 +92,8 @@ export function sendWindowFor({ provider, chainId, payment, status, bitrefillExp
       chainId,
       intentExpiresAt: payment?.expiresAt ?? deadline,
       coinbaseExpiry: deadline,
+      // Native coins: the price lock is a deadline too (undefined otherwise).
+      ...(quoteExpiresAt !== undefined ? { quoteExpiresAt } : {}),
     });
     return expiry.ok
       ? { ok: true, code: null, minutesOfSlack: Math.floor(expiry.msOfSlack / 60000), deadlineMs: expiry.effectiveDeadlineMs }
@@ -224,6 +234,27 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
       local = null;
     }
     bitrefillExpiry = earliestExpiry(local?.bitrefill?.expiresAt, intentBitrefillExpiry(payment));
+    // Funder model: money reached Rozo but the funder has not (visibly) paid
+    // the invoice, and the invoice is past its deadline or inside its last
+    // BITREFILL_MIN_PAY_WINDOW_MS. The funder's signer refuses to pay inside
+    // that window, so waiting for the full expiry only delays the escalation.
+    // A late payment is not forwarded to Bitrefill; it is refunded by hand on
+    // request. Any stage after money arrived counts, not only after the payout.
+    const lateStates = new Set(['payin_detected', 'payin_confirmed', 'bridging', 'paying_merchant']);
+    if (
+      payment &&
+      isBitrefillFunderOrder(payment) &&
+      !payment.merchantDeliveredAt &&
+      (verdict.moneyDetected || verdict.state === 'paying_merchant') &&
+      lateStates.has(verdict.state) &&
+      bitrefillExpiry &&
+      Date.parse(bitrefillExpiry) - Date.now() < BITREFILL_MIN_PAY_WINDOW_MS
+    ) {
+      state = 'stuck_after_payment';
+      terminal = false;
+      escalate = true;
+      detail = BITREFILL_LATE_PAYMENT_DETAIL;
+    }
     if (!verdict.moneyDetected && ['awaiting_deposit', 'expired_unfunded'].includes(verdict.state)) {
       const ms = bitrefillExpiry ? Date.parse(bitrefillExpiry) : NaN;
       if (Number.isFinite(ms) && ms <= Date.now()) {
@@ -241,6 +272,12 @@ export async function snapshot({ rozoPaymentId, linkId, provider: explicitProvid
 
   return {
     provider,
+    ...(provider === 'bitrefill'
+      ? {
+          bitrefillModel: payment ? (isBitrefillFunderOrder(payment) ? 'funder' : 'direct') : null,
+          merchantDeliveredAt: payment?.merchantDeliveredAt ?? null,
+        }
+      : {}),
     rozoPaymentId: id,
     rozoPaymentIdSource: idSource,
     // Without the authoritative payment object we are reading a partial view.
