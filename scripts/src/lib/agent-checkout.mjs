@@ -51,9 +51,42 @@ export function gateOn(env = process.env) {
   return env[GATE_ENV] === '1';
 }
 
+const TRUSTED_ORIGIN = 'https://apiserver.mpprouter.dev';
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
+/**
+ * The router base URL. The stored Bearer credential and the bind code are only
+ * ever sent to the trusted https origin, or to a loopback host (tests and
+ * local development). Anything else is refused before a secret is read.
+ */
 export function acBase(env = process.env) {
-  return (env[BASE_ENV] || DEFAULT_BASE).replace(/\/+$/, '');
+  const raw = String(env[BASE_ENV] || DEFAULT_BASE).replace(/\/+$/, '');
+  let u;
+  try {
+    u = new URL(raw);
+  } catch {
+    u = null;
+  }
+  const trusted =
+    u &&
+    !u.username &&
+    !u.password &&
+    !u.search &&
+    !u.hash &&
+    ((u.protocol === 'https:' && u.origin === TRUSTED_ORIGIN) ||
+      ((u.protocol === 'http:' || u.protocol === 'https:') && LOOPBACK_HOSTS.has(u.hostname)));
+  if (!trusted) {
+    throw new SkillError(
+      'AC_BASE_UNTRUSTED',
+      `${BASE_ENV} must be ${TRUSTED_ORIGIN}/… (or a loopback host for testing). Nothing was read or sent.`,
+    );
+  }
+  return raw;
 }
+
+/** Upstream error codes are shown only when they look like a code. */
+export const UPSTREAM_CODE_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
+const DISPLAY_REF_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 /** True when argv names one of the agent checkout commands. */
 export function isAgentCheckoutArgv(argv) {
@@ -254,42 +287,70 @@ export function credentialExists(env = process.env) {
 }
 
 /**
- * Write the credential record atomically with mode 0600: temp file in the same
- * dir, fsync, then link (no overwrite) or rename (--force).
+ * Prepare the credential write BEFORE the single-use bind code is claimed:
+ * the private dir is created and checked, and an exclusive 0600 temp file is
+ * opened, so a claim never succeeds into a credential that cannot be saved.
+ * commit() writes, fsyncs and links (no overwrite) or renames (--force);
+ * abort() removes the temp file.
  */
-export function saveCredential(record, { force = false, env = process.env } = {}) {
-  if (!CREDENTIAL_RE.test(record?.credential || '')) {
-    throw new SkillError('CREDENTIAL_INVALID', 'The router returned a credential in an unexpected format; nothing was saved.');
-  }
+export function prepareCredentialWrite({ force = false, env = process.env } = {}) {
   const file = credentialPath(env);
-  ensurePrivateDir(path.dirname(file));
-  const tmp = path.join(path.dirname(file), `.agent-checkout-credential.${crypto.randomBytes(6).toString('hex')}.tmp`);
-  const fd = fs.openSync(tmp, 'wx', 0o600);
-  try {
-    fs.writeFileSync(fd, `${JSON.stringify({ version: 1, ...record }, null, 2)}\n`, 'utf8');
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
+  const dir = path.dirname(file);
+  ensurePrivateDir(dir);
+  if (process.platform !== 'win32' && (fs.statSync(dir).mode & 0o077) !== 0) {
+    throw new SkillError('CREDENTIAL_DIR_PERMISSIONS', `${dir} is not private (0700); nothing was claimed.`);
   }
-  try {
-    if (force) {
-      fs.renameSync(tmp, file);
-    } else {
-      fs.linkSync(tmp, file); // fails with EEXIST, never replaces
-      fs.unlinkSync(tmp);
+  if (!force && credentialExists(env)) {
+    throw new SkillError('CREDENTIAL_EXISTS', `A credential already exists at ${file}. Pass --force to replace it.`);
+  }
+  const tmp = path.join(dir, `.agent-checkout-credential.${crypto.randomBytes(6).toString('hex')}.tmp`);
+  let fd = fs.openSync(tmp, 'wx', 0o600);
+  const cleanup = () => {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // already closed
+      }
+      fd = null;
     }
-  } catch (err) {
     try {
       fs.unlinkSync(tmp);
     } catch {
       // already gone
     }
-    if (err?.code === 'EEXIST') {
-      throw new SkillError('CREDENTIAL_EXISTS', `A credential already exists at ${file}. Pass --force to replace it.`);
-    }
-    throw err;
-  }
-  return file;
+  };
+  return {
+    file,
+    abort: cleanup,
+    commit(record) {
+      try {
+        if (!CREDENTIAL_RE.test(record?.credential || '')) {
+          throw new SkillError('CREDENTIAL_INVALID', 'The router returned a credential in an unexpected format; nothing was saved.');
+        }
+        fs.writeFileSync(fd, `${JSON.stringify({ version: 1, ...record }, null, 2)}\n`, 'utf8');
+        fs.fsyncSync(fd);
+        fs.closeSync(fd);
+        fd = null;
+        if (force) fs.renameSync(tmp, file);
+        else fs.linkSync(tmp, file); // fails with EEXIST, never replaces
+      } catch (err) {
+        cleanup();
+        if (err?.code === 'EEXIST') {
+          throw new SkillError('CREDENTIAL_EXISTS', `A credential already exists at ${file}. Pass --force to replace it.`);
+        }
+        throw err;
+      }
+      cleanup(); // removes the temp name left behind by link()
+      return file;
+    },
+  };
+}
+
+/** Prepare and commit in one go (used where no network call sits between). */
+export function saveCredential(record, opts = {}) {
+  const w = prepareCredentialWrite(opts);
+  return w.commit(record);
 }
 
 /** Read and validate the stored credential. Refuses a file readable by others. */
@@ -356,23 +417,64 @@ export function writeIdempotencyRecord(invoiceId, record, env = process.env) {
 }
 
 /**
+ * Create the per-invoice record only if none exists (temp file + link, so a
+ * reader never sees a half-written file). Returns the record that won: ours,
+ * or the one a concurrent run saved first.
+ */
+export function claimIdempotencyRecord(invoiceId, record, env = process.env) {
+  const file = idempotencyFile(invoiceId, env);
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const full = { invoiceId, ...record };
+  const tmp = path.join(dir, `.${path.basename(file)}.${crypto.randomBytes(6).toString('hex')}.tmp`);
+  const fd = fs.openSync(tmp, 'wx', 0o600);
+  try {
+    fs.writeFileSync(fd, `${JSON.stringify(full, null, 2)}\n`, 'utf8');
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  try {
+    fs.linkSync(tmp, file);
+    return { record: full, won: true };
+  } catch (err) {
+    if (err?.code !== 'EEXIST') throw err;
+    const existing = readIdempotencyRecord(invoiceId, env);
+    if (existing) return { record: existing, won: false };
+    throw new SkillError('STATE_UNREADABLE', `Could not read ${file}; remove it or pass --idempotency-key.`);
+  } finally {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      // already gone
+    }
+  }
+}
+
+/**
  * The key to send: an explicit one wins; else the saved one for this invoice
- * and binding; else a new one, saved before the request goes out.
+ * and binding; else a new one, claimed atomically before the request goes out
+ * so concurrent runs for the same invoice all use the same key.
  */
 export function resolveIdempotencyKey({ invoiceId, explicit, fingerprint, env = process.env }) {
+  const fp = fingerprint ?? null;
   const saved = readIdempotencyRecord(invoiceId, env);
+  const fresh = (key) => ({ idempotencyKey: key, fingerprint: fp, createdAt: new Date().toISOString() });
   if (explicit) {
-    if (!saved || saved.idempotencyKey !== explicit) {
-      writeIdempotencyRecord(invoiceId, { idempotencyKey: explicit, fingerprint: fingerprint ?? null, createdAt: new Date().toISOString() }, env);
-    }
+    if (!saved || saved.idempotencyKey !== explicit) writeIdempotencyRecord(invoiceId, fresh(explicit), env);
     return { key: explicit, reused: Boolean(saved && saved.idempotencyKey === explicit), generated: false };
   }
-  if (saved && (saved.fingerprint ?? null) === (fingerprint ?? null)) {
+  if (saved && (saved.fingerprint ?? null) === fp) {
     return { key: saved.idempotencyKey, reused: true, generated: false };
   }
   const key = `cli_${crypto.randomUUID()}`;
-  writeIdempotencyRecord(invoiceId, { idempotencyKey: key, fingerprint: fingerprint ?? null, createdAt: new Date().toISOString() }, env);
-  return { key, reused: false, generated: true };
+  if (saved) {
+    // A record from another binding: replace it (a new binding is a new request).
+    writeIdempotencyRecord(invoiceId, fresh(key), env);
+    return { key, reused: false, generated: true };
+  }
+  const { record, won } = claimIdempotencyRecord(invoiceId, fresh(key), env);
+  return { key: record.idempotencyKey, reused: !won, generated: won };
 }
 
 // ---------------------------------------------------------------------------
@@ -448,19 +550,22 @@ export async function acApi(method, apiPath, { body, credential, idempotencyKey,
     }
     return { status: res.status, json };
   }
-  const code =
+  const rawCode =
     (typeof json?.error?.code === 'string' && json.error.code) ||
     (typeof json?.code === 'string' && json.code) ||
-    (typeof json?.error === 'string' && /^[A-Z][A-Z0-9_]+$/.test(json.error) ? json.error : null) ||
-    `HTTP_${res.status}`;
+    (typeof json?.error === 'string' && json.error) ||
+    null;
+  // Only a code-shaped value is shown; anything else (which could carry a
+  // secret echoed by a broken upstream) becomes UPSTREAM_ERROR.
+  const code = rawCode === null ? `HTTP_${res.status}` : UPSTREAM_CODE_RE.test(rawCode) ? rawCode : 'UPSTREAM_ERROR';
   const details = { httpStatus: res.status };
   const retryMs = parseRetryAfter(res.headers?.get?.('retry-after'));
   if (retryMs !== null) details.retryAfterSeconds = Math.ceil(retryMs / 1000);
   if (code === 'INVOICE_IN_PROGRESS') {
-    if (json?.spendRequestId) details.spendRequestId = String(json.spendRequestId);
-    if (json?.displayRef) details.displayRef = String(json.displayRef);
-    if (json?.error?.spendRequestId) details.spendRequestId = String(json.error.spendRequestId);
-    if (json?.error?.displayRef) details.displayRef = String(json.error.displayRef);
+    const id = json?.error?.spendRequestId ?? json?.spendRequestId;
+    const ref = json?.error?.displayRef ?? json?.displayRef;
+    if (typeof id === 'string' && SPEND_REQUEST_ID_RE.test(id)) details.spendRequestId = id;
+    if (typeof ref === 'string' && DISPLAY_REF_RE.test(ref)) details.displayRef = ref;
   }
   throw new SkillError(code, ERROR_MESSAGES[code] || `Agent Checkout returned HTTP ${res.status}.`, details);
 }

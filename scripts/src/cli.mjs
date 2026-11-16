@@ -1184,7 +1184,8 @@ async function cmdAgentCheckout(argv) {
   try {
     payload = redactDeep(await flows[opts.command]());
   } catch (err) {
-    const failure = formatFailure(err);
+    // The whole failure, code included, goes through redaction.
+    const failure = redactDeep(formatFailure(err));
     if (opts.json) printJson(failure);
     else {
       printError(failure);
