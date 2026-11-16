@@ -159,8 +159,9 @@ async function step(fn, argv) {
  * report. The report never changes the exit code, the output or a thrown
  * error, and is skipped entirely unless reporting is switched on.
  */
-async function withReport(flow, fn) {
-  attemptTrace = { flow };
+async function withReport(flow, fn, { dryRun = false } = {}) {
+  // A dry run is never a pay attempt, however early it fails.
+  attemptTrace = { flow, ...(dryRun ? { skip: true } : {}) };
   let exitCode;
   let thrown = null;
   try {
@@ -1302,7 +1303,7 @@ async function main() {
       }
       return EXIT_USAGE;
     }
-    if (x402opts.sub === 'pay') return withReport('x402', () => cmdX402(x402opts));
+    if (x402opts.sub === 'pay') return withReport('x402', () => cmdX402(x402opts), { dryRun: Boolean(x402opts.dryRun) });
     return cmdX402(x402opts);
   }
   let opts;
@@ -1343,7 +1344,9 @@ async function main() {
       return cmdResume(opts);
     case 'pay':
       try {
-        return await withReport(opts.bitrefill ? 'bitrefill' : 'coinbase', () => cmdPay(opts));
+        return await withReport(opts.bitrefill ? 'bitrefill' : 'coinbase', () => cmdPay(opts), {
+          dryRun: Boolean(opts.dryRun),
+        });
       } catch (err) {
         // A usage problem discovered after parsing (no coin, on a non-TTY)
         // should still exit 2, like every other usage error.

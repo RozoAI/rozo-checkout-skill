@@ -149,7 +149,7 @@ await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const ORIGIN = `http://127.0.0.1:${server.address().port}`;
 test.after(() => server.close());
 
-function runPay(extraEnv) {
+function runPay(extraEnv, extraArgs = []) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'rozo-report-home-'));
   const env = {
     ...process.env,
@@ -168,7 +168,7 @@ function runPay(extraEnv) {
   return new Promise((resolve) => {
     execFile(
       process.execPath,
-      ['--import', PRELOAD, CLI, 'pay', 'https://payments.coinbase.com/payment-links/pl_01reporttest', '--with', 'usdc-base', '--yes', '--json'],
+      ['--import', PRELOAD, CLI, ...(extraArgs.length && extraArgs[0] === 'x402' ? extraArgs : ['pay', 'https://payments.coinbase.com/payment-links/pl_01reporttest', '--with', 'usdc-base', '--yes', '--json', ...extraArgs])],
       { cwd: home, env },
       (e, stdout, stderr) => {
         fs.rmSync(home, { recursive: true, force: true });
@@ -219,4 +219,31 @@ test('CLI: an unreachable report endpoint does not change output or exit code', 
   assert.equal(broken.code, base.code);
   assert.equal(broken.stdout, base.stdout);
   assert.equal(broken.stderr.includes('ECONNREFUSED'), false);
+});
+
+test('CLI: dry runs that fail early send no report (pay --send --dry-run, x402 pay --dry-run)', async () => {
+  mock.calls = [];
+  const pay = await runPay({ ROZO_CHECKOUT_REPORT: '1' }, ['--send', '--dry-run']);
+  assert.equal(pay.code, 1, pay.stdout);
+  // Fails before any order exists (no signing key here): still not reported.
+  assert.equal(JSON.parse(pay.stdout).success, false);
+  assert.equal(reports().length, 0);
+  // The same early failure without --dry-run is reported, so the skip is the dry run.
+  mock.calls = [];
+  const sendOnly = await runPay({ ROZO_CHECKOUT_REPORT: '1' }, ['--send']);
+  assert.equal(sendOnly.code, pay.code);
+  assert.equal(reports().length, 1);
+
+  mock.calls = [];
+  const x = await runPay({ ROZO_CHECKOUT_REPORT: '1' }, ['x402', 'pay', `${ORIGIN}/paid-endpoint`, '--dry-run', '--json']);
+  assert.notEqual(x.code, 0, x.stdout);
+  assert.ok(mock.calls.some((c) => c.url === '/paid-endpoint'));
+  assert.equal(reports().length, 0);
+
+  // The same x402 failure without --dry-run is reported.
+  mock.calls = [];
+  const real = await runPay({ ROZO_CHECKOUT_REPORT: '1' }, ['x402', 'pay', `${ORIGIN}/paid-endpoint`, '--json']);
+  assert.equal(real.code, x.code);
+  assert.equal(reports().length, 1);
+  assert.equal(JSON.parse(reports()[0].body).flow, 'x402');
 });

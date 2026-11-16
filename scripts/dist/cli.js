@@ -61101,8 +61101,8 @@ async function step(fn, argv) {
   if (!p?.success) noteFailure(p);
   return result;
 }
-async function withReport(flow, fn) {
-  attemptTrace = { flow };
+async function withReport(flow, fn, { dryRun = false } = {}) {
+  attemptTrace = { flow, ...dryRun ? { skip: true } : {} };
   let exitCode;
   let thrown = null;
   try {
@@ -62033,7 +62033,7 @@ async function main9() {
       }
       return EXIT_USAGE;
     }
-    if (x402opts.sub === "pay") return withReport("x402", () => cmdX402(x402opts));
+    if (x402opts.sub === "pay") return withReport("x402", () => cmdX402(x402opts), { dryRun: Boolean(x402opts.dryRun) });
     return cmdX402(x402opts);
   }
   let opts;
@@ -62074,7 +62074,9 @@ ${AC_HELP}` : HELP;
       return cmdResume(opts);
     case "pay":
       try {
-        return await withReport(opts.bitrefill ? "bitrefill" : "coinbase", () => cmdPay(opts));
+        return await withReport(opts.bitrefill ? "bitrefill" : "coinbase", () => cmdPay(opts), {
+          dryRun: Boolean(opts.dryRun)
+        });
       } catch (err) {
         if (err instanceof CliError) {
           const payload = formatFailure(err);
