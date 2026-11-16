@@ -63,6 +63,7 @@ import {
   isAgentCheckoutArgv,
   parseAgentCheckoutArgs,
 } from './lib/agent-checkout.mjs';
+import { buildReport, classifyAttempt, isUuid, reportingEnabled, sendReport } from './lib/client-report.mjs';
 import { runBind, runBindingStatus, runRequest, runRequestStatus, readAllStdin } from './agent-checkout.mjs';
 
 class SkillErrorLike extends Error {
@@ -131,9 +132,56 @@ function printMoneyWarning(payload) {
 // Flow helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * What the current pay attempt left behind, for the client result report.
+ * Every audited flow runs through step(), so its last failure code and the
+ * order id are captured here; cmdPay adds the few facts only it knows
+ * (cancelled, confirmed on chain, settled). Never addresses or amounts.
+ */
+let attemptTrace = {};
+
+function noteFailure(payload) {
+  const code = payload?.error?.code;
+  if (code) attemptTrace.code = code;
+}
+
 /** Run one of the audited flows and hand back its payload plus exit code. */
 async function step(fn, argv) {
-  return capture(() => fn(argv));
+  const result = await capture(() => fn(argv));
+  const p = result.payload;
+  if (isUuid(p?.rozoPaymentId) && !attemptTrace.rozoPaymentId) attemptTrace.rozoPaymentId = p.rozoPaymentId;
+  if (!p?.success) noteFailure(p);
+  return result;
+}
+
+/**
+ * The single exit point of a pay attempt: run it, then send at most one
+ * report. The report never changes the exit code, the output or a thrown
+ * error, and is skipped entirely unless reporting is switched on.
+ */
+async function withReport(flow, fn) {
+  attemptTrace = { flow };
+  let exitCode;
+  let thrown = null;
+  try {
+    exitCode = await fn();
+  } catch (err) {
+    thrown = err;
+    if (err instanceof CliError) attemptTrace.skip = true;
+    else if (err?.code) attemptTrace.code = err.code;
+    exitCode = EXIT_ERROR;
+  }
+  if (reportingEnabled()) {
+    try {
+      const c = classifyAttempt(attemptTrace, exitCode);
+      const report = c && buildReport({ ...c, flow, rozoPaymentId: attemptTrace.rozoPaymentId, version: VERSION });
+      if (report) await sendReport(report);
+    } catch {
+      // Reporting must never affect the payment command.
+    }
+  }
+  if (thrown) throw thrown;
+  return exitCode;
 }
 
 function targetToArgs(target) {
@@ -773,6 +821,7 @@ async function cmdPay(opts) {
               `${short} holds ${formatNativeHeld(n)}; this order needs ${need}. Nothing was sent. ` +
               'The unfunded order simply expires. Choose another coin, or omit --payer to pay from a different wallet.',
           });
+          noteFailure(payload);
           if (opts.json) printJson(payload);
           else printError(payload);
           return EXIT_ERROR;
@@ -798,12 +847,14 @@ async function cmdPay(opts) {
           'Not running on a terminal, so the payment cannot be confirmed interactively. ' +
           'Re-run with --yes once you have reviewed the amount and destination.',
       });
+      noteFailure(payload);
       if (opts.json) printJson(payload);
       else printError(payload);
       return EXIT_ERROR;
     }
     const ok = await askYesNo(`  ${bold('Pay this?')} [y/N] `);
     if (!ok) {
+      attemptTrace.abandoned = true;
       out(dim('  Cancelled. The order was not funded and will simply expire.'));
       out();
       return EXIT_OK;
@@ -847,6 +898,7 @@ async function cmdPay(opts) {
           `--send is not available for ${deposit.chain}. Pay the deposit below from your own ` +
           'wallet instead.',
       });
+      noteFailure(payload);
       if (opts.json) printJson(payload);
       else {
         printError(payload);
@@ -865,6 +917,9 @@ async function cmdPay(opts) {
     if (!opts.json) out(dim(opts.dryRun ? '  Preparing (dry run)…' : '  Sending…'));
     const sent = await step(sender, sendArgs);
     sendResult = sent.payload;
+    if (opts.dryRun) attemptTrace.skip = true;
+    else if (sent.payload.success && sent.exitCode === EXIT_OK) attemptTrace.sendConfirmed = true;
+    else if (sent.exitCode === 3) attemptTrace.sendUnconfirmed = true;
     if (opts.json) {
       if (!sent.payload.success) {
         printJson({ success: false, step: 'pay', order: confirmed.payload, send: sent.payload });
@@ -910,6 +965,7 @@ async function cmdPay(opts) {
     '--timeout',
     String(settlementWatchSeconds(opts, deposit)),
   ]);
+  if (watched.payload?.state === 'settled') attemptTrace.settled = true;
   if (opts.json) {
     printJson({
       success: Boolean(watched.payload?.success),
@@ -1038,6 +1094,9 @@ async function cmdX402(opts) {
         idempotencyKey: opts.idempotencyKey,
         dryRun: opts.dryRun,
       });
+      if (payload?.dryRun) attemptTrace.skip = true;
+      else if (payload?.success && payload?.paid) attemptTrace.paid = true;
+      else if (!payload?.success) noteFailure(payload);
     }
   } catch (err) {
     const failure = formatFailure(err);
@@ -1048,6 +1107,7 @@ async function cmdX402(opts) {
         out(`  ${dim(`idempotencyKey ${failure.error.details.idempotencyKey} (reuse it with --idempotency-key to avoid a second charge)`)}`);
       }
     }
+    if (err?.code) attemptTrace.code = err.code;
     return err?.code === 'BAD_VALUE' || err?.code === 'BAD_PRESET' ? EXIT_USAGE : EXIT_ERROR;
   }
 
@@ -1241,6 +1301,7 @@ async function main() {
       }
       return EXIT_USAGE;
     }
+    if (x402opts.sub === 'pay') return withReport('x402', () => cmdX402(x402opts));
     return cmdX402(x402opts);
   }
   let opts;
@@ -1281,7 +1342,7 @@ async function main() {
       return cmdResume(opts);
     case 'pay':
       try {
-        return await cmdPay(opts);
+        return await withReport(opts.bitrefill ? 'bitrefill' : 'coinbase', () => cmdPay(opts));
       } catch (err) {
         // A usage problem discovered after parsing (no coin, on a non-TTY)
         // should still exit 2, like every other usage error.
