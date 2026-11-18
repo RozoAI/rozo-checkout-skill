@@ -33,8 +33,8 @@ and the native coins `eth-ethereum`, `eth-base`, `eth-arbitrum`, `bnb-bnb`,
 only appears on a terminal, and there is no default coin.
 
 A native coin is offered only when the invoice's quote lists it, for invoices up
-to $12,750 including the service fee, i.e. 12,000 OpenRouter credits (POL: up to
-$3,500; native ETH on Ethereum: $1 minimum). It is exact-out: send exactly
+to 10,000 OpenRouter credits (about $10,500; POL: up to $3,500; native ETH on
+Ethereum: $1 minimum). It is exact-out: send exactly
 the coin amount shown, before its price lock ends (about an hour; the OpenRouter
 link itself stays payable about 24 hours), and keep a
 little of the same coin for gas. On-chain BTC and Tron are not supported.

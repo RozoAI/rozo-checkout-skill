@@ -30,7 +30,7 @@ npx @rozoai/checkout pay https://payments.coinbase.com/payment-links/pl_01YOURLI
 スクリプトやエージェントでは必ず `--with` を渡してください。対話式の選択は端末でのみ
 表示され、既定の通貨はありません。
 
-ネイティブコインは、インボイスの見積もりに含まれている場合のみ使えます（ETH・BNB・SOL の上限はサービス手数料込みで $12,750＝OpenRouter 12,000 クレジット、POL は $3,500、Ethereum の ETH は最低 $1）。
+ネイティブコインは、インボイスの見積もりに含まれている場合のみ使えます（ETH・BNB・SOL は OpenRouter 10,000 クレジット（約 $10,500）までの請求、POL は $3,500、Ethereum の ETH は最低 $1）。
 受取額固定（exact-out）なので、表示された数量を価格固定の期限（約 1 時間。OpenRouter の支払いリンク自体は作成から約 24 時間支払い可能です）までに正確に送り、ガス代として同じコインを少し残してください。
 オンチェーンの BTC と Tron には対応していません。
 Zcash の ZEC（Beta）は https://checkout.rozo.ai/zec を使ってください。この CLI では ZEC の注文は作れません。

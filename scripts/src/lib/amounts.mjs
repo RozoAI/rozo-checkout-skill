@@ -88,9 +88,11 @@ export const NATIVE_COINS = Object.freeze({
 
 /**
  * Customer limit on one native ETH, BNB or SOL order, in USD of callerPays (service fee
- * included): $12,750, i.e. up to 12,000 OpenRouter credits. Mirrors checkout.rozo.ai, MPP
- * Router and the rozo-intents-api app_config knob NATIVE_MAX_ORDER_USD_merchant_openrouter
- * (backend hard cap MAX_NATIVE_PAYIN_USD $13,500). Was $3,500.
+ * included): $12,750. Mirrors checkout.rozo.ai, MPP Router and the rozo-intents-api
+ * app_config knob NATIVE_MAX_ORDER_USD_merchant_openrouter (backend hard cap
+ * MAX_NATIVE_PAYIN_USD $13,500). Was $3,500. Payers are promised only up to 10,000
+ * OpenRouter credits ($10,605 with the fee; founder 2026-11-18 "10000 credits for all"),
+ * so the room above that is a margin that keeps a 10,000-credit order from being refused.
  */
 export const NATIVE_MAX_USD = 12750;
 
@@ -373,7 +375,9 @@ export function nativeOfferFor({ chainId, tokenSymbol, supportedSources, nativeM
       return {
         ok: false,
         code: 'NATIVE_AMOUNT_TOO_HIGH',
-        reason: `${sym} orders are limited to $${maxUsd} per invoice; this one is $${usd}. Pay with USDC or USDT instead.`,
+        reason: `This invoice is too large for ${sym} ($${usd} including the service fee); ${
+          sym === 'POL' ? `POL takes invoices up to $${POL_MAX_USD.toLocaleString('en-US')}` : 'ETH, BNB and SOL take OpenRouter invoices of up to 10,000 credits'
+        }. Pay with USDC or USDT instead.`,
         minUsd,
       };
     }

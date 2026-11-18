@@ -177,8 +177,8 @@ async function main(argv) {
     zecShielded,
     nativeNote:
       'Native coins are exact-out: the coin amount is fixed at order creation and its price is ' +
-      'locked only until quoteExpiresAt. ETH, BNB and SOL: up to $12,750 per invoice including the ' +
-      'service fee (12,000 OpenRouter credits); POL: up to $3,500; native ETH on Ethereum needs $1.',
+      'locked only until quoteExpiresAt. ETH, BNB and SOL: OpenRouter invoices of up to 10,000 ' +
+      'credits (about $10,500); POL: up to $3,500; native ETH on Ethereum needs $1.',
     quoteReceipt: quote?.quoteReceipt ?? null,
     quoteReceiptTtlSeconds: 60,
     quoteReceiptNote:

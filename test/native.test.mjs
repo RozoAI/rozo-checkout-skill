@@ -170,6 +170,15 @@ test('native USD bounds: $12,750 cap (POL $3,500), $1 minimum for native ETH on 
   assert.equal(POL_MAX_USD, 3500);
   assert.equal(offer('8453', 'ETH', '3500.01').ok, true, 'the old $3,500 cap is gone');
   assert.equal(offer('8453', 'ETH', '12726').ok, true, '12,000 OpenRouter credits with the fee');
+  // The promised 10,000 credits: $10,605 with the fee, $10,711.05 with the 1% quote buffer too.
+  for (const [cid, sym] of [['8453', 'ETH'], ['1', 'ETH'], ['42161', 'ETH'], ['56', 'BNB'], ['900', 'SOL']]) {
+    assert.equal(offer(cid, sym, '10605').ok, true, `${sym}@${cid} 10,000 credits`);
+    assert.equal(offer(cid, sym, '10711.05').ok, true, `${sym}@${cid} 10,000 credits + buffer`);
+  }
+  const over = offer('8453', 'ETH', '12750.01');
+  assert.match(over.reason, /up to 10,000 credits/);
+  assert.doesNotMatch(over.reason, /12,000|limited to/);
+  assert.match(offer('137', 'POL', '3500.01').reason, /POL takes invoices up to \$3,500/);
   assert.equal(offer('8453', 'ETH', '12749.99').ok, true);
   assert.equal(offer('8453', 'ETH', '12750').ok, true);
   assert.equal(offer('8453', 'ETH', '12750.01').code, 'NATIVE_AMOUNT_TOO_HIGH');
@@ -821,8 +830,9 @@ test('help text lists every native and Arbitrum preset, and never calls POL beta
     assert.ok(HELP.includes(p), p);
   }
   assert.doesNotMatch(HELP, /beta/i);
-  assert.match(HELP, /\$12,750/);
-  assert.match(HELP, /12,000 OpenRouter credits/);
+  // Founder 2026-11-18: the promise is up to 10,000 credits; the $12,750 check is margin.
+  assert.match(HELP, /up to 10,000 OpenRouter credits/);
+  assert.doesNotMatch(HELP, /12,000|12,750/);
   assert.match(HELP, /POL: up to \$3,500/);
   assert.doesNotMatch(HELP, /\$2,000/);
   assert.match(HELP, /On-chain BTC and Tron/);

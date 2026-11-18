@@ -461,7 +461,7 @@ function nativeOfferFor({ chainId, tokenSymbol, supportedSources, nativeMinUsd, 
       return {
         ok: false,
         code: "NATIVE_AMOUNT_TOO_HIGH",
-        reason: `${sym} orders are limited to $${maxUsd} per invoice; this one is $${usd}. Pay with USDC or USDT instead.`,
+        reason: `This invoice is too large for ${sym} ($${usd} including the service fee); ${sym === "POL" ? `POL takes invoices up to $${POL_MAX_USD.toLocaleString("en-US")}` : "ETH, BNB and SOL take OpenRouter invoices of up to 10,000 credits"}. Pay with USDC or USDT instead.`,
         minUsd
       };
     }
@@ -821,7 +821,7 @@ async function main(argv) {
     routerSupportedSources: quote?.supportedSources && typeof quote.supportedSources === "object" ? quote.supportedSources : null,
     nativeOffered,
     zecShielded,
-    nativeNote: "Native coins are exact-out: the coin amount is fixed at order creation and its price is locked only until quoteExpiresAt. ETH, BNB and SOL: up to $12,750 per invoice including the service fee (12,000 OpenRouter credits); POL: up to $3,500; native ETH on Ethereum needs $1.",
+    nativeNote: "Native coins are exact-out: the coin amount is fixed at order creation and its price is locked only until quoteExpiresAt. ETH, BNB and SOL: OpenRouter invoices of up to 10,000 credits (about $10,500); POL: up to $3,500; native ETH on Ethereum needs $1.",
     quoteReceipt: quote?.quoteReceipt ?? null,
     quoteReceiptTtlSeconds: 60,
     quoteReceiptNote: "Short-lived (~60s). create-order.js takes its own fresh quote; do not carry this over.",
