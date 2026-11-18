@@ -970,7 +970,7 @@ function nativeOfferFor({ chainId, tokenSymbol, supportedSources, nativeMinUsd, 
       return {
         ok: false,
         code: "NATIVE_AMOUNT_TOO_HIGH",
-        reason: `${sym} orders are limited to $${maxUsd} per invoice; this one is $${usd}. Pay with USDC or USDT instead.`,
+        reason: `This invoice is too large for ${sym} ($${usd} including the service fee); ${sym === "POL" ? `POL takes invoices up to $${POL_MAX_USD.toLocaleString("en-US")}` : "ETH, BNB and SOL take OpenRouter invoices of up to 10,000 credits"}. Pay with USDC or USDT instead.`,
         minUsd
       };
     }
