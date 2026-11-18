@@ -103,7 +103,9 @@ re-running pay replaces it. `status` shows `payin.zec.payinState`
 **Native coins have extra rules.** Offer one only when the quote lists it for
 this invoice (`quote.js` reports `nativeOffered`; `create-order.js` refuses
 anything else with `NATIVE_NOT_OFFERED` before creating an order). Native
-orders are limited to $3,500 per invoice (`NATIVE_AMOUNT_TOO_HIGH`), and native
+ETH, BNB and SOL orders are limited to $12,750 per invoice including the service
+fee, i.e. up to 12,000 OpenRouter credits, and POL orders to $3,500
+(`NATIVE_AMOUNT_TOO_HIGH`), and native
 ETH on Ethereum needs at least $1 (`NATIVE_AMOUNT_TOO_LOW`). A native order is
 **exact-out**, like Lightning: `deposit.amount` is the exact coin amount to
 send, and its price is locked only until `deposit.quoteExpiresAt` (about an
@@ -781,7 +783,7 @@ of any `status` result that is not a clean answer.
 | `EXPIRY_MARGIN` / `EXPIRED` | not enough time left to fund, bridge and settle | start over with a fresh link |
 | `QUOTE_EXPIRED` / `QUOTE_EXPIRY_MARGIN` | a native coin order's price lock has ended, or is inside the safety margin | do not send; the unfunded order costs nothing. Once it has expired, run pay again for a fresh price, or pay with a stablecoin |
 | `NATIVE_NOT_OFFERED` | the quote does not list that native coin for this invoice | nothing was created; offer a stablecoin or a native coin from `nativeOffered` |
-| `NATIVE_AMOUNT_TOO_HIGH` / `NATIVE_AMOUNT_TOO_LOW` | the invoice is outside the native bounds ($3,500 max; native ETH on Ethereum $1 min) | nothing was created; pay with another coin |
+| `NATIVE_AMOUNT_TOO_HIGH` / `NATIVE_AMOUNT_TOO_LOW` | the invoice is outside the native bounds ($12,750 max including the fee for ETH, BNB and SOL, $3,500 for POL; native ETH on Ethereum $1 min) | nothing was created; pay with another coin |
 | `NATIVE_TOKEN_ADDRESS_UNEXPECTED` | a native order names a token contract or mint | do not sign; report it |
 | `DEPOSIT_ACCOUNT_NOT_WALLET` / `DEPOSIT_BELOW_RENT` | (native SOL) the deposit address is not a plain wallet, or a new one would stay below rent | do not sign; pay by hand only after checking with the operator |
 | `BOLT11_TOO_SHORT` | the Lightning invoice has under 10 minutes left | see "Lightning invoice too short" below |

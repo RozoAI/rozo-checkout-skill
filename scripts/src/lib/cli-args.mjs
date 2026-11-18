@@ -562,7 +562,8 @@ COINS (--with)
 
 NATIVE COINS
   Offered only when the invoice's quote lists the coin, and only for invoices
-  up to $3,500 (native ETH on Ethereum: $1 minimum). The order is exact-out:
+  up to $12,750 including the service fee, i.e. 12,000 OpenRouter credits
+  (POL: up to $3,500; native ETH on Ethereum: $1 minimum). The order is exact-out:
   send exactly the coin amount shown. Its price is locked only until the time
   shown (about an hour); after that do not send, start a new order. The coin
   amount includes an FX spread on top of the service fee, and your wallet also
