@@ -86,8 +86,21 @@ export const NATIVE_COINS = Object.freeze({
   '900:SOL': { chainId: '900', symbol: 'SOL', decimals: 9 },
 });
 
-/** Backend limit on one native order, in USD (rozo-intents-api MAX_NATIVE_PAYIN_USD). */
-export const NATIVE_MAX_USD = 3500;
+/**
+ * Customer limit on one native ETH, BNB or SOL order, in USD of callerPays (service fee
+ * included): $12,750, i.e. up to 12,000 OpenRouter credits. Mirrors checkout.rozo.ai, MPP
+ * Router and the rozo-intents-api app_config knob NATIVE_MAX_ORDER_USD_merchant_openrouter
+ * (backend hard cap MAX_NATIVE_PAYIN_USD $13,500). Was $3,500.
+ */
+export const NATIVE_MAX_USD = 12750;
+
+/** POL keeps its own $3,500 limit: a larger POL order exceeds the 100,000 coin NEAR conversion limit. */
+export const POL_MAX_USD = 3500;
+
+/** Customer limit in USD for the native coin `symbol` (upper case). */
+export function nativeMaxUsdFor(symbol) {
+  return String(symbol || '').trim().toUpperCase() === 'POL' ? POL_MAX_USD : NATIVE_MAX_USD;
+}
 
 /**
  * Fallback USD minimum per native coin, used only when the quote does not
@@ -344,7 +357,7 @@ export function nativeOfferFor({ chainId, tokenSymbol, supportedSources, nativeM
     };
   }
   const usd = Number(callerPaysUsd);
-  // Without a USD amount the $3,500 cap and the minimum cannot be checked, so
+  // Without a USD amount the native cap and the minimum cannot be checked, so
   // refuse the native coin rather than let the order through unchecked.
   if (!Number.isFinite(usd) || usd <= 0) {
     return {
@@ -355,11 +368,12 @@ export function nativeOfferFor({ chainId, tokenSymbol, supportedSources, nativeM
     };
   }
   {
-    if (usd > NATIVE_MAX_USD) {
+    const maxUsd = nativeMaxUsdFor(sym);
+    if (usd > maxUsd) {
       return {
         ok: false,
         code: 'NATIVE_AMOUNT_TOO_HIGH',
-        reason: `Native coin orders are limited to $${NATIVE_MAX_USD} per invoice; this one is $${usd}. Pay with USDC or USDT instead.`,
+        reason: `${sym} orders are limited to $${maxUsd} per invoice; this one is $${usd}. Pay with USDC or USDT instead.`,
         minUsd,
       };
     }

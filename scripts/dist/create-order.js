@@ -795,7 +795,11 @@ var NATIVE_COINS = Object.freeze({
   "137:POL": { chainId: "137", symbol: "POL", decimals: 18 },
   "900:SOL": { chainId: "900", symbol: "SOL", decimals: 9 }
 });
-var NATIVE_MAX_USD = 3500;
+var NATIVE_MAX_USD = 12750;
+var POL_MAX_USD = 3500;
+function nativeMaxUsdFor(symbol) {
+  return String(symbol || "").trim().toUpperCase() === "POL" ? POL_MAX_USD : NATIVE_MAX_USD;
+}
 var NATIVE_MIN_USD_FALLBACK = Object.freeze({ "1:ETH": 1 });
 var DECIMALS = {
   "1:USDC": 6,
@@ -961,11 +965,12 @@ function nativeOfferFor({ chainId, tokenSymbol, supportedSources, nativeMinUsd, 
     };
   }
   {
-    if (usd > NATIVE_MAX_USD) {
+    const maxUsd = nativeMaxUsdFor(sym);
+    if (usd > maxUsd) {
       return {
         ok: false,
         code: "NATIVE_AMOUNT_TOO_HIGH",
-        reason: `Native coin orders are limited to $${NATIVE_MAX_USD} per invoice; this one is $${usd}. Pay with USDC or USDT instead.`,
+        reason: `${sym} orders are limited to $${maxUsd} per invoice; this one is $${usd}. Pay with USDC or USDT instead.`,
         minUsd
       };
     }

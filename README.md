@@ -83,7 +83,8 @@ npx @rozoai/checkout pay <coinbase-link> --with usdt-solana
 | POL | `pol-polygon` or `pol` | `137` | 18 decimals |
 
 A native coin is offered only when the invoice's quote lists it (`quote` shows
-which), and only for invoices up to $3,500. The order is **exact-out**, like
+which), and only for invoices up to $12,750 including the service fee, i.e.
+12,000 OpenRouter credits (POL: up to $3,500). The order is **exact-out**, like
 Lightning: send exactly the coin amount in the deposit block. Its price is
 locked only until the time shown (about an hour, while the OpenRouter link
 itself stays payable about 24 hours); after that, do not send it,

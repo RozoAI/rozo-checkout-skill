@@ -370,7 +370,11 @@ var NATIVE_COINS = Object.freeze({
   "137:POL": { chainId: "137", symbol: "POL", decimals: 18 },
   "900:SOL": { chainId: "900", symbol: "SOL", decimals: 9 }
 });
-var NATIVE_MAX_USD = 3500;
+var NATIVE_MAX_USD = 12750;
+var POL_MAX_USD = 3500;
+function nativeMaxUsdFor(symbol) {
+  return String(symbol || "").trim().toUpperCase() === "POL" ? POL_MAX_USD : NATIVE_MAX_USD;
+}
 var NATIVE_MIN_USD_FALLBACK = Object.freeze({ "1:ETH": 1 });
 var AmountError = class extends Error {
   constructor(code, message) {
@@ -452,11 +456,12 @@ function nativeOfferFor({ chainId, tokenSymbol, supportedSources, nativeMinUsd, 
     };
   }
   {
-    if (usd > NATIVE_MAX_USD) {
+    const maxUsd = nativeMaxUsdFor(sym);
+    if (usd > maxUsd) {
       return {
         ok: false,
         code: "NATIVE_AMOUNT_TOO_HIGH",
-        reason: `Native coin orders are limited to $${NATIVE_MAX_USD} per invoice; this one is $${usd}. Pay with USDC or USDT instead.`,
+        reason: `${sym} orders are limited to $${maxUsd} per invoice; this one is $${usd}. Pay with USDC or USDT instead.`,
         minUsd
       };
     }
@@ -816,7 +821,7 @@ async function main(argv) {
     routerSupportedSources: quote?.supportedSources && typeof quote.supportedSources === "object" ? quote.supportedSources : null,
     nativeOffered,
     zecShielded,
-    nativeNote: "Native coins are exact-out: the coin amount is fixed at order creation and its price is locked only until quoteExpiresAt. Up to $3,500 per invoice; native ETH on Ethereum needs $1.",
+    nativeNote: "Native coins are exact-out: the coin amount is fixed at order creation and its price is locked only until quoteExpiresAt. ETH, BNB and SOL: up to $12,750 per invoice including the service fee (12,000 OpenRouter credits); POL: up to $3,500; native ETH on Ethereum needs $1.",
     quoteReceipt: quote?.quoteReceipt ?? null,
     quoteReceiptTtlSeconds: 60,
     quoteReceiptNote: "Short-lived (~60s). create-order.js takes its own fresh quote; do not carry this over.",
